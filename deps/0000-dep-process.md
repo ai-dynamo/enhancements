@@ -1,10 +1,15 @@
 # Dynamo Enhancement Proposals
 
 **Status**: Draft | Under Review | Approved | Superseded  
+
 **Authors**: [Name/Team] 
+
 **Category**: Architecture | Build & Test | Code & Design Guidelines 
+
 **Replaces**: [Link if applicable] 
+
 **Replaced By**: [Link if applicable] 
+
 **Implementation**: [Link if applicable]
 
 # Summary
