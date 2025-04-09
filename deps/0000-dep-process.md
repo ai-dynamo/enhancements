@@ -1,8 +1,10 @@
 # Dynamo Enhancement Proposals
 
+
+
 **Status**: Draft
 
-**Authors**: [nnshah1](https://github.com/nnshah1)
+**Authors**: [nnshah1](https://github.com/nnshah1), [ryanolson](https://github.com/ryanolson)
 
 **Category**: Process
 
@@ -11,6 +13,10 @@
 **Replaced By**: N/A
 
 **Implementation**: TBD
+
+**Sponser / Steward**: [nnshah1](https://github.com/nnshah1)
+
+**Required Reviewers**: dzier, suman, team
 
 # Summary
 
