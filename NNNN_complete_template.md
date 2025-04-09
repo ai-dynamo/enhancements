@@ -177,7 +177,7 @@ Provide a list of frequently used acronyms and abbreviations which are uncommon 
 
 Keep the list of acronyms and abbreviations sorted alphabetically to ease looking up definitions by readers.
 
-Do not include the full definition in the expanded meaning of an abbreviation or acronym. If the reader needs the definition, please include it in the [Terminology & Definitions](#terminology-&-definitions) section.
+Do not include the full definition in the expanded meaning of an abbreviation or acronym. If the reader needs the definition, please include it in the [Terminology & Definitions](#terminology--definitions) section.
 
 **\<Acronym/Abbreviation\>:** \<Expanded Meaning\>
 
