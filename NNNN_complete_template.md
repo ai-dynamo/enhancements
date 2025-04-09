@@ -157,7 +157,7 @@ Add additional references as needed to help reviewers and authors understand the
 
 * \<hyper-linked title of an external reference resource\>
 
-## Terminology & Definitions {#terminology-&-definitions}
+## Terminology & Definitions
 
 **\[Optional \- if not applicable omit\]**
 
