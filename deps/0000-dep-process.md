@@ -39,8 +39,6 @@ design philosophies. The Dynamo project's code base itself reflects
 multiple previously independent code bases integrated quickly to meet
 overall project goals. 
 
-As the Triton Inference Serving project continues to grow in scope we need a way to capture architecture, design and process decisions in a consistent, light weight, maintainable way. 
-
 As the project evolves we need a way to propose, ratify and capture
 architecture, design and process decisions transparently and quickly
 in a consistent, lightweight, maintainable way.
