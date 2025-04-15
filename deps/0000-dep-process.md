@@ -1,7 +1,6 @@
 # Dynamo Enhancement Proposals
 
 
-
 **Status**: Draft
 
 **Authors**: [nnshah1](https://github.com/nnshah1), [ryanolson](https://github.com/ryanolson)
@@ -26,6 +25,9 @@ along with the motivations behind those decisions. We adopt a similar
 process as adopted by Kubernetes, Rust, Python, and Ray broadly
 categorized as "enhancement proposals".
 
+ * [Limited Template][limited]
+ * [Complete Template][complete]
+
 # Motivation
 
 With any software project but especially agile, open source projects
@@ -40,8 +42,8 @@ multiple previously independent code bases integrated quickly to meet
 overall project goals. 
 
 As the project evolves we need a way to propose, ratify and capture
-architecture, design and process decisions transparently and quickly
-in a consistent, lightweight, maintainable way.
+architecture, design and process decisions quickly and thoughtfully in
+a transparant, consistent, lightweight, maintainable way.
 
 Borrowing from the motivation for KEPs:
 
@@ -54,7 +56,7 @@ Borrowing from the motivation for Rust RFCs:
 
 ## Goals
 
-    * Design records and the process of writing and approving them should first and foremost encourage the thoughtful evaluation of design, process, and architecture choices and lead to timely decisions with a clear record of what was decided, why, and what other options were considered. 
+    * Enhancement proposals and the process of writing and approving them should encourage the thoughtful evaluation of design, process, and architecture choices and lead to timely decisions with a clear record of what was decided, why, and what other options were considered. 
 
 	* Lightweight and Scalable
 	  
@@ -80,12 +82,62 @@ Borrowing from the motivation for Rust RFCs:
    * DEPs do not take the place of other forms of documentation such as user / developer facing documentation (including architecture documents, api documentation)
    * Prototyping and early development are not gated by design / architectural approval.
    * DEPs should not be a perfunctory process but lead to discussion and thought process around good designs. 
-   * Not all changes (bug fixes, documentation improvements) need a DEP - and can be reviewed via tht normal GitHub pull request
-
+   * Not all changes (bug fixes, documentation improvements) need a DEP - and many can be reviewed via tht normal GitHub pull request
 
 # Proposal
 
+Following successful open source projects such as [Kubernetes][kep]
+and [Rust][rust-rfc] we adopt a markdown based enhancement proposal
+format designed to support any decisions we need to capture as a
+project. 
+
+Enhancement proposals will be stored in github in a seperate
+repository. We provide two templates [limited][limited] and
+[complete][complete] where `limited` is a strict subset of `complete`
+and both indicate which sections are `required` and which are
+`optional`.
+
 # Implementation Details
+
+* When is a proposal required?
+
+It is difficult to enumerate all the circumstances where a proposal
+would be required or not requiured. Generally we will follow this
+process when making "substantial changes". What is "substantial" is
+evolving and mainly determined by the core team and community. 
+
+Generally speaking a proposal would not be required for:
+
+** Bug fixes that don't change advertised behavior. 
+
+** Documentation fixes / updates.
+
+** Minor refactors within a single module. 
+
+Generally speaking proposals would be required for:
+
+** New features which add significant functionality.
+
+** Changes to existing features or code which require discussion. 
+
+** Responses to security related vulnerabilities found directly in the project code. 
+
+** Changes to packaging and installation
+
+** When a `maintainer` or `code owner` recommends that a change go
+through the proposal process.
+
+When in doubt reach out to a `maintainer` or `code owner`.
+
+* Proposal Process
+
+** fork or create a branch in the `enhancements` repository
+
+** Copy the [NNNN_limited_template.md][limited] or
+[NNNN_complete_template.md][complete] to `deps/0000-my-feature.md`
+(where `my-feature` is descriptive, don't assign an `DEP` number yet)
+
+
 
 ## Deferred to Implementation
 
@@ -415,3 +467,9 @@ Familiarity and use of Google Docs to align with other best practices at NVIDIA 
              **Notes:**  
 
 		Can be revisited if practices change / more information becomes available on better workflows.  
+
+
+[rust-rfc]: https://github.com/rust-lang/rfcs/blob/master/text/0002-rfc-process.md
+[kep]: https://github.com/kubernetes/enhancements/blob/master/keps/sig-architecture/0000-kep-process/README.md
+[limited]: [../NNNN_limited_template.md]
+[complete]: [../NNNN_complete_template.md]
