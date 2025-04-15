@@ -1,6 +1,5 @@
 # Dynamo Enhancement Proposals
 
-
 **Status**: Draft
 
 **Authors**: [nnshah1](https://github.com/nnshah1), [ryanolson](https://github.com/ryanolson)
@@ -16,6 +15,8 @@
 **Sponser / Steward**: [nnshah1](https://github.com/nnshah1)
 
 **Required Reviewers**: dzier, suman, team
+
+**Review Date**: TBD
 
 # Summary
 
@@ -131,21 +132,90 @@ When in doubt reach out to a `maintainer` or `code owner`.
 
 * Proposal Process
 
-** fork or create a branch in the `enhancements` repository
+** Fork or create a branch in the `enhancements` repository
 
 ** Copy the [NNNN_limited_template.md][limited] or
 [NNNN_complete_template.md][complete] to `deps/0000-my-feature.md`
 (where `my-feature` is descriptive, don't assign an `DEP` number yet)
 
+** Identify a `sponser / steward` from the list of `maintainers` or
+`code owners` to help with the process.
 
+** Fill in the proposal template. Be sure to include all `required`
+sections. Keep sections in the order prescribed in the template.
+
+** Work with the `steward` to identify the required reviewers and a
+timeline for review.
+
+** Submit a pull request to the `enhancements` repository
+
+** Iterate and incorporate feedback via the pull request.
+
+** When review is complete The `steward` will merge the request and update the status.
+
+** `steward` should assign an id 
+
+** author and `steward` should add issues and/or PRs as needed to track implementation
+
+* Minor Changes After Review
+
+For minor changes / changes that are in the spirit of the review -
+updates can be made to the document without a new proposal.
+
+Example: links to implementation
+
+* Significant Changes After Review
+
+For significant changes - a new proposal should be made and the
+original marked as replaced.
+
+* Maintainence 
+
+** DEPs should be reviewed for updates / replace / archive on a
+regular basis.
+
+* Senstive Changes and Discussions
+
+Certain types of changes need to be discussed and ratified before
+being made public due to timing of non-disclosed information.
+
+In such (rare) cases - drafts and reviews will be conducted offline by
+`authors`, `code owners` and `maintainers` and the public proposals
+updated when possible.
+
+Example: when responding to undisclosed security vulnerabilities we
+want to avoid inadvertantly encouraging zero day attacks for deployed
+systems.
 
 ## Deferred to Implementation
 
-# Implementation Phases
+* Definition of `code owners` and `maintainers`
 
-# Related Proposals
+* Whether or not to organize `deps` into sub directories
+
+* Tooling around the creation / indexing of `deps`
 
 # Alternatives
+
+# Alternate Solutions
+
+**\[Required, if not applicable write N/A\]**
+
+List out solutions that were considered but ultimately rejected. Consider free form \- but a possible format shown below.
+
+## Alt \<\#\> \<Title\>
+
+**Pros:**
+
+\<bulleted list or pros describing the positive aspects of this solution\>
+
+**Cons:**
+
+\<bulleted list or pros describing the negative aspects of this solution\>
+
+**Reason Rejected:**
+
+\<bulleted list or pros describing why this option was not used\>
 
 # Background
 
@@ -178,7 +248,13 @@ Just as in Agile planning, each team modifies the template and process to fit th
 9. [Rust RFC](https://github.com/rust-lang/rfcs/blob/master/text/0002-rfc-process.md)
 
 
--------------------------------------------------------------------------------
+[rust-rfc]: https://github.com/rust-lang/rfcs/blob/master/text/0002-rfc-process.md
+[kep]: https://github.com/kubernetes/enhancements/blob/master/keps/sig-architecture/0000-kep-process/README.md
+[limited]: [../NNNN_limited_template.md]
+[complete]: [../NNNN_complete_template.md]
+
+
+-----------------------------------------------------------------------------------------------
 
 DRAFT Below Here
 
@@ -469,7 +545,3 @@ Familiarity and use of Google Docs to align with other best practices at NVIDIA 
 		Can be revisited if practices change / more information becomes available on better workflows.  
 
 
-[rust-rfc]: https://github.com/rust-lang/rfcs/blob/master/text/0002-rfc-process.md
-[kep]: https://github.com/kubernetes/enhancements/blob/master/keps/sig-architecture/0000-kep-process/README.md
-[limited]: [../NNNN_limited_template.md]
-[complete]: [../NNNN_complete_template.md]
