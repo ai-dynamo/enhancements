@@ -57,33 +57,60 @@ Borrowing from the motivation for Rust RFCs:
 
 ## Goals
 
-* Enhancement proposals and the process of writing and approving them should encourage the thoughtful evaluation of design, process, and architecture choices and lead to timely decisions with a clear record of what was decided, why, and what other options were considered. 
+* Useful 
+
+  Enhancement proposals and the process of writing and approving them
+  should encourage the thoughtful evaluation of design, process, and
+  architecture choices and lead to timely decisions with a clear
+  record of what was decided, why, and what other options were
+  considered.
 
 * Lightweight and Scalable
 
-  The format and process should be applicable both to small / medium sized changes as well as large ones. The process should not impede the rate of progress but serve to provide timely feedback, discussion and ratification on key proposals. The process should also support retroactive documents to capture and explain decisions already made.
+  The format and process should be applicable both to small / medium
+  sized changes as well as large ones. The process should not impede
+  the rate of progress but serve to provide timely feedback,
+  discussion and ratification on key proposals. The process should
+  also support retroactive documents to capture and explain decisions
+  already made.
 	  
-* Combine aspects of requirements documents, design documents and software architecture documents into a single document.
-	  
-	  Give one place to understand the motivation, requirements, and design of a feature or process.
-	
-* Support process, architecture and guideline decisions
-	
-	  Have a single format to articulate decisions that effect process (such as github merge rules or templates) as well as code and design guidelines as well as features. 
+* Single Document for Requirements and Design
 
-* Should be relatively clear when a document is required and when the review needs to be completed and by whom
+  Combine aspects of requirements documents, design documents and
+  software architecture documents into a single document. Give one
+  place to understand the motivation, requirements, and design of a
+  feature or process.
 	
-* Should allow for easy collaboration and communication between authors and reviewers
+* Support Process, Architecture and Guideline Decisions
+	
+  Have a single format to articulate decisions that effect process
+  (such as github merge rules or templates) as well as code and
+  design guidelines as well as features.
 
-* Format and process should be flexible enough to be used for different types of decisions requiring different levels of detail and formatting of sections.
+* Clear 
+
+  Should be relatively clear when a document is required and when the
+  review needs to be completed and by who and what the overall process
+  is.
+	
+* Encourage Collaboration
+
+ Should allow for easy collaboration and communication between authors
+ and reviewers
+
+* Flexible
+
+ Format and process should be flexible enough to be used for different
+ types of decisions requiring different levels of detail and formatting
+ of sections.
 
 	  	  
 ## Non Goals
 
-   * DEPs do not take the place of other forms of documentation such as user / developer facing documentation (including architecture documents, api documentation)
-   * Prototyping and early development are not gated by design / architectural approval.
-   * DEPs should not be a perfunctory process but lead to discussion and thought process around good designs. 
-   * Not all changes (bug fixes, documentation improvements) need a DEP - and many can be reviewed via tht normal GitHub pull request
+* DEPs do not take the place of other forms of documentation such as user / developer facing documentation (including architecture documents, api documentation)
+* Prototyping and early development are not gated by design / architectural approval.
+* DEPs should not be a perfunctory process but lead to discussion and thought process around good designs. 
+* Not all changes (bug fixes, documentation improvements) need a DEP - and many can be reviewed via tht normal GitHub pull request
 
 # Proposal
 
