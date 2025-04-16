@@ -65,7 +65,7 @@ Borrowing from the motivation for Rust RFCs:
   record of what was decided, why, and what other options were
   considered.
 
-* Lightweight and Scalable
+* **Lightweight and Scalable**
 
   The format and process should be applicable both to small / medium
   sized changes as well as large ones. The process should not impede
@@ -74,31 +74,31 @@ Borrowing from the motivation for Rust RFCs:
   also support retroactive documents to capture and explain decisions
   already made.
 	  
-* Single Document for Requirements and Design
+* **Single Document for Requirements and Design**
 
   Combine aspects of requirements documents, design documents and
   software architecture documents into a single document. Give one
   place to understand the motivation, requirements, and design of a
   feature or process.
 	
-* Support Process, Architecture and Guideline Decisions
+* **Support Process, Architecture and Guideline Decisions**
 	
   Have a single format to articulate decisions that effect process
   (such as github merge rules or templates) as well as code and
   design guidelines as well as features.
 
-* Clear 
+* **Clear** 
 
   Should be relatively clear when a document is required and when the
   review needs to be completed and by who and what the overall process
   is.
 	
-* Encourage Collaboration
+* **Encourage Collaboration**
 
   Should allow for easy collaboration and communication between
   authors and reviewers
 
-* Flexible
+* **Flexible**
 
   Format and process should be flexible enough to be used for
   different types of decisions requiring different levels of detail
@@ -127,7 +127,35 @@ and both indicate which sections are `required` and which are
 
 # Implementation Details
 
-* When is a proposal required?
+## Proposal Process
+
+* Fork or create a branch in the `enhancements` repository
+
+* Copy the [NNNN_limited_template.md][limited] or
+[NNNN_complete_template.md][complete] to `deps/0000-my-feature.md`
+(where `my-feature` is descriptive, don't assign an `DEP` number yet)
+
+* Identify a `sponser / steward` from the list of `maintainers` or
+`code owners` to help with the process.
+
+* Fill in the proposal template. Be sure to include all `required`
+sections. Keep sections in the order prescribed in the template.
+
+* Work with the `steward` to identify the required reviewers and a
+timeline for review.
+
+* Submit a pull request to the `enhancements` repository
+
+* Iterate and incorporate feedback via the pull request.
+
+* When review is complete The `steward` will merge the request and update the status.
+
+* `steward` should assign an id 
+
+* author and `steward` should add issues and/or PRs as needed to track implementation
+
+
+## When is a proposal required?
 
 It is difficult to enumerate all the circumstances where a proposal
 would be required or not requiured. Generally we will follow this
@@ -157,34 +185,7 @@ through the proposal process.
 
 When in doubt reach out to a `maintainer` or `code owner`.
 
-* Proposal Process
-
-** Fork or create a branch in the `enhancements` repository
-
-** Copy the [NNNN_limited_template.md][limited] or
-[NNNN_complete_template.md][complete] to `deps/0000-my-feature.md`
-(where `my-feature` is descriptive, don't assign an `DEP` number yet)
-
-** Identify a `sponser / steward` from the list of `maintainers` or
-`code owners` to help with the process.
-
-** Fill in the proposal template. Be sure to include all `required`
-sections. Keep sections in the order prescribed in the template.
-
-** Work with the `steward` to identify the required reviewers and a
-timeline for review.
-
-** Submit a pull request to the `enhancements` repository
-
-** Iterate and incorporate feedback via the pull request.
-
-** When review is complete The `steward` will merge the request and update the status.
-
-** `steward` should assign an id 
-
-** author and `steward` should add issues and/or PRs as needed to track implementation
-
-* Minor Changes After Review
+## Minor Changes After Review
 
 For minor changes / changes that are in the spirit of the review -
 updates can be made to the document without a new proposal.
@@ -196,12 +197,12 @@ Example: links to implementation
 For significant changes - a new proposal should be made and the
 original marked as replaced.
 
-* Maintainence 
+## Maintainence 
 
 ** DEPs should be reviewed for updates / replace / archive on a
 regular basis.
 
-* Senstive Changes and Discussions
+## Senstive Changes and Discussions
 
 Certain types of changes need to be discussed and ratified before
 being made public due to timing of non-disclosed information.
