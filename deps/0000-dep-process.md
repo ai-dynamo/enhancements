@@ -210,14 +210,14 @@ updates can be made to the document without a new proposal.
 
 Example: links to implementation
 
-* Significant Changes After Review
+## Significant Changes After Review
 
 For significant changes - a new proposal should be made and the
 original marked as replaced.
 
 ## Maintainence 
 
-** DEPs should be reviewed for updates / replace / archive on a
+DEPs should be reviewed for updates / replace / archive on a
 regular basis.
 
 ## Senstive Changes and Discussions
@@ -232,6 +232,9 @@ updated when possible.
 Example: when responding to undisclosed security vulnerabilities we
 want to avoid inadvertantly encouraging zero day attacks for deployed
 systems.
+
+In such (rare) cases we may make use of a private repo on a temporary
+basis to collect feedback before publishing to the public repo.
 
 ## Deferred to Implementation
 
