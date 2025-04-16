@@ -57,7 +57,7 @@ Borrowing from the motivation for Rust RFCs:
 
 ## Goals
 
-* Useful 
+* **Useful** 
 
   Enhancement proposals and the process of writing and approving them
   should encourage the thoughtful evaluation of design, process, and
@@ -95,14 +95,14 @@ Borrowing from the motivation for Rust RFCs:
 	
 * Encourage Collaboration
 
- Should allow for easy collaboration and communication between authors
- and reviewers
+  Should allow for easy collaboration and communication between
+  authors and reviewers
 
 * Flexible
 
- Format and process should be flexible enough to be used for different
- types of decisions requiring different levels of detail and formatting
- of sections.
+  Format and process should be flexible enough to be used for
+  different types of decisions requiring different levels of detail
+  and formatting of sections.
 
 	  	  
 ## Non Goals
