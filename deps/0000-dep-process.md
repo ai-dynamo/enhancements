@@ -248,8 +248,6 @@ basis to collect feedback before publishing to the public repo.
 
 # Alternate Solutions
 
-**\[Required, if not applicable write N/A\]**
-
 List out solutions that were considered but ultimately rejected. Consider free form \- but a possible format shown below.
 
 ## Alt 1 Google Docs
