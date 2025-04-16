@@ -244,8 +244,6 @@ basis to collect feedback before publishing to the public repo.
 
 * Tooling around the creation / indexing of `deps`
 
-# Alternatives
-
 # Alternate Solutions
 
 ## Alt 1 Google Docs
