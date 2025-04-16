@@ -248,8 +248,6 @@ basis to collect feedback before publishing to the public repo.
 
 # Alternate Solutions
 
-List out solutions that were considered but ultimately rejected. Consider free form \- but a possible format shown below.
-
 ## Alt 1 Google Docs
 
 **Pros:**
@@ -265,7 +263,6 @@ List out solutions that were considered but ultimately rejected. Consider free f
 **Reason Rejected:**
 
 * Want to standardize around a simple text format and use AI tools also for diagramming, etc.
-
 
 # Background
 
