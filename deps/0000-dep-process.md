@@ -12,11 +12,15 @@
 
 **Implementation**: TBD
 
-**Sponser / Steward**: [nnshah1](https://github.com/nnshah1)
+**Sponser**: [nnshah1](https://github.com/nnshah1)
 
-**Required Reviewers**: dzier, suman, team
+**Required Reviewers**: [dzier](https://github.com/dzier), [statiraj](https://github.com/statiraj), team
 
-**Review Date**: TBD
+**Review Date**: 2025-04-16
+
+**Pull Request**: [PR#1](https://github.com/ai-dynamo/enhancements/pull/1)
+
+**Issue(s)**: N/A
 
 # Summary
 
@@ -119,6 +123,12 @@ and [Rust][rust-rfc] we adopt a markdown based enhancement proposal
 format designed to support any decisions we need to capture as a
 project. 
 
+We will adopt an open, community-wide, discussion and comment process
+using pull requests but enable `code owners` and `maintainers` to be
+the final arbiters of `approval`. Subject area experts will be listed
+as required approvers to ensure proposals are complete and reviewed
+properly.
+
 Enhancement proposals will be stored in github in a seperate
 repository. We provide two templates [limited][limited] and
 [complete][complete] where `limited` is a strict subset of `complete`
@@ -135,24 +145,28 @@ and both indicate which sections are `required` and which are
 [NNNN_complete_template.md][complete] to `deps/0000-my-feature.md`
 (where `my-feature` is descriptive, don't assign an `DEP` number yet)
 
-* Identify a `sponser / steward` from the list of `maintainers` or
+* Identify a `sponser` from the list of `maintainers` or
 `code owners` to help with the process.
 
 * Fill in the proposal template. Be sure to include all `required`
 sections. Keep sections in the order prescribed in the template.
 
-* Work with the `steward` to identify the required reviewers and a
-timeline for review.
+* Work with the `sponser` to identify the required reviewers and a
+timeline for review. 
 
 * Submit a pull request to the `enhancements` repository
 
+* If discussion is needed the `sponser` can ask for
+a slot in the weekly Engineering Sync or schedule an ad-hoc meeting
+with the required reviewers.
+
 * Iterate and incorporate feedback via the pull request.
 
-* When review is complete The `steward` will merge the request and update the status.
+* When review is complete The `sponser` will merge the request and update the status.
 
-* `steward` should assign an id 
+* `sponser` should assign an id 
 
-* author and `steward` should add issues and/or PRs as needed to track implementation
+* author and `sponser` should add issues and/or PRs as needed to track implementation
 
 
 ## When is a proposal required?
@@ -162,28 +176,32 @@ would be required or not requiured. Generally we will follow this
 process when making "substantial changes". What is "substantial" is
 evolving and mainly determined by the core team and community. 
 
+When in doubt reach out to a `maintainer` or `code owner`.
+
 Generally speaking a proposal would not be required for:
 
-** Bug fixes that don't change advertised behavior. 
+* Bug fixes that don't change advertised behavior. 
 
-** Documentation fixes / updates.
+* Documentation fixes / updates.
 
-** Minor refactors within a single module. 
+* Minor refactors within a single module. 
 
 Generally speaking proposals would be required for:
 
-** New features which add significant functionality.
+* New features which add significant functionality.
 
-** Changes to existing features or code which require discussion. 
+* Changes to existing features or code which require discussion. 
 
-** Responses to security related vulnerabilities found directly in the project code. 
+* Changes to public interfaces
 
-** Changes to packaging and installation
+* Responses to security related vulnerabilities found directly in the project code. 
 
-** When a `maintainer` or `code owner` recommends that a change go
+* Changes to packaging and installation
+
+* When a `maintainer` or `code owner` recommends that a change go
 through the proposal process.
 
-When in doubt reach out to a `maintainer` or `code owner`.
+* Retroactively to capture current architecture, guideline or process 
 
 ## Minor Changes After Review
 
@@ -219,7 +237,7 @@ systems.
 
 * Definition of `code owners` and `maintainers`
 
-* Whether or not to organize `deps` into sub directories
+* Whether or not to organize `deps` into sub directories for projects / areas
 
 * Tooling around the creation / indexing of `deps`
 
@@ -231,19 +249,22 @@ systems.
 
 List out solutions that were considered but ultimately rejected. Consider free form \- but a possible format shown below.
 
-## Alt \<\#\> \<Title\>
+## Alt 1 Google Docs
 
 **Pros:**
 
-\<bulleted list or pros describing the positive aspects of this solution\>
+* Fits existing documents and templates used by many teams
 
 **Cons:**
 
-\<bulleted list or pros describing the negative aspects of this solution\>
+* Difficult to integrate with AI tools. 
+
+* Difficult to search and index
 
 **Reason Rejected:**
 
-\<bulleted list or pros describing why this option was not used\>
+* Want to standardize around a simple text format and use AI tools also for diagramming, etc.
+
 
 # Background
 
@@ -280,296 +301,5 @@ Just as in Agile planning, each team modifies the template and process to fit th
 [kep]: https://github.com/kubernetes/enhancements/blob/master/keps/sig-architecture/0000-kep-process/README.md
 [limited]: [../NNNN_limited_template.md]
 [complete]: [../NNNN_complete_template.md]
-
-
------------------------------------------------------------------------------------------------
-
-DRAFT Below Here
-
-
-# Problem
-
-As the Triton Inference Serving project continues to grow in scope we need a way to capture architecture, design and process decisions in a consistent, light weight, maintainable way. Currently while design and architecture decisions are captured using design docs, the format, naming, and review process for the design docs are variable and inconsistent. It’s largely unclear when a design doc is required and the timeline and process for review and approval are unknown. The goal of this document is to lay out the process and template that the team will use for documenting and recording architectural, design, and process decisions. 
-
-# Requirements and Goals 
-
-* Format and process should be lightweight enough to be adopted by all Triton engineering teams  
-* Should be relatively clear when a document is required and when the review needs to be completed and by whom  
-* Should allow for easy collaboration and communication between authors and reviewers including other teams at NVIDIA and external customers and partners (when relevant)  
-* Format and process should be flexible enough to be used for different types of decisions requiring different levels of detail and formatting of sections.  
-* Design records and the process of writing and approving them should first and foremost encourage the thoughtful evaluation of design, process, and architecture choices and lead to timely decisions with a clear record of what was decided, why, and what other options were considered.  
-
-## Non Goals
-
-* Decision records do not take the place of other forms of documentation such as user / developer facing documentation (including architecture documents, api documentation, [TAVA](https://confluence.nvidia.com/pages/viewpage.action?spaceKey=PRODSEC&title=TAVA+Guidance&sxr=1), etc.)  
-* Prototyping and early development are not gated by design / architectural approval.  
-* Decision records should not be a perfunctory process but lead to discussion and thought process around good designs. 
-
-# Proposal
-
-[Template (Complete)](https://docs.google.com/document/u/1/d/1CMH9g3lnIhrJ5445Ubm7OTjpfCDqBINvEzE1WeVn3Qg/edit),  [Template(Limited](https://docs.google.com/document/d/1ONZbl8HP-lU1DpB9j2GJzcuBpdzXLfgneUeTvxkQd7I/edit)),  [Folder](https://drive.google.com/drive/u/1/folders/1DoVUm4Mkz-d0qekGPMI6HwDvpDrNX3h9)
-
-Triton server project engineering teams will adopt a lightweight decision record template similar to enhancement proposals, ADRs, and previous design doc templates. While some projects utilize both ADRs and RFCs \- as most of the sections are the same we will adopt a **single template and review process** for both.
-
-Decision records will be kept in Google Docs in a folder labeled Decision Records with sub folders for different categories including “**Architecture and Design**”, “**Coding Guidelines**”, “**Process**” and a readme or index describing the docs included in each folder. Each decision record will be numbered within its folder as: **YY-MM-DD  \<title\>**.  
-
-Because we are collapsing RFCs and ADRs into one template \-the records will generally propose and ratify a **collection of related decisions** (similar to a code PR is a related set of changes) as opposed to strictly being a **single decision**. We should strive to keep them as small as possible but also not separate them too finely. Generally this should come up and out of the draft process and should be clear by the time a doc is “under review”. 
-
-Each **category** will have designated **architecture PICs** that will help organize and drive ratification. Each document will have a **primary author** and one or more secondary authors where the primary author is responsible for ensuring the decision process is moving forward.
-
-**Note about template:** 
-
-The sections of the template are listed as required / optional and should not be changed. The internal format of each section (sub sections, diagrams, tables) can be customized to the decision at hand. When there is a question \- the lead architect / category PIC will help clarify. 
-
-# Implementation Details
-
-* ### **When are decision records needed?** 
-
-  This will largely be team driven and situation by situation but, Almost always (according to [spotify](https://engineering.atspotify.com/2020/04/when-should-i-write-an-architecture-decision-record/)). Some things to keep in mind:
-
-1) Any time a public interface is changed / extended \- a design doc / decision record should be created.  
-2) Any medium to large change proposal.  
-3) When clarifications about scope / problem / options are needed.  
-4) Large changes in code base \- even if they are refactors  
-5) Changes to process / build / test / etc. \- any significant change to our software architecture, design, planning, etc.   
-6) Developer decides when working on a problem that a design review would be useful  
-7) If there is doubt \- consult with technical leads & architects.
-
-   
-
-* ### **When are decision records not needed?**
-
-1. When a change is a fix to existing documented behavior. 
-
-   
-2. When it is a minor enhancement to an existing feature (example extending vLLM with echo capabilities)    
-3. If there is doubt \- consult with technical leads & architects. 
-
-* ### **When are decision records and reviewers assigned?**
-
-  At sprint and program planning meetings.
-
-
-  When assigned a target completion date and a target review date are added.
-
-
-  Review date should be at most 2 weeks after the draft is complete (unless extenuating circumstances).
-
-
-  Authors and reviewers should be assigned and JIRA created to track. JIRA should be a story in the larger feature is applicable. JIRA should have component field as “Enhancement Proposal”. 
-
-* ### **What is the ratification process for decisions?**
-
-	  
-Documents start in an “**in progress”** state. Not all sections need to be filled out and authors should actively discuss the proposal.
-
-Authors should meet and discuss and finalize the proposal and options. Authors can consult and have previous discussions with category PICs  to make sure the proposal is the correct size and background is sufficient.
-
-	When a doc is ready for review the authors move the status to “**under review**”.   
-	  
-Reviewers are notified and notified of the target date for review. Typically 1 \- 2 weeks from draft completion. 
-
-Authors can schedule a short call with reviewers ahead of the ratification date (one or two days) to address opens all at once.
-
-By the specified review date, reviewers should indicate their approval, decision, and the status moves to **“approved”**, **“rejected”** or **“deferred”**. If the reviewers are not in agreement by the review date, the Category PIC and lead architect will have final approval / decision making authority.
-
-If there are unresolved opens by the deadline that can not be deferred   
-Authors / Architect / Category PIC can choose to extend the review deadline.
-
-During implementation, if **major decisions** are revisited the doc should be updated and reviewed with a link to PR. If minor changes are done, the document should be updated with the PR for the implementation.
-
-After implementation, if changes need to be made \- they should be addressed in a new document with the original marked as superseded and a link given to the new document. 
-
-* ### **Where are decision records stored?**
-
-  Google Docs within [Triton Inference Server \- DL System Software \- Google Drive](https://drive.google.com/drive/u/1/folders/15piQ1dgzqYaDS7T0RWw2EcVovNQTmpdL) / Triton Enhancement Proposals
-
-  Each document can have an optional folder **\<TITLE\> \[Artifacts\]** to store diagrams, images, other artifacts that need to be stored with the document.
-
-* ### **How are decision records named?**
-
-	            2023\-01-19 Title	
-
-* ### **How to plan small / medium / large proposals and implementations in a release cycle?**
-
-  Triton inference server and related projects have a monthly planning and release cadence and a weekly program review. 
-
-
-  During monthly planning, while planning small, medium and large features the team should identify proposal authors and reviewers along with a timeline for draft and review complete dates. 
-
-
-  For small and medium features we can target  a 1  \- 2 week proposal and review followed by 1 \- 2 week implementation. Proposals should start at the beginning of a release cycle.
-
-
-  For larger features with multiple implementation phases the proposals should be broken down into smaller incremental features. In such cases the proposals should start in the N-1 release cycle, giving more time for implementation in the N cycle (that is if a large feature is targeted for Release 24.05 the proposal should be drafted and reviewed within the Release 24.04 cycle).
-
-  During program review \- if it’s clear that the proposal draft or review won’t be complete with at least 1 sprint remaining for implementation we should expect the feature to slip. 
-
-
-  **Note:** 
-
-  Prototyping and initial implementation in a branch ARE NOT gated by proposal approval and in many cases should be encouraged to help identify feasibility of solutions. 
-
-
-  Final merge and publishing / marketing of the feature ARE gated by the proposal approval.
-
-* ### **How are proposals updated / maintained during implementation?**
-
-  During final  implementation it is expected that changes will be made from the solution described in the proposal. 
-
-
-  If the changes are minor and in the spirit of the proposal then a link should be added to the user / developer facing document / code MR of the final implementation.
-
-
-  If the changes are major / deviate from the spirit of the proposal then the document should be updated and re-approved or superseded with a new proposal that outlines the actual implementation with some rationale. Reviewers and authors should be kept in the loop. 
-
-
-  On rare / exceptional cases due to business deadlines, if the implementation has to be released before the design is reviewed \- the implementation should be marked as provisional / BETA and the document must be updated / superseded.
-
-
-  At least one of the authors / reviewers should be involved in the code review to give guidance on the scope of changes from the proposal and whether they constitute a minor or major change.
-
-
-  For implementation phases / features that are not part of the final version \- they can be marked as deferred / moved to alternate proposals.
-
-* ### **Categories**
-
-  * Architecture / Design  
-  * Process  
-  * Build / Infrastructure  
-  * Coding Guidelines / Design Principles
-
-* ### **Proposal Status**
-
-
-| Status | Description |
-| :---- | :---- |
-| Not Started | Assigned but draft not started |
-| In Progress | Draft is being written by author(s). Not yet ready for review \- but early comments welcome. |
-| Under Review | Draft is being reviewed by reviewers (date for ratification is set) |
-| Approved | Proposal is approved and further discussions move to implementation (code review, etc.) |
-| Implemented | Proposal has been implemented / released \- if appropriate \- link to implementation / architecture / api doc  is added |
-| Rejected | Proposal will not be implemented |
-| Deferred | Proposal is deferred to later time and will not be implemented. |
-| Superseded | Proposal is superseded by a later proposal \- link to new proposal added. |
-
-
-* ### **Reviewer Status**
-
-
-| Status | Description |
-| :---- | :---- |
-| Not Started | Assigned but review not started |
-| Reviewing | Reviewer is actively reviewing |
-|  |  |
-| Approved | Reviewer approves and further discussion would be moved to implementation. |
-|  |  |
-| Rejected | Proposal is rejected |
-| Deferred | Reviewer has given  tacit consented, is unable to review due to time, defers to the guidance of others. |
-| Changes Requested | Reviewer has requested changes that need to be addressed before approval / rejection can be given. |
-
-
-# Deferred to Implementation
-
-* Final category list and architecture / category PICs  
-* Submitting template to google docs as template  
-* Regular bi-weekly architecture forum to review / discuss / ratify. Meeting will be agenda driven and canceled if there are no topics.
-
-# Implementation Phases
-
-### **Phase 0**
-
-**Release Target: Mar 26, 2024**  
-**Effort Estimate: 2 days**  
-**JIRA:** *TBD*
-
-#### Supported API / Behavior
-
-* Folder structure in google docs  
-* Concise and Full Templates
-
-#### Not Supported
-
-* Automated indexes
-
-# Related Decision Records
-
-**N/A**
-
-# Alternate Solutions
-
-1. ## Use Markdown formatted ADRs / Decisions in a separate github repo
-
-	**Pros:** Markdown is easy to format and don’t have to worry about editor weirdisms  
-                      Support in community \- can script index creation, etc.   
-                      Live near the code.	  
-**Cons**: Not as easy to collaborate in real time.   
-Not as easy to share selectively with other teams/ companies.(would need to control via github / gitlab)  
-	**Reasons to reject**: Google docs easier to get started
-
-2. ## Use Existing templates
-
-   1. [Design Doc Template \- Google Docs](https://docs.google.com/document/d/1DFhT7Uz6qiTp2vAa5tsTucOAkAsCqeELctLxs1lUuo8/edit#heading=h.ykdv684u0rnx)  
-   2. [Design Document Template \- Google Docs](https://docs.google.com/document/d/1MIkUlC5nJ4XzCU1fCZ3mwcnrereiIx718zIcdLUr_PI/edit#heading=h.dh5skq4lgud6)  
-   3. [cuDNN Design DocuDNN Design Doc Templatec Template \- Google Docs](https://docs.google.com/document/d/1ZNdRvM3z9IqTCZlXddgiaA6O_qJ5tOhSL9dQ_BVWE2M/edit#heading=h.sk2q0bv4mmjl)
-
-	**Pros:** Use existing template  
-	**Cons**: Doesn’t allow team to own and change template as needed  
-	            	  
-	**Reasons to reject**: Team should own the template and process for Triton.   
-       Formatting of [Design Document Template \- Google Docs](https://docs.google.com/document/d/1MIkUlC5nJ4XzCU1fCZ3mwcnrereiIx718zIcdLUr_PI/edit#heading=h.dh5skq4lgud6) is hard to read.
-
-**Notes:**    
-Each template has slightly different terms and emphasis.   
-Where are some use the term ‘objective’ others use ‘problem’ or ‘issue’. Each also seems to have been created by a  specific team for their own purposes (such as cuDNN).  
-[Design Doc Template \- Google Docs](https://docs.google.com/document/d/1DFhT7Uz6qiTp2vAa5tsTucOAkAsCqeELctLxs1lUuo8/edit#heading=h.ykdv684u0rnx) is the closest \- and the proposed [template](https://docs.google.com/document/d/1INMNSkKxN5umnBnc984zhmxU5gcm1vkCzvNXOK_G8WE/edit#heading=h.ykdv684u0rnx) can be viewed as a customization.
-
-Finally just as an Agile team customizes sprint planning and JIRA templates \- the engineering teams should customize the architecture review process to best fit their project.
-
-3. ## Use SW PLC templates 
-
-[**\[PLC\] PLC-L1 template \- Google Docs**](https://docs.google.com/document/d/1W4Ucfmngu43u3_kF-EGwEDpNi1DwD1n8GFuJRLOQvnE/edit)
-
-**Pros:** Use existing template  
-	**Cons**: Doesn’t allow team to own and change template as needed  
-	**Reasons to reject**: Team should own the template and process for Triton.   
-        PLC templates seem verbose and a little intimidating.   
-             **Notes:**    
-As Triton projects are planned and executed much like other Agile, open source projects, Triton should adopt best industry practices with regards to Agile and open source projects. As ADRs and RFCs have been adopted by a larger number of Agile teams and open source projects \- they are a better fit for Triton than product life cycle oriented documents.  
-Many docs are still formatted for print and archive \- and add unneeded clutter when pageless schemes are more common in OSS proposals.
-
-4. ## Confluence
-
-   Several teams at NVIDIA use confluence to store indexes / pointers to design proposals, but general do not use Confluence to author design or store actual proposals. 
-
-   
-
-   Examples:
-
-   [**Design Docs and Proposals \- Computelab \- Confluence (nvidia.com)**](https://confluence.nvidia.com/display/COMPLAB/Design+Docs+and+Proposals)
-
-   [**https://confluence.nvidia.com/display/TGM/EUD+Design+Doc?src=contextnavpagetreemode**](https://confluence.nvidia.com/display/TGM/EUD+Design+Doc?src=contextnavpagetreemode) 
-
-   [**XLA Design Docs and Meetings \- Deep Learning \- Confluence (nvidia.com)**](https://confluence.nvidia.com/display/DL/XLA+Design+Docs+and+Meetings)
-
-   [**Design Doc and Presentation Collection \- GPU Compute Arch \- Confluence (nvidia.com)**](https://confluence.nvidia.com/display/GCA/Design+Doc+and+Presentation+Collection)
-
-   **Pros:** 
-
-   Using Confluence to store indexes and or proposals can lead to use of more advanced features such as labeling, content reuse, approval flows.
-
-   
-	**Cons**:   
-		Confluence editing features do not allow for as easy real time coordination between authors.   
-		Confluence is more difficult to share with external partners.  
-		Confluence is not used widely for design proposals within NVIDIA.
-
-	**Reasons to reject**:   
-		  
-Familiarity and use of Google Docs to align with other best practices at NVIDIA and to align with existing proposal work flow.
-
-             **Notes:**  
-
-		Can be revisited if practices change / more information becomes available on better workflows.  
 
 

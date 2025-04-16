@@ -12,11 +12,15 @@
 
 **Implementation**: [Link if applicable]
 
-**Sponser / Steward**: [Name of Dynamo Lead]
+**Sponser**: [Name of Dynamo Lead]
 
 **Required Reviewers**: [Names of technical leads that are required for acceptance]
 
+**Review Date**: [Date for review]
+
 **Pull Request**: [Link if applicable]
+
+**Issue(s)**: [Link if applicable]
 
 # Summary
 
