@@ -178,7 +178,7 @@ evolving and mainly determined by the core team and community.
 
 When in doubt reach out to a `maintainer` or `code owner`.
 
-Generally speaking a proposal would not be required for:
+**Generally speaking a proposal would not be required for**:
 
 * Bug fixes that don't change advertised behavior. 
 
@@ -186,7 +186,7 @@ Generally speaking a proposal would not be required for:
 
 * Minor refactors within a single module. 
 
-Generally speaking proposals would be required for:
+**Generally speaking proposals would be required for**:
 
 * New features which add significant functionality.
 
