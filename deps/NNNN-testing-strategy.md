@@ -1,4 +1,4 @@
-# <Title>
+# Test Strategy
 
 **Status**: Draft
 
