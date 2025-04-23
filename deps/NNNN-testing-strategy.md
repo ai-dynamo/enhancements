@@ -24,8 +24,8 @@
 
 # Summary
 
-Propposes a set of test frequency, test types, test locations as well
-as test runners to be used for dynamo.
+Propposes a set of development and releae life-cycle test stages, test
+types, coverage areas, test environments and test runners for dynamo.
 
 # Motivation
 
@@ -90,7 +90,7 @@ release lifecyle with different testing requirements, test types that
 have a different goal and modules and functionality that require test
 coverage.
 
-## Development and Release Life Cycle Stages
+## Development and Release Life Cycle Test Stages
 
 At each stage of development and release there are a different set of
 tests that are required. To help organize this we will group tests
