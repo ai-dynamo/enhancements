@@ -25,7 +25,8 @@
 # Summary
 
 Propposes a set of development and releae life-cycle test stages, test
-types, coverage areas, test environments and test runners for dynamo.
+types, coverage areas, test environments and test runners for
+dynamo. These will be used to form actual test plans.
 
 # Motivation
 
@@ -34,9 +35,12 @@ and implementations which can be confusing in particular with respect
 to what tests run, when, and where. There is not a guide for
 developers, QA or operations teams as to the general theory and basic
 set of tools, tests, or when and how they should be run. We need a set
-of guidelines and overarching structure to help. 
+of guidelines and overarching structure to help form the basis for
+test plans.
 
 ## Goals
+
+* Provide a common set of terms to ease communication about test plans ans results
 
 * Tests should be easy to write and run both locally and for CI
 
@@ -46,14 +50,12 @@ of guidelines and overarching structure to help.
 
 * Tests should cover code, features, and documentation and have a report of coverage.
 
-* Provide a common set of terms to ease communication about test results
-
 * Strategy must fit with the polyglot nature of dynamo (support for
   multiple programming languages and deployment targets)
 
 ### Non Goals
 
-* To enumerate all tests and test cases
+* To enumerate all tests and test cases (test plan)
 
 
 ## Requirements
