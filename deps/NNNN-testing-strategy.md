@@ -12,7 +12,7 @@
 
 **Implementation**: N/A
 
-**Sponser**: nnshah1
+**Sponsor**: nnshah1
 
 **Required Reviewers**: TBD
 
@@ -24,7 +24,7 @@
 
 # Summary
 
-Propposes a set of development and release life-cycle test stages, test
+Proposes a set of development and release life-cycle test stages, test
 types, coverage areas, test environments and test runners for
 dynamo. These will be used to form actual test plans.
 
@@ -44,7 +44,7 @@ test plans.
 
 * Tests should be easy to write and run both locally and for CI
 
-* Tests should cover the entire development and release lifecycle 
+* Tests should cover the entire development and release life-cycle 
 
 * Test should be automated 
 
@@ -79,16 +79,16 @@ Use all-caps, bolded terms like **MUST** and **SHOULD** when describing each req
 # Proposal
 
 The testing strategy will be a living document stored in the
-repository detailing the decisons and definitions outlined here. This
+repository detailing the decisions and definitions outlined here. This
 proposal will serve as a starting point and enumerate the sections of
 the living testing strategy.
 
 
 ## Dynamo Testing Strategy (Intro)
 
-Dynamo is a distributed inference serving framework designd for
+Dynamo is a distributed inference serving framework designed for
 generative AI use cases. Like any project it has a development and
-release lifecyle with different testing requirements, test types that
+release life-cycle with different testing requirements, test types that
 have a different goal and modules and functionality that require test
 coverage.
 
@@ -97,7 +97,7 @@ coverage.
 At each stage of development and release there are a different set of
 tests that are required. To help organize this we will group tests
 into categories and label them to clearly indicate where and when they
-run and what part of the lifecyle they "gate". Tests can be in more
+run and what part of the life-cycle they "gate". Tests can be in more
 than one category.
 
 ### Pre-Commit
@@ -165,7 +165,7 @@ a change hasn't broken core functionality.
 # Implementation Details
 
 -------------------------------------------------------------------------------------------
-| Lifecyle | Test Runner | Local Environment | Local Command | CI Environment | CI Command | 
+| Life-cycle | Test Runner | Local Environment | Local Command | CI Environment | CI Command | 
 ------------------------------------------------------------------------------------------- 
 | pre-commit | [pre-commit framework](https://pre-commit.com/). | Host | `pre-commit run --all` | github action | [pre-merge.yml](https://github.com/ai-dynamo/dynamo/blob/main/.github/workflows/pre-merge.yml) |
 
