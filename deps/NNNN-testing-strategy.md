@@ -40,7 +40,7 @@ test plans.
 
 ## Goals
 
-* Provide a common set of terms to ease communication about test plans ans results
+* Provide a common set of terms to ease communication about test plans and results
 
 * Tests should be easy to write and run both locally and for CI
 
