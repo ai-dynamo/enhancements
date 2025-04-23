@@ -24,7 +24,7 @@
 
 # Summary
 
-Propposes a set of development and releae life-cycle test stages, test
+Propposes a set of development and release life-cycle test stages, test
 types, coverage areas, test environments and test runners for
 dynamo. These will be used to form actual test plans.
 
