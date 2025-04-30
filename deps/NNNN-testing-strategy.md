@@ -132,7 +132,6 @@ main. These tests are designed to be a set of sanity and core
 functionality tests that have broad coverage and give confidence that
 a change hasn't broken core functionality.
 
-
 ### Nightly
 
 ### Weekly
@@ -151,20 +150,44 @@ a change hasn't broken core functionality.
 
 ### Performance
 
-### COTs
+### Continuous Operation Tests
 
 ## Test Coverage
 
 ### Feature Coverage
 
+* dynamo run
+  * Serving model with Open AI compat endpoints locally
+* dynamo serve
+  * Serving model with kvrouting
+  * Serving model with planner
+  * Serving model with disagg
+  * Serving model with disagg + planner + kvrouting
+  * hello world graph
+  * mock model
+  
 ### Code Coverage
 
+* measure with pytest
+* measure with rust
+
 ### Tutorials / Examples
+
+* use pytest codeblocks / mynist
 
 ## Test Runners
 
 ## Test Environments
 
+* CPU Only with Mock Model -> support all graphs
+
+* GPU single node - 8 gpus
+
+* GPU multi-node
+
+* GPU cluster 
+
+* GPU perf cluster
 
 # Implementation Details
 
