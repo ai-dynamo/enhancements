@@ -14,9 +14,9 @@
 
 **Sponsor**: nnshah1
 
-**Required Reviewers**: TBD
+**Required Reviewers**: meenakshi, pavitra, anant
 
-**Review Date**: TBD
+**Review Date**: 2025-05-05 
 
 **Pull Request**: TBD
 
