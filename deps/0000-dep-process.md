@@ -246,6 +246,8 @@ basis to collect feedback before publishing to the public repo.
 
 * Tooling around the creation / indexing of `deps`
 
+* Making requirements required in addition to motivation
+
 # Alternate Solutions
 
 ## Alt 1 Google Docs
