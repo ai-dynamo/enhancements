@@ -6,21 +6,19 @@
 
 **Category**: Architecture | Process | Guidelines 
 
-**Replaces**: [Link if applicable] 
+**Replaces**: [Link of previous proposal if applicable] 
 
-**Replaced By**: [Link if applicable] 
+**Replaced By**: [Link of previous proposal if applicable] 
 
-**Implementation**: [Link if applicable]
-
-**Sponser**: [Name of Dynamo Lead]
+**Sponsor**: [Name of Dynamo Lead]
 
 **Required Reviewers**: [Names of technical leads that are required for acceptance]
 
 **Review Date**: [Date for review]
 
-**Pull Request**: [Link if applicable]
+**Pull Request**: [Link to Pull Request of the Proposal itself]
 
-**Issue(s)**: [Link if applicable]
+**Implementation PR / Tracking Issue**: [Link to Pull Request or Tracking Issue for Implementation]
 
 # Summary
 
@@ -64,7 +62,7 @@ List out any additional requirements in numbered subheadings.
 
 ### REQ \<\#\> \<Title\>
 
-Describe the requirement in as much detail as necessary for others to understand it and how it applies to the TEP. Keep in mind that requirements should be measurable and will be used to determine if a TEP has been successfully implemented or not.
+Describe the requirement in as much detail as necessary for others to understand it and how it applies to the DEP. Keep in mind that requirements should be measurable and will be used to determine if a DEP has been successfully implemented or not.
 
 Requirement names should be prefixed using a monotonically increasing number such as “REQ 1 \<Title\>” followed by “REQ 2 \<Title\>” and so on. Use title casing when naming requirements. Requirement names should be as descriptive as possible while remaining as terse as possible.
 
@@ -101,7 +99,7 @@ List out phases of implementation (can be single phase). Give each phase a monot
 
 **Effort Estimate**: \<estimate of time and number of engineers to complete the phase\>
 
-**Work Item(s):** \<one or more links to work items, usually to JIRA tasks or user stories\>
+**Work Item(s):** \<one or more links to github issues\>
 
 **Supported API / Behavior:**
 
