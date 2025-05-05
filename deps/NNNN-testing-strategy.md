@@ -150,6 +150,11 @@ Tests that are part of `nightly` include:
 ### QA
 
 ### Pre-Release
+Tests that are part of `pre-release` include:
+1. [Unit tests](###Unit)
+2. [Integration tests](###Integration)
+3. [End-to-End tests](###End-to-End)
+4. [Performance test](###Performance)
 
 ## Test Types
 
@@ -216,7 +221,7 @@ Performance tests can be viewed as an extension of [End-to-End tests](#End-to-En
 
 For this the data to have validity the deployment environment must be well defined, stable, and cataloged for each run. Where possible these environments will be defined in [Terraform](https://developer.hashicorp.com/terraform) and created specifically for each run of the test suite to minimize environmental factors that could impact behavior.
 
-Structurally these tests exist within a folder at the top-level and are defined in the [pytest](https://docs.pytest.org/en/stable/) framework. ** No idea how to run PerfAnalyzer.
+Structurally these tests exist within a `benchmarks` folder at the top-level and are defined in the [a python CLI](https://docs.pytest.org/en/stable/) framework. ** No idea how to run PerfAnalyzer.
 
 **Note** Need to work with engineering teams to define customer deployments
 **Note** Internal deployments
@@ -252,11 +257,13 @@ Structurally these tests exist within a folder at the top-level and are defined 
 
 * use pytest codeblocks / mynist
 
-## Test Runners
+## Test Runners (CI execution environment)
 
 
 
 ## Test Environments
+
+-- Define what is public and private
 
 * CPU Only with Mock Model -> support all graphs
 
