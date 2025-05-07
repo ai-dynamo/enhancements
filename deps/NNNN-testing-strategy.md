@@ -134,16 +134,18 @@ functionality tests that have broad coverage and give confidence that
 a change hasn't broken core functionality.
 
 Tests that are part of `pre-merge` include:
-1. [Unit tests](###Unit)
-2. [Integration tests](###Integration)
+1. [Unit tests](#unit)
+2. [Integration tests](#integration)
+3. [End-to-End tests](#end-to-end)
+4. [Performance tests](#performance-tests)
 
 ### Nightly
 Nightly tests are run against ToT of the `main` branch.
 
 Tests that are part of `nightly` include:
-1. [Unit tests](###Unit)
-2. [Integration tests](###Integration)
-3. [End-to-End tests](###End-to-End)
+1. [Unit tests](#unit)
+2. [Integration tests](#Integration)
+3. [End-to-End tests](#end-to-end)
 
 ### Weekly
 
@@ -151,10 +153,10 @@ Tests that are part of `nightly` include:
 
 ### Pre-Release
 Tests that are part of `pre-release` include:
-1. [Unit tests](###Unit)
-2. [Integration tests](###Integration)
-3. [End-to-End tests](###End-to-End)
-4. [Performance test](###Performance)
+1. [Unit tests](#Unit)
+2. [Integration tests](#Integration)
+3. [End-to-End tests](#End-to-End)
+4. [Performance test](#Performance)
 
 ## Test Types
 
@@ -169,68 +171,89 @@ Structurally unit tests should live adjacent to the code that they test and shou
 | Rust     | [cargo test](https://doc.rust-lang.org/cargo/commands/cargo-test.html) |
 | Python   | [pytest](https://docs.pytest.org/en/stable/) |
 
-From a performance perspective, each test suite of a functional code unit should take less than a second to run. In the event that the setup or execution exceeds this threshold it is an indication that either the functional unit is too large, the dependencies are not mocked appropriately, or your code is inefficient. In any of these cases an evaluation of the design is warranted. In the event that your test case is (perhaps intentionally) long running pla
+From a performance perspective, each test suite of a functional code unit should take less than a second to run. In the event that the setup or execution exceeds this threshold it is an indication that either the functional unit is too large, the dependencies are not mocked appropriately, or your code is inefficient. In any of these cases an evaluation of the design is warranted. In the event that your test case is (perhaps intentionally) long running place a 
 
 ### Integration
 
-Integration tests test the functionality of a set of code with external services or on hardware but are testable from one node from within the development container.
+Integration tests validate the functionality of a code module with respect to interactions with external services or between modules. An example of this class would be testing spinning up two instances of the runtime module which requires [NATS](https://nats.io/) and [etcd](https://etcd.io/) for functionality. A good short-hand for differentiating whether your test is an integration test or an [end-to-end] test is whether the interface your code uses to drive the test is a library call or a CLI-based command: if it is the former mark it as an integration test.
 
-Structurally these tests exist within a folder at the top-level and are defined in the [pytest](https://docs.pytest.org/en/stable/) framework. Necessary services should be started within test fixtures and then [subprocess](https://docs.python.org/3/library/subprocess.html) or similar is used to interact the artifacts.
+Structurally these tests exist within the `tests/integration` folder at the top-level of the Dynamo directory structure and are defined in the [pytest](https://docs.pytest.org/en/stable/) framework. To organize the test files the folder structure mimics the folder hierarchy for the source implementation as seen below. This allows integration tests to be selected simply by defining the `tests/integration` folder, i.e. `pytest tests/integration`, or more specific integration test targets by specifying one of more folders of interest, e.g. `pytest test/integration/lib/runtime test/integration/lib/llm`
 
-#### Development cycle 
-This class of testing serves as the first level proving rudimentary function of Dyanmo's features and should function as the first step when planning a new feature for a release.
+`conftest.py` is found at each level of the hierarchy where there is configuration that is specific only the the components of within the directory tree of that folder. Fixtures for setup should be promoted and generalized where possible to permit reuse across test domains.
 
-When planning for a release integration tests for new features should be marked as follows:
-```python
-# In conftest.py
-def pytest_addoption(parser):
-    parser.addoption(
-        "--dynamo-version",
-        action="store",
-        default="0.1.0",
-        help="Current release version of dynamo, used to gate tests which are expected to fail before a particular release"
-    )
-def pytest_configure(config):
-    dynamo_version = Version(config.getoption('--dynamo-version'))
-    pytest.dynamo_version = dynamo_version
-
-# In the test file
-from packaging.version import Version
-
-@pytest.marks.xfail(
-    pytest.dynamo_version < Version("1.0.0rc0"),
-    reason="Feature expected in 1.0.0 release.")
-def test_new_feature_for_1_0_0():
-    assert False
+``` shell
+# Dynamo top-level folder
+tests/
+└── conftest.py
+└── integration/
+    └── lib/
+        └── conftest.py
+        └── runtime/
+            └── conftest.py
+            └── test_runtime_initialization.py
+            ...
+        └── llm/
+            └── conftest.py
+            └── test_llm_initialization.py
+            ...
+        ...
+    ...
 ```
-When all tests for a particular release version are in the state [XPASS](https://docs.pytest.org/en/stable/how-to/skipping.html#xfail-mark-test-functions-as-expected-to-fail) a `<major>.<minor>.<micro>rc0` tag can be placed and the release branch cut (this assumes dynamic version calculation based on Git tags). If when you want to cut a release branch if any of the tests for features in that release version are in the `FAILED` state then it becomes a product decision to delay those features to a future release, and updating the test along with it. 
+
+Integration tests should utilize mark decorators of the form `@pytest.mark.needs_<dependency>` for each additional dependency that the unit under test will interact with. This can be verbose if many are required to operate the unit under test so we encourage grouping tests with the same external dependencies within a class and placing the decorator on the class.
 
 ### End-to-End
 
-End-to-end tests run simulate user-like flows using build artifacts as the units under test in deployment scenarios. Practically this means all the steps from installation of a build artifact into an container, initializing an execution environment with programattically hardware setup within that environment, and any datasets that are necessary.
+End-to-end tests run simulate top-level user experience flows. Examples of these flows include installation of artifacts from Python wheels, interacting with CLI commands such as `dynamo serve` and `dynamo build`, executing the examples from the documentation, and deployment onto infrastructure. Special care needs to be taken in these tests to ensure that the environment which in which the test executes resembles the environment a user would run them within to ensure validity.
 
 Structurally these tests exist within a folder at the top-level and are defined in the [pytest](https://docs.pytest.org/en/stable/) framework.
 
-The execution environments, where ephemeral, will be defined in [Terraform](https://developer.hashicorp.com/terraform) and created specifically for each run of the test suite to minimize environmental factors that could impact behavior.
+```
+tests/
+└── conftest.py
+└── e2e/
+    └── examples/
+        └── conftest.py
+        └── test_serve_disagg.py
+    └── installation/
+        └── conftest.py
+        └── test_ai_dynamo_runtime_wheel.py
+    └── serve/
+        └── conftest.py
+        └── test_serve_agg.py
+        └── test_serve_disagg.py
+        ...
+```
+
+Execution or deployment environments, where necessary, will be defined in an infrastructure as code fashion and launched from within a pytest fixture.
 
 **Note** Need to work with engineering team to define environments
 
-### Performance
+### Performance Tests
 
-Performance tests can be viewed as an extension of [End-to-End tests](#End-to-End) with the focus being on performance of the system as measured by an external service such as the [NVIDIA PerfAnalyzer](https://github.com/triton-inference-server/perf_analyzer). This secondary tool generates a report on metrics of interest and they are evaluated against the historical performance record to judge conformance to the test standard.
+Performance tests can be viewed as an extension of [End-to-End tests](#End-to-End) with the focus being on performance of the system as measured by an external observer such as the [NVIDIA PerfAnalyzer](https://github.com/triton-inference-server/perf_analyzer). This secondary tool generates a report on metrics of interest and they are evaluated against the historical performance record to judge conformance to the test standard.
 
-For this the data to have validity the deployment environment must be well defined, stable, and cataloged for each run. Where possible these environments will be defined in [Terraform](https://developer.hashicorp.com/terraform) and created specifically for each run of the test suite to minimize environmental factors that could impact behavior.
+Unlike other test suites defined so far, passing this test suite requires not only functional correctness but meeting a performance bar specific to the hardware execution environment which can be defined in either absolute (e.g. time to first token must be less than 200 ms) or relative (e.g. no more than 5% slower than the previous release) terms. The existence of a relative comparison requires a source of historical truth for previous executions. For the purposes of this document an oracle provided by a fixture will be interrogated to determine passage of a particular test. It is yet to be defined the storage engine for these comparison metrics.
 
-Structurally these tests exist within a `benchmarks` folder at the top-level and are defined in the [a python CLI](https://docs.pytest.org/en/stable/) framework. ** No idea how to run PerfAnalyzer.
+Structurally these tests exist within a `benchmarks` folder at the top-level and are defined in the [pytest](https://docs.pytest.org/en/stable/) framework. Pytest marks should be used here to enable selection of tests according to the hardware targeted, system configurations, and duration.
+
+The metrics of performance of interest include, but are not limited to: (**Note**: need metrics from tools team)
+* time-to-first token
+* ...
+* ...
 
 **Note** Need to work with engineering teams to define customer deployments
-**Note** Internal deployments
+**Note** Internal deployments by NVIDIA may differ
 
 ### Continuous Operation Tests
+
+Dynamo is meant for large-scale deployments which means that stability of the system over extended periods, varying loads, and infrastructure deployments should be characterized. Continuous operations tests are a subset of [Performance Tests](#Performance-Tests) where performance is characterized over long durations and/or in the presence of infrastructure disturbances. 
 
 ## Test Coverage
 
 ### Feature Coverage
+
+**Note** need engineering input on features to t5est
 
 * dynamo run
   * Serving model with Open AI compat endpoints locally
@@ -247,6 +270,8 @@ Structurally these tests exist within a `benchmarks` folder at the top-level and
   
 ### Code Coverage
 
+[Unit tests](#unit) serve as the basis for determining how well our code is tested. While not gating at this time these numbers will be recorded by our CI tooling and if, over time, it is determined that our testing discipline is lacking there will be a gating function.
+
 |Language| Tool |
 |--------|------|
 | Rust   | [Tarpaulin](https://github.com/xd009642/tarpaulin) |
@@ -255,7 +280,7 @@ Structurally these tests exist within a `benchmarks` folder at the top-level and
 
 ### Tutorials / Examples
 
-* use pytest codeblocks / mynist
+To keep our 
 
 ## Test Runners (CI execution environment)
 
@@ -303,7 +328,7 @@ List out items that are under discussion but that will be resolved only during i
 
 ## Phase 1 Baseline
 
-**Release Target**: Date
+**Release Target**: 0.3.0
 
 **Effort Estimate**: \<estimate of time and number of engineers to complete the phase\>
 
