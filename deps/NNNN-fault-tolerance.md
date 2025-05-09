@@ -1,23 +1,14 @@
-# Fault Tolerance Definitions
+# Fault Tolerance Definitions and Test Cases
 
 **Status**: Draft 
-
 **Authors**: nnshah1
-
 **Category**: Architecture 
-
 **Replaces**: N/A
-
 **Replaced By**: N/A
-
 **Sponsor**: nnshah1
-
 **Required Reviewers**: TBD
-
 **Review Date**: TBD
-
 **Pull Request**: [Link to Pull Request of the Proposal itself]
-
 **Implementation PR / Tracking Issue**: TBD
 
 # Summary
@@ -114,6 +105,8 @@ codes
 
 ### REQ 4 GPU Failure 
 
+### REQ 4 Node Failure 
+
 ### REQ 5 LLM Model xP / Shard Failure
 
 ### REQ 6 KV Router Failure
@@ -131,6 +124,17 @@ codes
 ### REQ 13 Planner Misconfiguration 
 **Dynamo SHOULD** automatically roll back scaling decisions that cause KV cache utilization >95% or prefill queue depth >100 for 3 consecutive intervals.
 
+### NVLINK failures -> nvl72 gpu 
+
+### HW GPU detection of failure 
+
+be able to detect which node is failing and redeploy as quickly as possible ... for sharded nodes ....
+
+### zero down time -> rolling upgrade
+
+rolling restart of prefill, decode 
+
+update of model version - and no failed requests ....
 
 # Proposal
 
