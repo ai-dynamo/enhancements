@@ -166,3 +166,35 @@ List out solutions that were considered but ultimately rejected. Consider free f
 
 \<optional: additional comments about this solution\>
 
+# Additional Notes 
+
+## Recovery Strategies
+1. **Worker Health Checks**: Etcd lease-based liveness monitoring
+2. **State Management**: KV cache versioning with hash chain validation
+3. **Retry Queues**: Prefill queue persistence through NATS JetStream
+4. **Plan Rollbacks**: TensorBoard-integrated planner decision audit trail
+
+## Test Cases
+1. **TC-1**: SIGKILL decode worker during high load
+   - Verify: Planner scales up replacement within 60s
+   - Verify: In-flight requests complete or restart
+
+2. **TC-2**: Simulate network partition between prefill/decode
+   - Verify: NIXL transfers buffer to local SSD
+   - Verify: Queued prefills process post-recovery
+
+3. **TC-3**: Force planner over-scale (-30% workers)
+   - Verify: Auto-rollback triggers within 3 intervals
+   - Verify: Metrics show stable KV cache utilization
+
+# Alternate Solutions
+
+## Alt 1 Immediate Shutdown on Failure
+**Pros:** Simplifies failure modes  
+**Cons:** Violates SLA requirements during recovery  
+**Rejected:** Conflicts with REQ 2 continuity requirements
+
+## Alt 2 External Orchestration Only  
+**Pros:** Leverages Kubernetes health checks  
+**Cons:** Lacks Dynamo-specific KV cache awareness  
+**Rejected:** Fails REQ 3 for stateful recovery
