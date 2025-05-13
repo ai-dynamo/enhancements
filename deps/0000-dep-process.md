@@ -12,7 +12,7 @@
 
 **Sponsor**: [nnshah1](https://github.com/nnshah1)
 
-**Required Reviewers**: [dzier](https://github.com/dzier), [statiraj](https://github.com/statiraj), team
+**Required Reviewers**: [dzier](https://github.com/dzier), [statiraju](https://github.com/statiraju), team
 
 **Review Date**: 2025-04-16
 
