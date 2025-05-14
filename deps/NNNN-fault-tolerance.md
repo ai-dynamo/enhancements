@@ -2,7 +2,7 @@
 
 **Status**: Draft 
 
-**Authors**: nnshah1
+**Authors**: nnshah1, [others welcome]
 
 **Category**: Architecture 
 
@@ -16,7 +16,7 @@
 
 **Review Date**: TBD
 
-**Pull Request**: [Link to Pull Request of the Proposal itself]
+**Pull Request**: [pull/4](https://github.com/ai-dynamo/enhancements/pull/4)
 
 **Implementation PR / Tracking Issue**: TBD
 
@@ -46,11 +46,11 @@ disaggregated prefill/decode components, and stateful KV cache
 management introduces multiple potential failure points. Production
 deployments require clear guarantees about:
 
-1. Service continuity during worker failures
-2. Graceful degradation during infrastructure outages
-3. Data consistency for KV cache routing
-4. Recovery from planner miscalculations
-5. Network partition resilience
+1. Service continuity during individual component failures
+2. Service continuity during runtime infrastructure failures
+3. Service continuity during GPU HW failure
+4. Data consistency for globals state (KV cache prefix tree)
+5. Recovery from auto scaling miscalculations
 
 Without formal fault tolerance definitions, users cannot reliably predict system behavior during failures.
 
@@ -63,6 +63,7 @@ Without formal fault tolerance definitions, users cannot reliably predict system
 * Establish recovery requirements for each failure class
 * Create verifiable test cases for fault scenarios
 * Preserve SLA guarantees during failure recovery
+* Give guidance on how to reduce downtime and speed recovery
 
 ### Non Goals
 
@@ -92,64 +93,218 @@ codes
     
 **Dynamo MUST** detect and withstand temporary failures of etcd or NATS services while maintaining:  
 1. **Etcd Unavailability**:  
-   - **MUST** continue processing existing requests for ≥5 minutes  
+   - **MUST** continue processing existing requests for ≥X minutes  
    - **SHOULD** buffer component registration changes in memory  
-   - **MUST** attempt re-registration with exponential backoff (max 30s interval)  
+   - **MUST** attempt re-registration with exponential backoff (max Xs interval)  
 
 2. **NATS Outage**:  
-   - **MUST** persist undelivered KV events locally for ≥15 minutes  
-   - **SHOULD** queue prefill requests in memory with disk spillover  
+   - **MUST** persist undelivered events (Kv and other) locally for ≥X minutes  
+   - **SHOULD** retry requests with exponential backoff 
    - **MUST** replay queued messages in-order after reconnection  
 
 **Recovery Requirements**:  
-- **MUST** reconcile etcd state within 1 adjustment interval after restoration  
-- **MUST** maintain KV cache consistency through hash-chain validation post-recovery  
-- **SHOULD** prioritize replay of prefills over decodes during catch-up  
-
+- **MUST** reconcile etcd state fter restoration  
+- **MUST** maintain KV cache consistency post-recovery  
+-
 
 ### REQ 2 Component Process Failure
-**Dynamo MUST** automatically detect and recover from worker process failures within 2 adjustment intervals. Failed workers **SHOULD** be removed from routing tables within 1 metric collection interval.
+
+**Dynamo MUST** automatically detect and recover from worker process
+failures. 
+
+Failed workers **MUST** be removed from routing tables.
+
+**Dynamo MUST** restart workers on healthy nodes according to resource
+constraints.
+
+**Dynamo MUST** remove nodes from consideration if workers fail to
+restart.
 
 ### REQ 3 LLM Model Instance Failure
 
+**Dynamo MUST** automatically detect and recover from LLM worker process
+failures. 
+
+**Dynamo MUST** automatically transition queued and inflight requests
+to healthy instances for a fixed duration before failing. 
+
+**Dynamo SHOULD** transition partial state of inflight requests (kv
+cache, partial outputs) to healthy instances during request transition.
+
+**Dynamo MUST** automatically update routing tables, kv cache tree,
+auto scaling state after recovery.
+
 ### REQ 4 GPU Failure 
+
+**Dynamo MUST** detect and recover from GPU failure by restarting
+model instances with remaining healthy GPUs.
+
+**LLM Workers SHOULD** checkpoint kv cache periodically to system
+memory and storage to speed up recovery. 
+
+**Multi-GPU LLM Workers SHOULD** recover as quickly as possible
+ideally without having to re-iniatialize all GPUs within an instance.
+
+1. NVLINK failures -> nvl72 gpu 
+
+2. HW GPU detection of failure 
+
+	be able to detect which node is failing and redeploy as quickly as possible ... for sharded nodes
+	
 
 ### REQ 4 Node Failure 
 
+**Dynamo MUST** detect and recover from Node failure by restarting
+model instances with remaining healthy nodes.
+
 ### REQ 5 LLM Model xP / Shard Failure
+
+**Multi-GPU LLM Workers SHOULD** recover as quickly as possible
+ideally without having to re-iniatialize all GPUs within an instance.
 
 ### REQ 6 KV Router Failure
 
+**Dynamo MUST** fall back to random, round-robin, or pull / capacity
+based routing in case of KV Router Failure.
+
+**Dynamo SHOULD** support multiple redundant KV Router's in the
+system.
+
+### REQ 7 Frontend Failure
+
+**Dynamo MUST** support multiple frontends behind a cluster
+orchestrator such as K8s. 
+
 ### REQ 7 Inter component request failure
 
-### REQ 8 LLM Client Failure
+**Dynamo MUST** identify and retry requests that fail due to component
+failure (service failure as seperate from client failures).
+
+**Dynamo MUST** report errors that are client side vs server side in a
+way that requests can be retried or failed.
+
+### REQ 8 LLM Client Request Failure
+
+**Dynamo SHOULD** retry requests with partial state for a specified
+number of attempts with backoff.
 
 ### REQ 9 Remote Prefill Failure
 
+**Dynamo SHOULD** retry requests with partial state for a specified
+number of attempts with backoff.
+
+**Dynamo SHOULD** fall back to local prefill after retry attempts have
+been exhausted.
+
+**Dynamo MUST** continue to handle incoming and inflight decode
+requests during failure of a remote prefill request.
+
 ### REQ 10 Decode Failure
 
-### REQ 11 Planner Failure 
+**Dynamo SHOULD** retry requests with partial state for a specified
+number of attempts with backoff.
 
-### REQ 13 Planner Misconfiguration 
-**Dynamo SHOULD** automatically roll back scaling decisions that cause KV cache utilization >95% or prefill queue depth >100 for 3 consecutive intervals.
+### REQ 11 Planner / Auto Scaler Behavior
 
-### NVLINK failures -> nvl72 gpu 
+**Dynamo SHOULD** automatically roll back scaling decisions that cause
+KV cache utilization >95% or prefill queue depth >100 for 3
+consecutive intervals.
 
-### HW GPU detection of failure 
+**Dynamo SHOULD** automatically recognize failures and re-establish
+planner set scaling requirements.
 
-be able to detect which node is failing and redeploy as quickly as possible ... for sharded nodes ....
+**Dynamo MUST** Have zero downtime as workers are scaled up and
+down. In flight requests should complete successfully.
 
-### zero down time -> rolling upgrade
+### REQ 12 Rolling Upgrades with Zero Down Time
 
-rolling restart of prefill, decode 
+**Dynamo MUST** support rolling upgrades of models and graphs with zero downtime.
 
-update of model version - and no failed requests ....
+
+### REQ 13 Fault Tolerance for Expert Parallelism
+
+**LLM Workers SHOULD** offer redundancy and fault tolerance through extra experts.
+
+**LLM Workers SHOULD** offer quick instance reinitialization /
+reconfiguration by adding / removing redundant experts.
+
 
 # Proposal
 
-**\[Required\]**
+Focus primarily in K8s environment and limited support in local or
+slurm environments.
 
-Describe the high level design / proposal. Use sub sections as needed, but start with an overview and then dig into the details. Try to provide images and diagrams to facilitate understanding.
+Focus in two main areas:
+
+1. Dynamo Software System Resiliency. 
+
+  Enable request transition with partial state recovery. 
+  
+  Enable worker restart using K8s.
+  
+
+1. LLM Worker Resiliency in face of GPU failures 
+
+  Leverage technologies such as NVRX and see at which layer they can
+  be applied most effectively.
+
+
+# Implementation Details
+
+TBD
+
+# Implementation Phases
+
+## Phase 1 Software System Resilience and Recovery
+
+**Release Target**: 0.3
+
+**Effort Estimate**: \<estimate of time and number of engineers to complete the phase\>
+
+**Work Item(s):** \<one or more links to github issues\>
+
+**Supported API / Behavior:**
+
+* \<name and concise description of the API / behavior\>
+
+**Not Supported:**
+
+* \<name and concise description of the API / behavior\>
+
+
+## Phase 2 LLM Worker GPU Resilience Basic
+
+**Release Target**: 0.4
+
+**Effort Estimate**: \<estimate of time and number of engineers to complete the phase\>
+
+**Work Item(s):** \<one or more links to github issues\>
+
+**Supported API / Behavior:**
+
+* \<name and concise description of the API / behavior\>
+
+**Not Supported:**
+
+* \<name and concise description of the API / behavior\>
+
+## Phase 3 LLM Worker GPU Resilience Improvements
+
+**Release Target**: 0.5
+
+**Effort Estimate**: \<estimate of time and number of engineers to complete the phase\>
+
+**Work Item(s):** \<one or more links to github issues\>
+
+**Supported API / Behavior:**
+
+* \<name and concise description of the API / behavior\>
+
+**Not Supported:**
+
+* \<name and concise description of the API / behavior\>
+
+
 
 # Alternate Solutions
 
