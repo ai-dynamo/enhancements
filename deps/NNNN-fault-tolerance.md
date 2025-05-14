@@ -1,14 +1,23 @@
 # Fault Tolerance Definitions and Test Cases
 
 **Status**: Draft 
+
 **Authors**: nnshah1
+
 **Category**: Architecture 
+
 **Replaces**: N/A
+
 **Replaced By**: N/A
+
 **Sponsor**: nnshah1
+
 **Required Reviewers**: TBD
+
 **Review Date**: TBD
+
 **Pull Request**: [Link to Pull Request of the Proposal itself]
+
 **Implementation PR / Tracking Issue**: TBD
 
 # Summary
