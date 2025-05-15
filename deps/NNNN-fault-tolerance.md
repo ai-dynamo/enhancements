@@ -230,6 +230,21 @@ reconfiguration by adding / removing redundant experts.
 
 # Proposal
 
+> ** Notes
+> Focus primarily in K8s environment and limited support in local or
+> slurm environments.
+
+> Focus in two main areas:
+
+> 1. Dynamo Software System Resiliency. 
+>
+>  Enable request transition with partial state recovery. 
+>  Enable worker restart using K8s.
+>
+> 1. LLM Worker Resiliency in face of GPU failures 
+>
+>  Leverage technologies such as NVRX and see at which layer they can
+>  be applied most effectively.
 
 
 We'll use the following component diagram to illustrate a typical
@@ -314,22 +329,6 @@ graph LR
 
 
 
-Focus primarily in K8s environment and limited support in local or
-slurm environments.
-
-Focus in two main areas:
-
-1. Dynamo Software System Resiliency. 
-
-  Enable request transition with partial state recovery. 
-  
-  Enable worker restart using K8s.
-  
-
-1. LLM Worker Resiliency in face of GPU failures 
-
-  Leverage technologies such as NVRX and see at which layer they can
-  be applied most effectively.
 
 
 # Implementation Details
