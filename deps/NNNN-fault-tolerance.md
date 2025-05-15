@@ -371,26 +371,55 @@ graph LR
     Client --> Frontend
     Frontend --> Processor
     Processor <--> Router
-
-    %% Prefill Worker Pool
     Processor --> PrefillQueue
+
+    %% Prefill Worker Pool (horizontal layout)
     subgraph PrefillPool["Prefill Worker Pool"]
-        direction TB
-        Prefill1["Prefill 1 (2 GPUs)"]
-        Prefill2["Prefill 2 (2 GPUs)"]
-        Prefill3["Prefill 3 (2 GPUs)"]
+        direction LR
+        subgraph Prefill1["Prefill 1"]
+            direction TB
+            P1GPU0["GPU 0"]
+            P1GPU1["GPU 1"]
+        end
+        subgraph Prefill2["Prefill 2"]
+            direction TB
+            P2GPU0["GPU 0"]
+            P2GPU1["GPU 1"]
+        end
+        subgraph Prefill3["Prefill 3"]
+            direction TB
+            P3GPU0["GPU 0"]
+            P3GPU1["GPU 1"]
+        end
     end
 
-    %% Decode Worker Pool
-    Processor --> DecodePool
+    %% Decode Worker Pool (vertical layout)
     subgraph DecodePool["Decode Worker Pool"]
         direction TB
-        Decode1["Decode 1 (4 GPUs)"]
-        Decode2["Decode 2 (4 GPUs)"]
-        Decode3["Decode 3 (4 GPUs)"]
+        subgraph Decode1["Decode 1"]
+            direction LR
+            D1GPU0["GPU 0"]
+            D1GPU1["GPU 1"]
+            D1GPU2["GPU 2"]
+            D1GPU3["GPU 3"]
+        end
+        subgraph Decode2["Decode 2"]
+            direction LR
+            D2GPU0["GPU 0"]
+            D2GPU1["GPU 1"]
+            D2GPU2["GPU 2"]
+            D2GPU3["GPU 3"]
+        end
+        subgraph Decode3["Decode 3"]
+            direction LR
+            D3GPU0["GPU 0"]
+            D3GPU1["GPU 1"]
+            D3GPU2["GPU 2"]
+            D3GPU3["GPU 3"]
+        end
     end
 
-    %% Communication paths
+    %% Connections
     PrefillQueue --> PrefillPool
     DecodePool --> PrefillQueue
     PrefillPool -.-> DecodePool
@@ -398,7 +427,6 @@ graph LR
     %% Styling
     style PrefillPool stroke:#0066cc,stroke-width:2px
     style DecodePool stroke:#000,stroke-width:2px
-
 ```
 
 Focus primarily in K8s environment and limited support in local or
