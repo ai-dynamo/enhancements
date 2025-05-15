@@ -304,9 +304,9 @@ graph LR
 	
 
     %% Prefill and Decode workers can communicate (dashed lines)
-    %% Prefill1 -.-> Decode1
-    %% Prefill2 -.-> Decode2
-    %% Prefill3 -.-> Decode3
+    Prefill1 -.-> Decode1
+    Prefill2 -.-> Decode2
+    Prefill3 -.-> Decode3
 
     %% Optional: Style blocks for emphasis
     style Prefill1 stroke:#0066cc,stroke-width:2px
