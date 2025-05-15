@@ -2,7 +2,7 @@
 
 **Status**: Draft 
 
-**Authors**: nnshah1, [others welcome]
+**Authors**: nnshah1, vikram, biswa, harrison
 
 **Category**: Architecture 
 
@@ -49,8 +49,7 @@ deployments require clear guarantees about:
 1. Service continuity during individual component failures
 2. Service continuity during runtime infrastructure failures
 3. Service continuity during GPU HW failure
-4. Data consistency for globals state (KV cache prefix tree)
-5. Recovery from auto scaling miscalculations
+4. Data consistency for globals state (ex: KV cache prefix tree)
 
 Without formal fault tolerance definitions, users cannot reliably predict system behavior during failures.
 
@@ -60,7 +59,7 @@ Without formal fault tolerance definitions, users cannot reliably predict system
 * Define the required behavior of dynamo components w.r.t to faults and failures.
 * Define test cases and implementation changes needed to address faults.
 * Define failure modes specific to Dynamo's components
-* Establish recovery requirements for each failure class
+* Establish resilency and recovery requirements for each failure class
 * Create verifiable test cases for fault scenarios
 * Preserve SLA guarantees during failure recovery
 * Give guidance on how to reduce downtime and speed recovery
@@ -230,6 +229,85 @@ reconfiguration by adding / removing redundant experts.
 
 
 # Proposal
+
+We'll use the following component diagram to illustrate a typical
+dynamo deployment with request flow dependencies and where faults in
+the system can be.
+
+```mermaid
+graph LR
+    Client["Client"]
+    Frontend["Frontend"]
+    Router["Router"]
+    EventPlane["Event Plane"]
+    KVCache["KV Cache Storage"]
+
+    Client --> Frontend
+    Frontend --> Router
+    EventPlane --> KVCache
+
+    %% Multiple Prefill Workers (each with 2 GPUs)
+   
+
+    subgraph Prefill1["Prefill Worker 1"]
+        direction TB
+        P1GPU0["GPU 0"]
+        P1GPU1["GPU 1"]
+    end
+    subgraph Prefill2["Prefill Worker 2"]
+        direction TB
+        P2GPU0["GPU 0"]
+        P2GPU1["GPU 1"]
+    end
+    subgraph Prefill3["Prefill Worker 3"]
+        direction TB
+        P3GPU0["GPU 0"]
+        P3GPU1["GPU 1"]
+    end
+
+    %% Multiple Decode Workers (each with 4 GPUs)
+    Router --> Decode1
+    Router --> Decode2
+    Router --> Decode3
+
+    subgraph Decode1["Decode Worker 1"]
+        direction TB
+        D1GPU0["GPU 0"]
+        D1GPU1["GPU 1"]
+        D1GPU2["GPU 2"]
+        D1GPU3["GPU 3"]
+    end
+    subgraph Decode2["Decode Worker 2"]
+        direction TB
+        D2GPU0["GPU 0"]
+        D2GPU1["GPU 1"]
+        D2GPU2["GPU 2"]
+        D2GPU3["GPU 3"]
+    end
+    subgraph Decode3["Decode Worker 3"]
+        direction TB
+        D3GPU0["GPU 0"]
+        D3GPU1["GPU 1"]
+        D3GPU2["GPU 2"]
+        D3GPU3["GPU 3"]
+    end
+
+    %% Prefill and Decode workers can communicate (dashed lines)
+    Prefill1 -.-> Decode1
+    Prefill2 -.-> Decode2
+    Prefill3 -.-> Decode3
+
+    %% Optional: Style blocks for emphasis
+    style Prefill1 stroke:#0066cc,stroke-width:2px
+    style Prefill2 stroke:#0066cc,stroke-width:2px
+    style Prefill3 stroke:#0066cc,stroke-width:2px
+    style Decode1 stroke:#000,stroke-width:2px
+    style Decode2 stroke:#000,stroke-width:2px
+    style Decode3 stroke:#000,stroke-width:2px
+
+```
+
+
 
 Focus primarily in K8s environment and limited support in local or
 slurm environments.
