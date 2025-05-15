@@ -240,10 +240,13 @@ graph LR
     Frontend["Frontend"]
     Router["Router"]
 	Processor["Processor"]
-	
+	PrefillQueue["Remote Prefill Queue"]
+
+
     Client --> Frontend
 	Frontend --> Processor
 	Processor <--> Router
+	
 	
     %% Multiple Prefill Workers (each with 2 GPUs)
    
@@ -291,10 +294,14 @@ graph LR
         D3GPU3["GPU 3"]
     end
 
+	Decode1 --> PrefillQueue
+    Decode2 --> PrefillQueue
+    Decode3 --> PrefillQueue
+
     %% Prefill and Decode workers can communicate (dashed lines)
-    Prefill1 -.-> Decode1
-    Prefill2 -.-> Decode2
-    Prefill3 -.-> Decode3
+    %% Prefill1 -.-> Decode1
+    %% Prefill2 -.-> Decode2
+    %% Prefill3 -.-> Decode3
 
     %% Optional: Style blocks for emphasis
     style Prefill1 stroke:#0066cc,stroke-width:2px
