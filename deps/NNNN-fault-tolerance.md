@@ -519,7 +519,7 @@ graph LR
     classDef events fill:#fbe9e7,stroke:#d84315
 ```
 
-```
+```mermaid
 graph LR
     %% Top horizontal bar for Discovery
     subgraph DiscoveryBar["Discovery"]
