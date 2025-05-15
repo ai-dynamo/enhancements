@@ -318,7 +318,46 @@ graph LR
 
 ```
 
+```
+graph LR
+    Client["Client"]
+    Frontend["Frontend"]
+    Router["Router"]
+    Processor["Processor"]
+    PrefillQueue["Remote Prefill Queue"]
 
+    Client --> Frontend
+    Frontend --> Processor
+    Processor <--> Router
+
+    %% Prefill Worker Pool
+    Processor --> PrefillQueue
+    subgraph PrefillPool["Prefill Worker Pool"]
+        direction TB
+        Prefill1["Prefill 1 (2 GPUs)"]
+        Prefill2["Prefill 2 (2 GPUs)"]
+        Prefill3["Prefill 3 (2 GPUs)"]
+    end
+
+    %% Decode Worker Pool
+    Processor --> DecodePool
+    subgraph DecodePool["Decode Worker Pool"]
+        direction TB
+        Decode1["Decode 1 (4 GPUs)"]
+        Decode2["Decode 2 (4 GPUs)"]
+        Decode3["Decode 3 (4 GPUs)"]
+    end
+
+    %% Communication paths
+    PrefillQueue --> PrefillPool
+    DecodePool --> PrefillQueue
+    PrefillPool -.-> DecodePool
+
+    %% Styling
+    style PrefillPool stroke:#0066cc,stroke-width:2px
+    style DecodePool stroke:#000,stroke-width:2px
+
+```
 
 Focus primarily in K8s environment and limited support in local or
 slurm environments.
