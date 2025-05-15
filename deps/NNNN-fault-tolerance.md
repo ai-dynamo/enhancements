@@ -239,13 +239,12 @@ graph LR
     Client["Client"]
     Frontend["Frontend"]
     Router["Router"]
-    EventPlane["Event Plane"]
-    KVCache["KV Cache Storage"]
-
+	Processor["Processor"]
+	
     Client --> Frontend
-    Frontend --> Router
-    EventPlane --> KVCache
-
+	Frontend --> Processor
+	Processor <--> Router
+	
     %% Multiple Prefill Workers (each with 2 GPUs)
    
 
@@ -266,9 +265,9 @@ graph LR
     end
 
     %% Multiple Decode Workers (each with 4 GPUs)
-    Router --> Decode1
-    Router --> Decode2
-    Router --> Decode3
+    Processor --> Decode1
+    Processor --> Decode2
+    Processor --> Decode3
 
     subgraph Decode1["Decode Worker 1"]
         direction TB
