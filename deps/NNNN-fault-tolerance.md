@@ -420,6 +420,9 @@ graph LR
 
     %% Connections
     Processor --> Decode1
+    Processor --> Decode2
+	Processor --> Decode3
+	
 
 	PrefillQueue --> PrefillPool
     DecodePool --> PrefillQueue
