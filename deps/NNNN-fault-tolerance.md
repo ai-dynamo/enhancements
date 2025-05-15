@@ -519,6 +519,106 @@ graph LR
     classDef events fill:#fbe9e7,stroke:#d84315
 ```
 
+```
+graph LR
+    %% Top horizontal bar for Discovery
+    subgraph DiscoveryBar["Discovery"]
+        direction LR
+        Discovery[ ]
+    end
+
+    %% Main system components
+    Client["Client"]
+    Frontend["Frontend"]
+    Router["Router"]
+    Processor["Processor"]
+    PrefillQueue["Remote Prefill Queue"]
+
+    %% Prefill Worker Pool (horizontal)
+    subgraph PrefillPool["Prefill Worker Pool"]
+        direction LR
+        subgraph Prefill1["Prefill 1"]
+            direction TB
+            P1GPU0["GPU 0"]
+            P1GPU1["GPU 1"]
+        end
+        subgraph Prefill2["Prefill 2"]
+            direction TB
+            P2GPU0["GPU 0"]
+            P2GPU1["GPU 1"]
+        end
+        subgraph Prefill3["Prefill 3"]
+            direction TB
+            P3GPU0["GPU 0"]
+            P3GPU1["GPU 1"]
+        end
+    end
+
+    %% Decode Worker Pool (vertical)
+    subgraph DecodePool["Decode Worker Pool"]
+        direction TB
+        subgraph Decode1["Decode 1"]
+            direction TB
+            D1GPU0["GPU 0"]
+            D1GPU1["GPU 1"]
+            D1GPU2["GPU 2"]
+            D1GPU3["GPU 3"]
+        end
+        subgraph Decode2["Decode 2"]
+            direction TB
+            D2GPU0["GPU 0"]
+            D2GPU1["GPU 1"]
+            D2GPU2["GPU 2"]
+            D2GPU3["GPU 3"]
+        end
+        subgraph Decode3["Decode 3"]
+            direction TB
+            D3GPU0["GPU 0"]
+            D3GPU1["GPU 1"]
+            D3GPU2["GPU 2"]
+            D3GPU3["GPU 3"]
+        end
+    end
+
+    %% Bottom horizontal bar for Events
+    subgraph EventsBar["Events"]
+        direction LR
+        Events[ ]
+    end
+
+    %% Main system wiring
+    Client --> Frontend
+    Frontend --> Processor
+    Processor <--> Router
+    Processor --> PrefillQueue
+    Processor --> Decode1
+    Processor --> Decode2
+    Processor --> Decode3
+    PrefillQueue --> PrefillPool
+    DecodePool --> PrefillQueue
+    PrefillPool -. "NIXL" .-> DecodePool
+
+    %% Connect all components to Discovery (top bar)
+    DiscoveryBar -.-> Client
+    DiscoveryBar -.-> Frontend
+    DiscoveryBar -.-> Router
+    DiscoveryBar -.-> Processor
+    DiscoveryBar -.-> PrefillQueue
+    DiscoveryBar -.-> PrefillPool
+    DiscoveryBar -.-> DecodePool
+
+    %% Connect Router and each Decode Worker to Events (bottom bar)
+    Router --> EventsBar
+    Decode1 --> EventsBar
+    Decode2 --> EventsBar
+    Decode3 --> EventsBar
+
+    %% Styling for bars
+    style DiscoveryBar fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    style EventsBar fill:#fbe9e7,stroke:#d84315,stroke-width:2px
+
+```
+
 
 Focus primarily in K8s environment and limited support in local or
 slurm environments.
