@@ -230,12 +230,12 @@ reconfiguration by adding / removing redundant experts.
 
 # Proposal
 
-> ** Notes
+> **Notes**
 > Focus primarily in K8s environment and limited support in local or
 > slurm environments.
-
+>
 > Focus in two main areas:
-
+>
 > 1. Dynamo Software System Resiliency. 
 >
 >  Enable request transition with partial state recovery. 
