@@ -371,7 +371,6 @@ graph LR
     Client --> Frontend
     Frontend --> Processor
     Processor <--> Router
-    Processor --> PrefillQueue
 
     %% Prefill Worker Pool (horizontal layout)
     subgraph PrefillPool["Prefill Worker Pool"]
@@ -420,9 +419,12 @@ graph LR
     end
 
     %% Connections
-    PrefillQueue --> PrefillPool
+    Processor --> Decode1
+
+	PrefillQueue --> PrefillPool
     DecodePool --> PrefillQueue
     PrefillPool -.-> DecodePool
+	
 
     %% Styling
     style PrefillPool stroke:#0066cc,stroke-width:2px
