@@ -434,6 +434,92 @@ graph LR
     style DecodePool stroke:#000,stroke-width:2px
 ```
 
+
+```mermaid
+graph LR
+    Client["Client"]
+    Frontend["Frontend"]
+    Router["Router"]
+    Processor["Processor"]
+    PrefillQueue["Remote Prefill Queue"]
+    Discovery[("Discovery")]:::discovery
+    Events[("Events")]:::events
+
+    Client --> Frontend
+    Frontend --> Processor
+    Processor <--> Router
+
+    %% Service Connections
+    Client -.-> Discovery
+    Frontend -.-> Discovery
+    Processor -.-> Discovery
+    Router -.-> Discovery
+    PrefillQueue -.-> Discovery
+    PrefillPool -.-> Discovery
+    DecodePool -.-> Discovery
+    Events -.-> Discovery
+    
+    Router --> Events
+    Decode1 --> Events
+    Decode2 --> Events
+    Decode3 --> Events
+
+    %% Prefill Worker Pool
+    Processor --> PrefillQueue
+    subgraph PrefillPool["Prefill Worker Pool"]
+        direction LR
+        subgraph Prefill1["Prefill 1"]
+            direction TB
+            P1GPU0["GPU 0"]
+            P1GPU1["GPU 1"]
+        end
+        subgraph Prefill2["Prefill 2"]
+            direction TB
+            P2GPU0["GPU 0"]
+            P2GPU1["GPU 1"]
+        end
+        subgraph Prefill3["Prefill 3"]
+            direction TB
+            P3GPU0["GPU 0"]
+            P3GPU1["GPU 1"]
+        end
+    end
+
+    %% Decode Worker Pool
+    Processor --> DecodePool
+    subgraph DecodePool["Decode Worker Pool"]
+        direction TB
+        subgraph Decode1["Decode 1"]
+            direction TB
+            D1GPU0["GPU 0"]
+            D1GPU1["GPU 1"]
+            D1GPU2["GPU 2"]
+            D1GPU3["GPU 3"]
+        end
+        subgraph Decode2["Decode 2"]
+            direction TB
+            D2GPU0["GPU 0"]
+            D2GPU1["GPU 1"]
+            D2GPU2["GPU 2"]
+            D2GPU3["GPU 3"]
+        end
+        subgraph Decode3["Decode 3"]
+            direction TB
+            D3GPU0["GPU 0"]
+            D3GPU1["GPU 1"]
+            D3GPU2["GPU 2"]
+            D3GPU3["GPU 3"]
+        end
+    end
+
+    %% NIXL Connection
+    PrefillPool == "NIXL" ==> DecodePool
+
+    classDef discovery fill:#e8f5e9,stroke:#2e7d32
+    classDef events fill:#fbe9e7,stroke:#d84315
+```
+
+
 Focus primarily in K8s environment and limited support in local or
 slurm environments.
 
