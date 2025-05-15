@@ -328,7 +328,7 @@ graph LR
 
 ## Scenario 1: Decode Worker Failure
 
-Suppose a decode worker fails.
+Suppose a decode worker fails and a failure is detected on GPU 2.
 
 ```mermaid
 graph LR
@@ -409,10 +409,16 @@ graph LR
 
 #### Resilency
 
+1. The Decode worker's lease should be immediately revoked and removed from requests.
+1. The **Processor(s)** should immediately restart any inflight requests:
+   a) reach out to router for new decode worker.
+1. KV Blocks stored in SSD / Network storage should be resored and transfered to new target
 
 
 
 #### Recovery
+1. Decode worker should be restarted with minimum latency
+1. Weights should be loaded via NIXL from existing Decode Worker (similar to fast boot)
 
 
 
