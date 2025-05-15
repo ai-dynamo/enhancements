@@ -360,7 +360,7 @@ graph LR
 ```
 
 
-```
+```mermaid
 graph LR
     Client["Client"]
     Frontend["Frontend"]
