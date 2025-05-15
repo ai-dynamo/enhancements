@@ -230,6 +230,8 @@ reconfiguration by adding / removing redundant experts.
 
 # Proposal
 
+
+
 We'll use the following component diagram to illustrate a typical
 dynamo deployment with request flow dependencies and where faults in
 the system can be.
@@ -277,7 +279,7 @@ graph LR
             D1GPU2["GPU 2"]
             D1GPU3["GPU 3"]
         end
-        subgraph Decode2["Decode 2"]
+        subgraph Decode2["Decode 2 🚫"]
             direction TB
             D2GPU0["GPU 0"]
             D2GPU1["GPU 1"]
@@ -307,8 +309,8 @@ graph LR
     %% Styling
     style PrefillPool stroke:#0066cc,stroke-width:2px
     style DecodePool stroke:#000,stroke-width:2px
+	style Decode2 stroke:#ff0000,stroke-width:4px,stroke-dasharray:5
 ```
-
 
 
 
