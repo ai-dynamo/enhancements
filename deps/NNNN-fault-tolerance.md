@@ -396,21 +396,21 @@ graph LR
     subgraph DecodePool["Decode Worker Pool"]
         direction TB
         subgraph Decode1["Decode 1"]
-            direction LR
+            direction TB
             D1GPU0["GPU 0"]
             D1GPU1["GPU 1"]
             D1GPU2["GPU 2"]
             D1GPU3["GPU 3"]
         end
         subgraph Decode2["Decode 2"]
-            direction LR
+            direction TB
             D2GPU0["GPU 0"]
             D2GPU1["GPU 1"]
             D2GPU2["GPU 2"]
             D2GPU3["GPU 3"]
         end
         subgraph Decode3["Decode 3"]
-            direction LR
+            direction TB
             D3GPU0["GPU 0"]
             D3GPU1["GPU 1"]
             D3GPU2["GPU 2"]
