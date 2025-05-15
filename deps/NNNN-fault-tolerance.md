@@ -297,6 +297,11 @@ graph LR
 	Decode1 --> PrefillQueue
     Decode2 --> PrefillQueue
     Decode3 --> PrefillQueue
+	
+	PrefillQueue --> Prefill1
+    PrefillQueue --> Prefill2
+    PrefillQueue --> Prefill3	
+	
 
     %% Prefill and Decode workers can communicate (dashed lines)
     %% Prefill1 -.-> Decode1
