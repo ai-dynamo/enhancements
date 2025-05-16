@@ -75,54 +75,6 @@ Use all-caps, bolded terms like **MUST** and **SHOULD** when describing each req
 
 Describe the high level design / proposal. Use sub sections as needed, but start with an overview and then dig into the details. Try to provide images and diagrams to facilitate understanding.
 
-# Implementation Details
-
-**\[Optional \- if not applicable omit\]**
-
-Add additional detailed items here including interface signatures, etc. Add anything that is relevant but seems more of a detail than central to the proposal. Use sub sections / bullet points as needed. Try to provide images and diagrams to facilitate understanding. If applicable link to PR.
-
-## Deferred to Implementation
-
-**\[Optional \- if not applicable omit\]**
-
-List out items that are under discussion but that will be resolved only during implementation / code review. 
-
-# Implementation Phases
-
-**\[Optional \- if not applicable omit\]**
-
-List out phases of implementation (can be single phase). Give each phase a monotonically increasing number; example “Phase 0” followed by “Phase 1” and so on. Give phases titles if it makes sense.
-
-## Phase \<\#\> \<Optional Title\>
-
-**Release Target**: Date
-
-**Effort Estimate**: \<estimate of time and number of engineers to complete the phase\>
-
-**Work Item(s):** \<one or more links to github issues\>
-
-**Supported API / Behavior:**
-
-* \<name and concise description of the API / behavior\>
-
-**Not Supported:**
-
-* \<name and concise description of the API / behavior\>
-
-# Related Proposals
-
-**\[Optional \- if not applicable omit\]**
-
-* File
-
-* File
-
-* File
-
-* File
-
-* File
-
 # Alternate Solutions
 
 **\[Required, if not applicable write N/A\]**
@@ -146,42 +98,4 @@ List out solutions that were considered but ultimately rejected. Consider free f
 **Notes:**
 
 \<optional: additional comments about this solution\>
-
-# Background
-
-**\[Optional \- if not applicable omit\]**
-
-Add additional context and references as needed to help reviewers and authors understand the context of the problem and solution being proposed.
-
-## References
-
-**\[Optional \- if not applicable omit\]**
-
-Add additional references as needed to help reviewers and authors understand the context of the problem and solution being proposed.
-
-* \<hyper-linked title of an external reference resource\>
-
-## Terminology & Definitions
-
-**\[Optional \- if not applicable omit\]**
-
-List out additional terms / definitions (lexicon). Try to keep definitions as concise as possible and use links to external resources when additional information would be useful to the reader.
-
-Keep the list of terms sorted alphabetically to ease looking up definitions by readers.
-
-| \<Term\> | \<Definition\> |
-| :---- | :---- |
-| **\<Term\>** | \<Definition\> |
-
-## Acronyms & Abbreviations
-
-**\[Optional \- if not applicable omit\]**
-
-Provide a list of frequently used acronyms and abbreviations which are uncommon or unlikely to be known by the reader. Do not include acronyms or abbreviations which the reader is likely to be familiar with.
-
-Keep the list of acronyms and abbreviations sorted alphabetically to ease looking up definitions by readers.
-
-Do not include the full definition in the expanded meaning of an abbreviation or acronym. If the reader needs the definition, please include it in the [Terminology & Definitions](#terminology--definitions) section.
-
-**\<Acronym/Abbreviation\>:** \<Expanded Meaning\>
 

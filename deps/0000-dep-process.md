@@ -1,6 +1,6 @@
 # Dynamo Enhancement Proposals
 
-**Status**: Draft
+**Status**: Approved
 
 **Authors**: [nnshah1](https://github.com/nnshah1), [ryanolson](https://github.com/ryanolson)
 
@@ -10,17 +10,15 @@
 
 **Replaced By**: N/A
 
-**Implementation**: TBD
+**Sponsor**: [nnshah1](https://github.com/nnshah1)
 
-**Sponser**: [nnshah1](https://github.com/nnshah1)
-
-**Required Reviewers**: [dzier](https://github.com/dzier), [statiraj](https://github.com/statiraj), team
+**Required Reviewers**: [dzier](https://github.com/dzier), [statiraju](https://github.com/statiraju), [kkranen](https://github.com/kkranen), [nvda-mesharma](https://github.com/nvda-mesharma), [ganeshku1](https://github.com/ganeshku1),[hutm](https://github.com/hutm)
 
 **Review Date**: 2025-04-16
 
 **Pull Request**: [PR#1](https://github.com/ai-dynamo/enhancements/pull/1)
 
-**Issue(s)**: N/A
+**Implementation PR / Tracking Issue**: N/A
 
 # Summary
 
@@ -48,7 +46,7 @@ overall project goals.
 
 As the project evolves we need a way to propose, ratify and capture
 architecture, design and process decisions quickly and thoughtfully in
-a transparant, consistent, lightweight, maintainable way.
+a transparent, consistent, lightweight, maintainable way.
 
 Borrowing from the motivation for KEPs:
 
@@ -111,10 +109,10 @@ Borrowing from the motivation for Rust RFCs:
 	  	  
 ## Non Goals
 
-* DEPs do not take the place of other forms of documentation such as user / developer facing documentation (including architecture documents, api documentation)
+* Dynamo Enhancement Proposals (DEP)s do not take the place of other forms of documentation such as user / developer facing documentation (including architecture documents, api documentation)
 * Prototyping and early development are not gated by design / architectural approval.
 * DEPs should not be a perfunctory process but lead to discussion and thought process around good designs. 
-* Not all changes (bug fixes, documentation improvements) need a DEP - and many can be reviewed via tht normal GitHub pull request
+* Not all changes (bug fixes, documentation improvements) need a DEP - and many can be reviewed via that normal GitHub pull request
 
 # Proposal
 
@@ -126,10 +124,10 @@ project.
 We will adopt an open, community-wide, discussion and comment process
 using pull requests but enable `code owners` and `maintainers` to be
 the final arbiters of `approval`. Subject area experts will be listed
-as required approvers to ensure proposals are complete and reviewed
+as required reviewers to ensure proposals are complete and reviewed
 properly.
 
-Enhancement proposals will be stored in github in a seperate
+Enhancement proposals will be stored in github in a separate
 repository. We provide two templates [limited][limited] and
 [complete][complete] where `limited` is a strict subset of `complete`
 and both indicate which sections are `required` and which are
@@ -145,34 +143,38 @@ and both indicate which sections are `required` and which are
 [NNNN_complete_template.md][complete] to `deps/0000-my-feature.md`
 (where `my-feature` is descriptive, don't assign an `DEP` number yet)
 
-* Identify a `sponser` from the list of `maintainers` or
+> Note choose the template that fits your purpose. You can start with
+> the limited form and pull additional sections from the complete form
+> as needed. Keep the order of the sections consistent.
+
+* Identify a `Sponsor` from the list of `maintainers` or
 `code owners` to help with the process.
 
 * Fill in the proposal template. Be sure to include all `required`
 sections. Keep sections in the order prescribed in the template.
 
-* Work with the `sponser` to identify the required reviewers and a
+* Work with the `Sponsor` to identify the required reviewers and a
 timeline for review. 
 
 * Submit a pull request to the `enhancements` repository
 
-* If discussion is needed the `sponser` can ask for
+* If discussion is needed the `Sponsor` can ask for
 a slot in the weekly Engineering Sync or schedule an ad-hoc meeting
 with the required reviewers.
 
 * Iterate and incorporate feedback via the pull request.
 
-* When review is complete The `sponser` will merge the request and update the status.
+* When review is complete The `Sponsor` will merge the request and update the status.
 
-* `sponser` should assign an id 
+* `Sponsor` should assign an id 
 
-* author and `sponser` should add issues and/or PRs as needed to track implementation
+* author and `Sponsor` should add issues and/or PRs as needed to track implementation
 
 
 ## When is a proposal required?
 
 It is difficult to enumerate all the circumstances where a proposal
-would be required or not requiured. Generally we will follow this
+would be required or not required. Generally we will follow this
 process when making "substantial changes". What is "substantial" is
 evolving and mainly determined by the core team and community. 
 
@@ -215,12 +217,12 @@ Example: links to implementation
 For significant changes - a new proposal should be made and the
 original marked as replaced.
 
-## Maintainence 
+## Maintenance 
 
 DEPs should be reviewed for updates / replace / archive on a
 regular basis.
 
-## Senstive Changes and Discussions
+## Sensitive Changes and Discussions
 
 Certain types of changes need to be discussed and ratified before
 being made public due to timing of non-disclosed information.
@@ -230,7 +232,7 @@ In such (rare) cases - drafts and reviews will be conducted offline by
 updated when possible.
 
 Example: when responding to undisclosed security vulnerabilities we
-want to avoid inadvertantly encouraging zero day attacks for deployed
+want to avoid inadvertently encouraging zero day attacks for deployed
 systems.
 
 In such (rare) cases we may make use of a private repo on a temporary
@@ -243,6 +245,12 @@ basis to collect feedback before publishing to the public repo.
 * Whether or not to organize `deps` into sub directories for projects / areas
 
 * Tooling around the creation / indexing of `deps`
+
+* Making requirements required in addition to motivation
+
+* Format recommendations for API surfaces / other formatted components.
+
+* Decisions / guidelines on when a DEP is needed.
 
 # Alternate Solutions
 
@@ -264,7 +272,7 @@ basis to collect feedback before publishing to the public repo.
 
 # Background
 
-With the rise of Agile software development practices and large open source projects, software development teams needed to devise new and lightweight (w.r.t to previous software architecture documents) ways of recording architecture proposals and decisions. As Agile was born in part as a reaction to waterfall styles of planning and development and famously prioritized “Working softwareover comprehensive documentation” so too there was a need to replace monolithic large software design specifications with something lighter weight but that still encouraged good architecture. 
+With the rise of Agile software development practices and large open source projects, software development teams needed to devise new and lightweight (w.r.t to previous software architecture documents) ways of recording architecture proposals and decisions. As Agile was born in part as a reaction to waterfall styles of planning and development and famously prioritized “Working software over comprehensive documentation” so too there was a need to replace monolithic large software design specifications with something lighter weight but that still encouraged good architecture. 
 
 From this need for a new way of practicing software architecture a  body of work and theory has evolved around the concepts of “Architecture Decision Records” which in turn are also termed “Any Decision Record”, and RFCs or Enhancement proposals (PEP, KEP, REP). 
 
