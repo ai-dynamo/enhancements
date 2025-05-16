@@ -1,6 +1,6 @@
 # Dynamo Enhancement Proposals
 
-**Status**: Under Review
+**Status**: Approved
 
 **Authors**: [nnshah1](https://github.com/nnshah1), [ryanolson](https://github.com/ryanolson)
 
@@ -12,7 +12,7 @@
 
 **Sponsor**: [nnshah1](https://github.com/nnshah1)
 
-**Required Reviewers**: [dzier](https://github.com/dzier), [statiraju](https://github.com/statiraju), [kkranen](https://github.com/kkranen), [nvda-mesharma](https://github.com/nvda-mesharma],[ganeshku1](https://github.com/ganeshku1),[hutm](https://github.com/hutm)
+**Required Reviewers**: [dzier](https://github.com/dzier), [statiraju](https://github.com/statiraju), [kkranen](https://github.com/kkranen), [nvda-mesharma](https://github.com/nvda-mesharma), [ganeshku1](https://github.com/ganeshku1),[hutm](https://github.com/hutm)
 
 **Review Date**: 2025-04-16
 
