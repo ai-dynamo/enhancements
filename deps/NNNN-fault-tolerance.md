@@ -2,7 +2,7 @@
 
 **Status**: Draft 
 
-**Authors**: nnshah1, vikram, biswa, harrison
+**Authors**: nnshah1, vikram, biswa, harrison, kkranen
 
 **Category**: Architecture 
 
@@ -77,17 +77,17 @@ Without formal fault tolerance definitions, users cannot reliably predict system
 For either a local or cloud deployment if a global distributed runtime
 service such as nats.io or etcd fails:
 
-* Dynamo components *MUST* detect the scenario, provide proper error
+* Dynamo components **MUST** detect the scenario, provide proper error
 codes
 
-* Dynamo deployment orchestrator *MUST* detect the scenario and
+* Dynamo deployment orchestrator **MUST** detect the scenario and
   restart the affected services
 
-* Requests in flight that do not required global services *SHOULD*
+* Requests in flight that do not required global services **SHOULD**
   continue
 
 * Components that require global state as persisted in the discovery
-  and configuration plane (etcd) *MUST* rebuild the global state in
+  and configuration plane (etcd) **MUST** rebuild the global state in
   the event of a discovery and config plane failure.
     
 **Dynamo MUST** detect and withstand temporary failures of etcd or NATS services while maintaining:  
@@ -104,127 +104,126 @@ codes
 **Recovery Requirements**:  
 - **MUST** reconcile etcd state fter restoration  
 - **MUST** maintain KV cache consistency post-recovery  
--
+
 
 ### REQ 2 Component Process Failure
 
-**Dynamo MUST** automatically detect and recover from worker process
+- **Dynamo MUST** automatically detect and recover from worker process
 failures. 
 
-Failed workers **MUST** be removed from routing tables.
+- Failed workers **MUST** be removed from routing tables.
 
-**Dynamo MUST** restart workers on healthy nodes according to resource
+- **Dynamo MUST** restart workers on healthy nodes according to resource
 constraints.
 
-**Dynamo MUST** remove nodes from consideration if workers fail to
+- **Dynamo MUST** remove nodes from consideration if workers fail to
 restart.
 
 ### REQ 3 LLM Model Instance Failure
 
-**Dynamo MUST** automatically detect and recover from LLM worker process
+- **Dynamo MUST** automatically detect and recover from LLM worker process
 failures. 
 
-**Dynamo MUST** automatically transition queued and inflight requests
+- **Dynamo MUST** automatically transition queued and inflight requests
 to healthy instances for a fixed duration before failing. 
 
-**Dynamo SHOULD** transition partial state of inflight requests (kv
+- **Dynamo SHOULD** transition partial state of inflight requests (kv
 cache, partial outputs) to healthy instances during request transition.
 
-**Dynamo MUST** automatically update routing tables, kv cache tree,
+- **Dynamo MUST** automatically update routing tables, kv cache tree,
 auto scaling state after recovery.
 
 ### REQ 4 GPU Failure 
 
-**Dynamo MUST** detect and recover from GPU failure by restarting
+- **Dynamo MUST** detect and recover from GPU failure by restarting
 model instances with remaining healthy GPUs.
 
-**LLM Workers SHOULD** checkpoint kv cache periodically to system
-memory and storage to speed up recovery. 
+- **LLM Workers SHOULD** checkpoint kv cache periodically to system
+memory and storage to speed up recovery. (Coordinate with KVBM)
 
-**Multi-GPU LLM Workers SHOULD** recover as quickly as possible
+- **Multi-GPU LLM Workers SHOULD** recover as quickly as possible
 ideally without having to re-iniatialize all GPUs within an instance.
 
-1. NVLINK failures -> nvl72 gpu 
+   1. NVLINK failures -> nvl72 gpu 
 
-2. HW GPU detection of failure 
+   2. HW GPU detection of failure 
 
-	be able to detect which node is failing and redeploy as quickly as possible ... for sharded nodes
+	  be able to detect which node is failing and redeploy as quickly as possible ... for sharded nodes
 	
+### REQ 5 Node Failure 
 
-### REQ 4 Node Failure 
-
-**Dynamo MUST** detect and recover from Node failure by restarting
+- **Dynamo MUST** detect and recover from Node failure by restarting
 model instances with remaining healthy nodes.
 
-### REQ 5 LLM Model xP / Shard Failure
+### REQ 6 LLM Model xP / Shard Failure
 
-**Multi-GPU LLM Workers SHOULD** recover as quickly as possible
+- **Multi-GPU LLM Workers SHOULD** recover as quickly as possible
 ideally without having to re-iniatialize all GPUs within an instance.
 
-### REQ 6 KV Router Failure
+### REQ 7 KV Router Failure
 
-**Dynamo MUST** fall back to random, round-robin, or pull / capacity
+- **Dynamo MUST** fall back to random, round-robin, or pull / capacity
 based routing in case of KV Router Failure.
 
-**Dynamo SHOULD** support multiple redundant KV Router's in the
+- **Dynamo SHOULD** support multiple redundant KV Router's in the
 system.
 
-### REQ 7 Frontend Failure
+### REQ 8 Frontend Failure
 
-**Dynamo MUST** support multiple frontends behind a cluster
+- **Dynamo MUST** support multiple frontends behind a cluster
 orchestrator such as K8s. 
 
-### REQ 7 Inter component request failure
+### REQ 9 Inter component request failure
 
-**Dynamo MUST** identify and retry requests that fail due to component
+- **Dynamo MUST** identify and retry requests that fail due to component
 failure (service failure as seperate from client failures).
 
-**Dynamo MUST** report errors that are client side vs server side in a
+- **Dynamo MUST** report errors that are client side vs server side in a
 way that requests can be retried or failed.
 
-### REQ 8 LLM Client Request Failure
+### REQ 10 LLM Client Request Failure
 
-**Dynamo SHOULD** retry requests with partial state for a specified
+- **Dynamo SHOULD** retry requests with partial state for a specified
 number of attempts with backoff.
 
-### REQ 9 Remote Prefill Failure
+### REQ 11 Remote Prefill Failure
 
-**Dynamo SHOULD** retry requests with partial state for a specified
+- **Dynamo SHOULD** retry requests with partial state for a specified
 number of attempts with backoff.
 
-**Dynamo SHOULD** fall back to local prefill after retry attempts have
+- **Dynamo SHOULD** fall back to local prefill after retry attempts have
 been exhausted.
 
-**Dynamo MUST** continue to handle incoming and inflight decode
+- **Dynamo MUST** continue to handle incoming and inflight decode
 requests during failure of a remote prefill request.
 
-### REQ 10 Decode Failure
+### REQ 12 Decode Failure
 
-**Dynamo SHOULD** retry requests with partial state for a specified
+- **Dynamo SHOULD** retry requests with partial state for a specified
 number of attempts with backoff.
 
-### REQ 11 Planner / Auto Scaler Behavior
+### REQ 13 Planner / Auto Scaler Behavior
 
-**Dynamo SHOULD** automatically roll back scaling decisions that cause
+- **Dynamo SHOULD** automatically roll back scaling decisions that cause
 KV cache utilization >95% or prefill queue depth >100 for 3
 consecutive intervals.
 
-**Dynamo SHOULD** automatically recognize failures and re-establish
+- **Dynamo SHOULD** automatically recognize failures and re-establish
 planner set scaling requirements.
 
-**Dynamo MUST** Have zero downtime as workers are scaled up and
+- **Dynamo MUST** Have zero downtime as workers are scaled up and
 down. In flight requests should complete successfully.
 
-### REQ 12 Rolling Upgrades with Zero Down Time
+### REQ 14 Rolling Upgrades with Zero Down Time
 
-**Dynamo MUST** support rolling upgrades of models and graphs with zero downtime.
+- **Dynamo MUST** support rolling upgrades of models and graphs with zero downtime.
+(Coordinate with gitops examples)
 
+### REQ 15 Fault Tolerance for Expert Parallelism
 
-### REQ 13 Fault Tolerance for Expert Parallelism
+- **LLM Workers SHOULD** offer redundancy and fault tolerance through extra experts.
 
-**LLM Workers SHOULD** offer redundancy and fault tolerance through extra experts.
-
-**LLM Workers SHOULD** offer quick instance reinitialization /
+- **LLM Workers SHOULD** offer quick instance reinitialization /
 reconfiguration by adding / removing redundant experts.
 
 
@@ -241,7 +240,7 @@ reconfiguration by adding / removing redundant experts.
 >  Enable request transition with partial state recovery. 
 >  Enable worker restart using K8s.
 >
-> 1. LLM Worker Resiliency in face of GPU failures 
+> 2. LLM Worker Resiliency in face of GPU failures 
 >
 >  Leverage technologies such as NVRX and see at which layer they can
 >  be applied most effectively.
@@ -409,19 +408,116 @@ graph LR
 
 #### Resilency
 
-1. The Decode worker's lease should be immediately revoked and removed from requests.
-1. The **Processor(s)** should immediately restart any inflight requests:
+1. The Decode worker's lease should be immediately revoked and removed from the routing table of all components.
+2. The **Processor(s)** should immediately restart any inflight requests:
    a) reach out to router for new decode worker.
-1. KV Blocks stored in SSD / Network storage should be resored and transfered to new target
+3. KV Blocks stored in SSD / Network storage should be restored and transfered to new target
 
 
 
 #### Recovery
+
 1. Decode worker should be restarted with minimum latency
-1. Weights should be loaded via NIXL from existing Decode Worker (similar to fast boot)
+2. Weights should be loaded via NIXL / RDMA from existing Decode Worker (similar to fast boot)
+3. Cuda graph should be reloaded without recompilation if possible
+4. If GPU failure is persistent - consider reconfiguring remaining gpus to decode instance.
+
+## Scenario 2: Prefill Worker Failure
+
+Suppose a prefill worker fails and a failure is detected on GPU 0.
+
+```mermaid
+graph LR
+    Client["Client"]
+    Frontend["Frontend"]
+    Router["Router"]
+    Processor["Processor"]
+    PrefillQueue["Remote Prefill Queue"]
+
+    Client --> Frontend
+    Frontend --> Processor
+    Processor <--> Router
+
+    %% Prefill Worker Pool (horizontal layout)
+    subgraph PrefillPool["Prefill Worker Pool"]
+        direction LR
+        subgraph Prefill1["Prefill 1  🚫"]
+            direction TB
+            P1GPU0["GPU 0 🚫"]
+            P1GPU1["GPU 1"]
+        end
+        subgraph Prefill2["Prefill 2"]
+            direction TB
+            P2GPU0["GPU 0"]
+            P2GPU1["GPU 1"]
+        end
+        subgraph Prefill3["Prefill 3"]
+            direction TB
+            P3GPU0["GPU 0"]
+            P3GPU1["GPU 1"]
+        end
+    end
+
+    %% Decode Worker Pool (vertical layout)
+    subgraph DecodePool["Decode Worker Pool"]
+        direction TB
+        subgraph Decode1["Decode 1"]
+            direction TB
+            D1GPU0["GPU 0"]
+            D1GPU1["GPU 1"]
+            D1GPU2["GPU 2"]
+            D1GPU3["GPU 3"]
+        end
+        subgraph Decode2["Decode 2"]
+            direction TB
+            D2GPU0["GPU 0"]
+            D2GPU1["GPU 1"]
+            D2GPU2["GPU 2"]
+            D2GPU3["GPU 3"]
+        end
+        subgraph Decode3["Decode 3"]
+            direction TB
+            D3GPU0["GPU 0"]
+            D3GPU1["GPU 1"]
+            D3GPU2["GPU 2"]
+            D3GPU3["GPU 3"]
+        end
+    end
+
+    %% Connections
+    Processor --> Decode1
+    Processor --> Decode2
+	Processor --> Decode3
+	
+
+	PrefillQueue --> PrefillPool
+    DecodePool --> PrefillQueue
+    PrefillPool -.-> DecodePool
+	
+
+    %% Styling
+    style PrefillPool stroke:#0066cc,stroke-width:2px
+    style DecodePool stroke:#000,stroke-width:2px
+	style Prefill1 stroke:#ff0000,stroke-width:4px,stroke-dasharray:5
+    style P1GPU0 stroke:#ff0000,stroke-width:4px,stroke-dasharray:5
+
+```
+
+#### Resilency
+
+1. The Prefill worker's lease should be immediately revoked and removed from the routing table of all components.
+2. The **Decode Worker** should immediately restart any inflight requests:
+   a) reach out to prefill queue for new prefill worker
+3. KV Blocks stored in SSD / Network storage should be restored and transfered to new target
+4. Partially transmitted KV blocks should be sent to Prefill worker.
 
 
+#### Recovery
 
+1. Prefill worker should be restarted with minimum latency
+2. Weights should be loaded via NIXL / RDMA from existing Prefill Worker (similar to fast boot)
+3. Cuda graph should be reloaded without recompilation if possible
+4. If GPU failure is persistent - consider reconfiguring remaining gpus to decode instance.
 
 # Implementation Details
 
