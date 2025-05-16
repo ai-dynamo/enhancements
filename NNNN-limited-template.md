@@ -10,7 +10,7 @@
 
 **Replaced By**: [Link of previous proposal if applicable] 
 
-**Sponsor**: [Name of Dynamo Lead]
+**Sponsor**: [Name of code owner or maintainer to shepard process]
 
 **Required Reviewers**: [Names of technical leads that are required for acceptance]
 
