@@ -519,62 +519,369 @@ graph LR
 3. Cuda graph should be reloaded without recompilation if possible
 4. If GPU failure is persistent - consider reconfiguring remaining gpus to decode instance.
 
+
+
+## Scenario 3: Router Failure
+```mermaid
+graph LR
+    Client["Client"]
+    Frontend["Frontend"]
+    Router["Router 🚫"]
+    Processor["Processor"]
+    PrefillQueue["Remote Prefill Queue"]
+
+    Client --> Frontend
+    Frontend --> Processor
+    Processor <--> Router
+
+    %% Prefill Worker Pool
+    subgraph PrefillPool["Prefill Worker Pool"]
+        direction LR
+        subgraph Prefill1["Prefill 1"]
+            direction TB
+            P1GPU0["GPU 0"]
+            P1GPU1["GPU 1"]
+        end
+        subgraph Prefill2["Prefill 2"]
+            direction TB
+            P2GPU0["GPU 0"]
+            P2GPU1["GPU 1"]
+        end
+        subgraph Prefill3["Prefill 3"]
+            direction TB
+            P3GPU0["GPU 0"]
+            P3GPU1["GPU 1"]
+        end
+    end
+
+    %% Decode Worker Pool
+    subgraph DecodePool["Decode Worker Pool"]
+        direction TB
+        subgraph Decode1["Decode 1"]
+            direction TB
+            D1GPU0["GPU 0"]
+            D1GPU1["GPU 1"]
+            D1GPU2["GPU 2"]
+            D1GPU3["GPU 3"]
+        end
+        subgraph Decode2["Decode 2"]
+            direction TB
+            D2GPU0["GPU 0"]
+            D2GPU1["GPU 1"]
+            D2GPU2["GPU 2"]
+            D2GPU3["GPU 3"]
+        end
+        subgraph Decode3["Decode 3"]
+            direction TB
+            D3GPU0["GPU 0"]
+            D3GPU1["GPU 1"]
+            D3GPU2["GPU 2"]
+            D3GPU3["GPU 3"]
+        end
+    end
+
+    Processor --> Decode1
+    Processor --> Decode2
+    Processor --> Decode3
+    PrefillQueue --> PrefillPool
+    DecodePool --> PrefillQueue
+    PrefillPool -.-> DecodePool
+
+    style Router stroke:#ff0000,stroke-width:4px,stroke-dasharray:5
+```
+
+#### Resilency
+
+1. The router's lease should be immediately revoked and removed from the routing table of all components.
+2. The **Processor(s)** should immediately fallback to round-robin or random routing
+3. Inflight requests remain unchanged
+
+
+#### Recovery
+
+1. Router should be able to reach out to LLM workers on restart and rebuild prefix tree
+2. If failure is due to OOM - Router will need to consider sharding the tree
+3. Need to consider checkpointing prefix tree to long term store for fast recovery
+
+
+## Scenario 4:. Processor Failure
+```mermaid
+graph LR
+    Client["Client"]
+    Frontend["Frontend"]
+    Router["Router"]
+    Processor["Processor 🚫"]
+    PrefillQueue["Remote Prefill Queue"]
+
+    Client --> Frontend
+    Frontend --> Processor
+    Processor <--> Router
+
+    %% Prefill Worker Pool
+    subgraph PrefillPool["Prefill Worker Pool"]
+        direction LR
+        subgraph Prefill1["Prefill 1"]
+            direction TB
+            P1GPU0["GPU 0"]
+            P1GPU1["GPU 1"]
+        end
+        subgraph Prefill2["Prefill 2"]
+            direction TB
+            P2GPU0["GPU 0"]
+            P2GPU1["GPU 1"]
+        end
+        subgraph Prefill3["Prefill 3"]
+            direction TB
+            P3GPU0["GPU 0"]
+            P3GPU1["GPU 1"]
+        end
+    end
+
+    %% Decode Worker Pool
+    subgraph DecodePool["Decode Worker Pool"]
+        direction TB
+        subgraph Decode1["Decode 1"]
+            direction TB
+            D1GPU0["GPU 0"]
+            D1GPU1["GPU 1"]
+            D1GPU2["GPU 2"]
+            D1GPU3["GPU 3"]
+        end
+        subgraph Decode2["Decode 2"]
+            direction TB
+            D2GPU0["GPU 0"]
+            D2GPU1["GPU 1"]
+            D2GPU2["GPU 2"]
+            D2GPU3["GPU 3"]
+        end
+        subgraph Decode3["Decode 3"]
+            direction TB
+            D3GPU0["GPU 0"]
+            D3GPU1["GPU 1"]
+            D3GPU2["GPU 2"]
+            D3GPU3["GPU 3"]
+        end
+    end
+
+    Processor --> Decode1
+    Processor --> Decode2
+    Processor --> Decode3
+    PrefillQueue --> PrefillPool
+    DecodePool --> PrefillQueue
+    PrefillPool -.-> DecodePool
+
+    style Processor stroke:#ff0000,stroke-width:4px,stroke-dasharray:5
+```
+
+#### Redunancy
+
+1. Processor and Frontend represent a single point of entry for clients and must be redundant
+
+#### Resilency
+ 
+1. Workers should cancel inflight requests but keep KV Cache warm
+2. Frontend should restart requests and target new processor (with partial state)
+3. Router shoudl route request to best current target. 
+3. KV Blocks stored in SSD / Network storage should be restored and transfered to new target
+
+#### Recovery
+
+1. Processor should be restarted immediately
+2. If can not be restarted on same node - move processor to new node.
+
+### Scenario 5: Frontend Failure
+
+```mermaid
+graph LR
+    Client["Client"]
+    Frontend["Frontend 🚫"]
+    Router["Router"]
+    Processor["Processor"]
+    PrefillQueue["Remote Prefill Queue"]
+
+    Client --> Frontend
+    Frontend --> Processor
+    Processor <--> Router
+
+    %% Prefill Worker Pool
+    subgraph PrefillPool["Prefill Worker Pool"]
+        direction LR
+        subgraph Prefill1["Prefill 1"]
+            direction TB
+            P1GPU0["GPU 0"]
+            P1GPU1["GPU 1"]
+        end
+        subgraph Prefill2["Prefill 2"]
+            direction TB
+            P2GPU0["GPU 0"]
+            P2GPU1["GPU 1"]
+        end
+        subgraph Prefill3["Prefill 3"]
+            direction TB
+            P3GPU0["GPU 0"]
+            P3GPU1["GPU 1"]
+        end
+    end
+
+    %% Decode Worker Pool
+    subgraph DecodePool["Decode Worker Pool"]
+        direction TB
+        subgraph Decode1["Decode 1"]
+            direction TB
+            D1GPU0["GPU 0"]
+            D1GPU1["GPU 1"]
+            D1GPU2["GPU 2"]
+            D1GPU3["GPU 3"]
+        end
+        subgraph Decode2["Decode 2"]
+            direction TB
+            D2GPU0["GPU 0"]
+            D2GPU1["GPU 1"]
+            D2GPU2["GPU 2"]
+            D2GPU3["GPU 3"]
+        end
+        subgraph Decode3["Decode 3"]
+            direction TB
+            D3GPU0["GPU 0"]
+            D3GPU1["GPU 1"]
+            D3GPU2["GPU 2"]
+            D3GPU3["GPU 3"]
+        end
+    end
+
+    Processor --> Decode1
+    Processor --> Decode2
+    Processor --> Decode3
+    PrefillQueue --> PrefillPool
+    DecodePool --> PrefillQueue
+    PrefillPool -.-> DecodePool
+
+    style Frontend stroke:#ff0000,stroke-width:4px,stroke-dasharray:5
+```
+
+#### Redunancy
+
+1. Processor and Frontend represent a single point of entry for clients and must be redundant
+
+#### Resilency
+ 
+1. Workers should cancel inflight requests but keep KV Cache warm
+2. Client should restart requests and target new frontend (with partial state). Note client behavior is out of the scope of dynamo control.
+3. Router should route request to best current target. 
+3. KV Blocks stored in SSD / Network storage should be restored and transfered to new target
+
+#### Recovery
+
+1. Frontend should be restarted immediately
+2. If can not be restarted on same node - move processor to new node.
+
+
+## Detecting and Recovering from GPU HW Failures
+
+- NVLINK Failure
+- MMU Failures
+- From UUIC Reference:
+  
+  1. (i) Uncontained memory errors, MMU errors, NVLink errors and GSP
+     RPC timeouts are the predominant errors, accounting for over 99%
+     (62,904 out of 63,253) of the characterized GPU errors (see Table
+     1); These errors can lead to a GPU error state, causing
+     interruptions to user jobs.
+  2. This section characterizes the resilience of Delta’s NVIDIA A40
+     and A100 GPUs. Specific resiliency metrics we discuss include
+     error statistics, error persistence distribution, and error
+     propagation of NVIDIA GPU errors in three categories: (a) GPU
+     hardware, (b) NVLink, and (c) GPU memory, as described in Section
+     2.2 and Table 1. These errors are critical because they propagate
+     to user job, as we show in Section 5. We first highlight key
+     findings from our analysis and then discuss GPU error statistics,
+     error persistence distributions, and error propagation for each
+     of the three error categories.
+
 # Implementation Details
 
-TBD
+## Test Harness and Failure Simulation
+
+Need a robust way of injecting failures and measuring recovery time as
+well as guranteeing required behavior.
+
+## Clear error reporting 
+
+Need a common and standard set of error codes for propagating errors
+through the system. Errors should indicate whether requests are
+component failures or invalid requests. Errors should indicate whether
+they should be retried or restarted.
+
+## GPU Failure Detection
+
+Need robust way of detecting when failures are transient vs
+persistent. When should a node be considered offline - 
+
+## Request Cancellation 
+
+Need to verify request cancellation throughout system to stop requests
+as quickly as possiblt.
+
+## Request Migration
+
+Need mechanisms to migrate inflight requests from failed components to
+health components with low latency. 
 
 # Implementation Phases
 
-## Phase 1 Software System Resilience and Recovery
+## Phase 1 LLM Worker GPU Resilience Basic
 
 **Release Target**: 0.3
 
-**Effort Estimate**: \<estimate of time and number of engineers to complete the phase\>
+**Effort Estimate**: TBD
 
-**Work Item(s):** \<one or more links to github issues\>
+**Work Item(s):** TBD
 
 **Supported API / Behavior:**
 
-* \<name and concise description of the API / behavior\>
+*** Tests covering prioritized scenarios
+
+*** Measurement of failure recovery time
+
+*** Measurement of resilency
+
+*** Detection of Common / Detectable GPU HW Failures
 
 **Not Supported:**
 
-* \<name and concise description of the API / behavior\>
+*** Inference Engine / Model Changes 
 
-
-## Phase 2 LLM Worker GPU Resilience Basic
+## Phase 2 System Software Resilience
 
 **Release Target**: 0.4
 
-**Effort Estimate**: \<estimate of time and number of engineers to complete the phase\>
+**Effort Estimate**: TBD
 
-**Work Item(s):** \<one or more links to github issues\>
+**Work Item(s):** TBD
 
 **Supported API / Behavior:**
 
-* \<name and concise description of the API / behavior\>
+*** Tests covering resilience in K8s environment
 
 **Not Supported:**
 
-* \<name and concise description of the API / behavior\>
+*** Recovery outside K8s
 
 ## Phase 3 LLM Worker GPU Resilience Improvements
 
 **Release Target**: 0.5
 
-**Effort Estimate**: \<estimate of time and number of engineers to complete the phase\>
+**Effort Estimate**: TBD
 
-**Work Item(s):** \<one or more links to github issues\>
+**Work Item(s):** TBD
 
 **Supported API / Behavior:**
 
-* \<name and concise description of the API / behavior\>
+* TBD
 
 **Not Supported:**
 
-* \<name and concise description of the API / behavior\>
-
-
+* TBD
 
 # Alternate Solutions
 
@@ -599,6 +906,14 @@ List out solutions that were considered but ultimately rejected. Consider free f
 **Notes:**
 
 \<optional: additional comments about this solution\>
+
+
+## References
+
+* [DéjàVu: KV-cache Streaming for Fast, Fault-tolerant Generative LLM Serving] (https://arxiv.org/pdf/2403.01876)
+* [Insights into DeepSeek-V3: Scaling Challenges and Reflections on Hardware for AI Architectures] (https://arxiv.org/pdf/2505.09343)
+* [Characterizing GPU Resilience and Impact on AI/HPC Systems] (https://arxiv.org/pdf/2503.11901v2)
+
 
 # Additional Notes 
 
