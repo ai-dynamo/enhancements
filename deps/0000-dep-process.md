@@ -1,6 +1,6 @@
 # Dynamo Enhancement Proposals
 
-**Status**: Under Review
+**Status**: Approved
 
 **Authors**: [nnshah1](https://github.com/nnshah1), [ryanolson](https://github.com/ryanolson)
 
@@ -12,7 +12,7 @@
 
 **Sponsor**: [nnshah1](https://github.com/nnshah1)
 
-**Required Reviewers**: [dzier](https://github.com/dzier), [statiraj](https://github.com/statiraj), team
+**Required Reviewers**: [dzier](https://github.com/dzier), [statiraju](https://github.com/statiraju), [kkranen](https://github.com/kkranen), [nvda-mesharma](https://github.com/nvda-mesharma), [ganeshku1](https://github.com/ganeshku1),[hutm](https://github.com/hutm)
 
 **Review Date**: 2025-04-16
 
@@ -247,6 +247,10 @@ basis to collect feedback before publishing to the public repo.
 * Tooling around the creation / indexing of `deps`
 
 * Making requirements required in addition to motivation
+
+* Format recommendations for API surfaces / other formatted components.
+
+* Decisions / guidelines on when a DEP is needed.
 
 # Alternate Solutions
 
