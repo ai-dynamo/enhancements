@@ -1,4 +1,4 @@
-# <Title>
+# Distributed Runtime Component Model
 
 **Status**: Draft 
 
