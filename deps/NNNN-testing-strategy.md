@@ -2,7 +2,7 @@
 
 **Status**: Draft
 
-**Authors**: nnshah1, harrison
+**Authors**: nnshah1, harrison, pavitra
 
 **Category**: Architecture 
 
@@ -14,7 +14,7 @@
 
 **Sponsor**: nnshah1
 
-**Required Reviewers**: meenakshi, pavitra, anant
+**Required Reviewers**: meenakshi, pavitra, anant, biswa
 
 **Review Date**: 2025-05-05 
 
@@ -55,7 +55,7 @@ test plans.
 
 ### Non Goals
 
-* To enumerate all tests and test cases (test plan)
+* To enumerate all tests and test cases (test plan) in this document.
 
 ## Requirements
 
