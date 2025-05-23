@@ -63,10 +63,21 @@ TBD
 
 # Proposal
 
+## Namespace
+
 ## Component
 
-A component is a 
+## Endpoint
 
+## Event
+
+## Property
+
+## Runtime
+
+## Request Flow
+
+## Discovery Flow
 
 
 # Alternate Solutions
