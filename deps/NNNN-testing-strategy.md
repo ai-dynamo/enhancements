@@ -2,7 +2,7 @@
 
 **Status**: Draft
 
-**Authors**: nnshah1, harrison, pavitra
+**Authors**: nnshah1, harrison, pavitra, biswa
 
 **Category**: Architecture 
 
@@ -59,21 +59,8 @@ test plans.
 
 ## Requirements
 
-> TBD, May remove
+### REQ 1 Tests can be run locally as well as in CI
 
-**\[Optional \- if not applicable omit\]**
-
-List out any additional requirements in numbered subheadings.
-
-**\<numbered subheadings\>**
-
-### REQ \<\#\> \<Title\>
-
-Describe the requirement in as much detail as necessary for others to understand it and how it applies to the TEP. Keep in mind that requirements should be measurable and will be used to determine if a TEP has been successfully implemented or not.
-
-Requirement names should be prefixed using a monotonically increasing number such as “REQ 1 \<Title\>” followed by “REQ 2 \<Title\>” and so on. Use title casing when naming requirements. Requirement names should be as descriptive as possible while remaining as terse as possible.
-
-Use all-caps, bolded terms like **MUST** and **SHOULD** when describing each requirement. See [RFC-2119](https://datatracker.ietf.org/doc/html/rfc2119) for additional information.
 
 # Proposal
 
@@ -90,8 +77,6 @@ generative AI use cases. Like any project it has a development and
 release life-cycle with different testing requirements, test types that
 have a different goal and modules and functionality that require test
 coverage.
-
-
 
 ## Development and Release Life-Cycle Test Stages
 
@@ -137,13 +122,26 @@ Tests that are part of `pre-merge` include:
 1. [Unit tests](###Unit)
 2. [Integration tests](###Integration)
 
+#### Dynamic Discovery
+
+A subset of pre-merge tests will be dynamically added to the the
+pre-merge gate based on the files changed. 
+
+Todo: Determine how to specify this mapping and enable it for local
+testing.
+
+### Post-Merge
+
+Post-merge tests are a full set of unit and integration tests that do
+not depend on the files that have changed. This is an immediate subset
+of nightly tests. 
+
 ### Nightly
 Nightly tests are run against ToT of the `main` branch.
 
 Tests that are part of `nightly` include:
 1. [Unit tests](###Unit)
 2. [Integration tests](###Integration)
-3. [End-to-End tests](###End-to-End)
 
 ### Weekly
 
@@ -254,8 +252,6 @@ Structurally these tests exist within a folder at the top-level and are defined 
 
 ## Test Runners
 
-
-
 ## Test Environments
 
 * CPU Only with Mock Model -> support all graphs
@@ -268,28 +264,51 @@ Structurally these tests exist within a folder at the top-level and are defined 
 
 * GPU perf cluster
 
+* K8s Cluster
+
 # Implementation Details
 
--------------------------------------------------------------------------------------------
-| Life-cycle | Test Runner | Local Environment | Local Command | CI Environment | CI Command | 
-|------------------------------------------------------------------------------------------- |
-| pre-commit | [pre-commit framework](https://pre-commit.com/) | Host | `pre-commit run --all` | github action | [pre-merge.yml](https://github.com/ai-dynamo/dynamo/blob/main/.github/workflows/pre-merge.yml) |
-| pre-merge  | 
+| Life-cycle | Test Runner | Local Environment | Local Command | CI Environment | CI Command |
+| --- | --- | --- | --- | --- | --- |
+| pre-commit | [pre-commit framework](https://pre-commit.com/) | Host | `pre-commit run --all` | GitHub Action | [pre-merge.yml](https://github.com/ai-dynamo/dynamo/blob/main/.github/workflows/pre-merge.yml) | 
+| pre-merge  |
 
+## Test Directory Structure
 
-> TBD
+### Unit Tests
 
-**\[Optional \- if not applicable omit\]**
+<TODO>
 
-Add additional detailed items here including interface signatures, etc. Add anything that is relevant but seems more of a detail than central to the proposal. Use sub sections / bullet points as needed. Try to provide images and diagrams to facilitate understanding. If applicable link to PR.
+```
+/workspace/lib/
+```
+
+### Integration / End to End Tests
+
+```
+/workspace/tests/<functional_group>/test_x.py
+```
+
+Example
+
+```
+/workspace/tests/utils
+/workspace/tests/conftest.py
+/workspace/tests/run/conftest.py
+/workspace/tests/run/test_dynamo_run.py
+/workspace/tests/serve/test_dynamo_serve.py
+/workspace/tests/planner/test_planner.py
+/workspace/tests/deploy/test_dynamo_deploy.py
+```
+
+## PyTest Marks
+
+<TODO> (pavithra)
+
+## Cargo Test Naming Convention
+
 
 ## Deferred to Implementation
-
-> TBD
-
-**\[Optional \- if not applicable omit\]**
-
-List out items that are under discussion but that will be resolved only during implementation / code review. 
 
 # Implementation Phases
 
