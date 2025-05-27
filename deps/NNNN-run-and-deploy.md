@@ -58,7 +58,7 @@ TBD
 
 Do we need local serve and run? Can we combine them into one?
 
-## Buiild
+## Build
 
 ## Deploy
 
