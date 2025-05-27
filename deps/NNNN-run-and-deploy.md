@@ -1,4 +1,4 @@
-# Dynamo Workflow Run, Serve, Build Deploy
+# Dynamo CLI Workflow: Run, Serve, Build, & Deploy
 
 **Status**: Draft 
 
