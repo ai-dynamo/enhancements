@@ -33,7 +33,7 @@ interchangeabley which can be confusing.
 
 We'll clarify the architecture and document the decsisions here to
 help clarify and discuss any changes needed. In cases where no change
-is neededd this will serve as a "retro-active" proposal.
+is needed this will serve as a "retro-active" proposal.
 
 
 ## Goals
