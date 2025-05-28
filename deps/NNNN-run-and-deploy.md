@@ -1,4 +1,4 @@
-# Dynamo CLI Workflow: Run, Serve, Build, & Deploy
+# Dynamo User and Developer Workflow
 
 **Status**: Draft 
 
@@ -33,11 +33,11 @@ of these phases as well the artifacts of each.
 
 ## Goals
 
-* Goal
+* Define the basic requirements and capabilities for moving from local development to cloud deployment.
 
-* Goal
+* Define each stage and how each stage relates to the next and how they relate to dynamo components and graphs
 
-* Goal
+* Define a common IR that captures the requirements for launching dynamo graphs locally and in the cloud.
 
 ### Non Goals
 
