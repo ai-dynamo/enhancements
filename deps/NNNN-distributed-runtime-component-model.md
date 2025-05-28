@@ -1,14 +1,14 @@
 # Distributed Runtime Component Model
 
-**Status**: Draft 
+**Status**: Draft
 
 **Authors**: graham, nnshah1, biswa, ishan, maksim
 
-**Category**: Architecture 
+**Category**: Architecture
 
-**Replaces**: [Link of previous proposal if applicable] 
+**Replaces**: [Link of previous proposal if applicable]
 
-**Replaced By**: [Link of previous proposal if applicable] 
+**Replaced By**: [Link of previous proposal if applicable]
 
 **Sponsor**: [Name of code owner or maintainer to shepard process]
 
@@ -38,7 +38,7 @@ is neededd this will serve as a "retro-active" proposal.
 
 ## Goals
 
-* Clearly define a `component`, its properties, and provide examples of `rust` and `python` components. 
+* Clearly define a `component`, its properties, and provide examples of `rust` and `python` components.
 
 * Prescriptively define how components use the `runtime` to discover and access each other.
 
@@ -65,9 +65,33 @@ TBD
 
 ## Namespace
 
+A pipeline. Usually a model. Just a name.
+
+If you run two models, that is two pipelines. An exception would be if doing speculative decoding. The draft model is part of the pipeline of a bigger model.
+
+Examples: "llama_8b".
+
 ## Component
 
+A load balanced service needed to run a pipeline. This typically has some configuration (which model to use, for example).
+
+In a Prefill / Decode disaggregated setup you would have at least two components: `deepseek-distill-llama8b.prefill.generate` (possibly multiple instance of this) and `deepseek-distill-llama8b.decode.generate`.
+
+Examples: "backend", "prefill", "decode", "preprocessor", "draft", etc.
+
 ## Endpoint
+
+Like a URL.
+
+Examples: "generate", "load_metrics".
+
+The KV metrics publisher in VLLM adds a `load_metrics` endpoint to the current component. If the `llama3-1-8b.backend` component is using patched vllm it will also expose `llama3-1-8b.backend.load_metrics`.
+
+## Instance
+
+A process. Unique. Dynamo assigns each one a unique instance_id. The thing that is running is always an instance. Namespace/component/endpoint can refer to multiple instances.
+
+If you run two instances of the same model ("data parallel") they are the same namespace+component+endpoint but different instances. The router will spread traffic over all the instances of a namespace+component+endpoint. If you have four prefill workers in a pipeline, they all have the same namespace+component+endpoint and are automatically assigned unique instance_ids.
 
 ## Event
 
