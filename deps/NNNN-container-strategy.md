@@ -1,8 +1,8 @@
-# Container Build Strategy 
+# Container Strategy 
 
 **Status**: Draft
 
-**Authors**: [nv-tusharma/Dynamo Ops team] 
+**Authors**: [nv-tusharma] 
 
 **Category**: Architecture
 
@@ -22,24 +22,36 @@
 
 # Summary
 
-This document outlines a container strategy for Dynamo to further improve the build process by focusing on reducing build times and improving developer experience with pre-built Dynamo containers. With these goals in mind, This DEP covers various optimizations to the build process, including: 
-- Restructuring the build process to provide a build-base container with Dynamo pre-built, enabiling specific backends to use the build base container to build the final container image.
-- Improve CI registry service to provide pre-built Dynamo containers for developers to use from their CI pipelines. This registry should be available to external contributors as well.  
-- Discuss possible further improvements including external caching to reduce build times. 
+This document outlines a container strategy for Dynamo to enhance the developer experience by 
+organizing Dockerfiles to maximize coverage and reuse. The primary goal for this document is to define a clear and maintainable structure for our Dockerfiles—specifically, to determine how many Dockerfiles we need and clarify the relationships between base, runtime, development, and CI images. The aim is to ensure each environment's Dockerfile builds upon the previous (as supersets), maximizing environment consistency and coverage during daily development and testing. 
+To achieve this goal, this document proposes certain optimizations to improve the current build process:
+- Restructuring the build process to provide a build-base container which contains all build dependencies, enabling specific backends to use the build base container to build the final binary.
+- Defining a structure/template for all Dockerfiles to follow to ensure consistent and reproducible builds across backends along with specific roles/use cases targeted for each stage.
 
 # Motivation
 
-Dynamo is primarily built from a collection of Dockerfiles hosted in the /containers directory of the[Dynamo repository](https://github.com/NVIDIA/Dynamo). These Dockerfiles build Dynamo along with the specific backend (vLLM, TRT-LLM, etc) and NIXL, the high-throughput, low-latency point to point communication library used by the Dynamo to accelerate inference. This approach has several drawbacks, including:
-1. Build times are long because all Dynamo, NIXL, and the selected backend are built each time. This is especially problematic as we continue to add more backends to Dynamo as we have to rebuilt the entire stack each time. 
-2. Developers need to build Dynamo per code change, which is time consuming and results in a poor developer experience. 
-3. Currently, we do not have a way to provide pre-built Dynamo containers to external contributors. The Github registry is not performant enough for public CI use-cases.
+Dynamo is primarily built from a collection of Dockerfiles hosted in the /containers directory of the [Dynamo repository](https://github.com/NVIDIA/Dynamo). Dockerfiles are split by backends (vLLM, sglang, TRT-LLM) and each Dockerfile contains multiple stages
+(base, devel, ci, runtime) to account for different purposes. Each stage essentially provides a Dynamo build along with the specific backend (vLLM, TRT-LLM, etc) and NIXL, the high-throughput, low-latency point-to-point communication library used by Dynamo to accelerate inference. 
+This approach has several drawbacks, including:
+1. Inefficient Build Times: Components such as Dynamo, NIXL, and the selected backend are rebuilt multiple times across stages, instead of leveraging a layered, superset structure. For instance, Dynamo is installed three separate times in the Dockerfile.vllm—once each in the base, ci_minimum, and runtime stages.
+2. Poor Developer Experience: The lack of clear organization among Dockerfiles makes it difficult for developers to identify which build suits their needs. As a result, the devel build is often used by default, regardless of the use case.
+3. Flaky Builds: Due to the large number of layers along with multiple repeated steps across stages, builds can fail intermittently resulting in flaky builds. 
+4. Lack of standardization across Dockerfiles: Currently, there is not a single, stand-alone Dockerfile to build Dynamo, NIXL, and dynamo dependencies resulting in duplicated/missing code across multiple Dockerfiles. Optimizations applied to one backend's Dockerfile are not immediately available to other backend-specific Dockerfiles.
+
+As Dynamo continues to scale to support multiple LLM backends along with efforts to provide pre-built Docker containers for external usage, we need to define a structure to our Dockerfiles to improve container usability.
 
 
 ## Goals
 
-* Reduce build times for Dynamo by providing a build-base container with Dynamo pre-built. This build-base container can be used by specific backends to build the final container image.
+* Remove duplicate code in current dockerfile implementations and define a single build base image containing all the necessary dependencies to build Dynamo/NIXL specific dependencies.
 
-* Provide a CI registry service to provide pre-built Dynamo containers for developers to use from the CI pipelines. This registry should be available to external contributors as well. The registry should be fast and reliable. 
+This build-base image should operate as a single base container which can then be used as base containers for backend-specific images. By leveraging a build base container, We can reduce the redundant code across Dockerfiles and establish a single-source of truth for all Dynamo-builds.
+
+* Define the relationships between base, runtime, development, and CI images for each Dockerfile and provide a structure/template to follow for Dockerfiles. 
+
+* Reduce build flakiness by pinning/fixing dependencies in the base image from package managers and squashing/reducing layers as necessary
+
+Pinning/Fixing dependencies will ensure a unified build environment reducing "it works on my machine" problems or "this worked yesterday"
 
 * Outline possible further improvements including external caching/multi-context docker builds to reduce build times. 
 
@@ -51,46 +63,92 @@ Dynamo is primarily built from a collection of Dockerfiles hosted in the /contai
 
 ## Requirements
 
-**\[Optional \- if not applicable omit\]**
+### REQ \<\#1\> \<Backend Integration with Base Container\>
+The build-base container must be designed such that backend-specific Dockerfiles can integrate with it with minimal changes to their existing build process. This includes:
+- Clear documentation on how to use the base container
+- Standardized environment variables and paths
+- Well-defined extension points for backend-specific customizations
 
-List out any additional requirements in numbered subheadings.
+### REQ \<\#2\> \<Layered Container Structure\>
+Dockerfiles must follow a layered, super-set structure to optimize build efficiency:
+- Each stage should build upon the previous stage
+- Artifacts should be built only once and reused across stages
+- Clear separation between build-time and runtime dependencies
+- Minimal layer count to reduce build complexity
 
-**\<numbered subheadings\>**
+### REQ \<\#3\> \<Stage Purpose Definition\>
+Each build stage must have a clearly defined purpose and scope:
+- Base: Common build dependencies and tools
+- Development: Additional debugging and development tools
+- Runtime: Minimal production deployment requirements
+- CI: Testing tools and validation requirements
 
-### REQ \<\#\> \<Title\>
-
-Describe the requirement in as much detail as necessary for others to understand it and how it applies to the DEP. Keep in mind that requirements should be measurable and will be used to determine if a DEP has been successfully implemented or not.
-
-Requirement names should be prefixed using a monotonically increasing number such as “REQ 1 \<Title\>” followed by “REQ 2 \<Title\>” and so on. Use title casing when naming requirements. Requirement names should be as descriptive as possible while remaining as terse as possible.
-
-Use all-caps, bolded terms like **MUST** and **SHOULD** when describing each requirement. See [RFC-2119](https://datatracker.ietf.org/doc/html/rfc2119) for additional information.
 
 
 # Proposal
 
 **\[Required\]**
 
+In order to address the requirements, we propose the following changes to the Dynamo build process:
+
+## Build-Base Container
+
+The build-base container will be a pre-built container that will be used by the backends to build the final container image. This build base container will contain all the necessary dependencies to build Dynamo. The dependencies should either be pinned or fixed to a particular commit SHA to promote reproducibility. The container will also include a NIXL build + NATS + ETCD installation since this is common across all backends. We will create a new Dockerfile in the /containers directory for this container and provide the image through our CI registry for developers to use for local development.
+
+## Use-case of build stages along with relationship between stages (base, runtime, devel, ci_minimum)
+
+Each backend-specific Dockerfile should follow a specific format. The backend-specific Dockerfiles should be divided up into multiple stages, with each stage inheriting artifacts/leveraging the previous stage as the base container. The following stages should be defined in the backend-specific Dockerfile: 
+
+| Stage    | Targeted User                | Base Image           | Functionality                                                                                                         |
+|----------|---------------------|----------------------|----------------------------------------------------------------------------------------------------------------------|
+| Devel    | Developers          | Dynamo Build base image     | Builds targeted backend and Dynamo; includes development tools for debugging and continuous development.              |
+| Runtime  | Customers/Production| Cuda base runtime image| Minimal image with only the dependencies required to deploy and run Dynamo; intended for production deployments.      |
+| CI       | Internal CI Pipelines/Local CI Debugging | Runtime image          | Adds CI-specific tools, QA test scripts, internal models, and other dependencies needed for automated testing.         |
+
 Describe the high level design / proposal. Use sub sections as needed, but start with an overview and then dig into the details. Try to provide images and diagrams to facilitate understanding.
 
 # Implementation Details
 
-**\[Optional \- if not applicable omit\]**
+## Container Build Flow
 
-Add additional detailed items here including interface signatures, etc. Add anything that is relevant but seems more of a detail than central to the proposal. Use sub sections / bullet points as needed. Try to provide images and diagrams to facilitate understanding. If applicable link to PR.
+![Container Strategy Diagram](container_strategy_proposal.png)
+
+The diagram above illustrates the proposed container strategy showing the relationships between:
+- Build Base Container with common dependencies
+- Backend-specific development containers
+- Runtime containers
+- CI containers
+
+This layered approach ensures consistent builds, reduces duplication, and improves maintainability across all backend implementations.
+
 
 ## Deferred to Implementation
 
 **\[Optional \- if not applicable omit\]**
 
-List out items that are under discussion but that will be resolved only during implementation / code review. 
+TBD
 
 # Implementation Phases
 
-**\[Optional \- if not applicable omit\]**
+## Phase \<\#1\> \<Build Base Container Development\>
 
-List out phases of implementation (can be single phase). Give each phase a monotonically increasing number; example “Phase 0” followed by “Phase 1” and so on. Give phases titles if it makes sense.
+**Release Target**: TBD
 
-## Phase \<\#\> \<Optional Title\>
+**Release Target**: Date
+
+**Effort Estimate**: \<estimate of time and number of engineers to complete the phase\>
+
+**Work Item(s):** \<one or more links to github issues\>
+
+**Supported API / Behavior:**
+
+* \<name and concise description of the API / behavior\>
+
+**Not Supported:**
+
+* \<name and concise description of the API / behavior\>
+
+## Phase \<\#2\> \<Restructure backend Dockerfiles to follow proposed structure\>
 
 **Release Target**: Date
 
