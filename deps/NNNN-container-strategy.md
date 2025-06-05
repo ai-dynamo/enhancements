@@ -107,7 +107,7 @@ Each backend-specific Dockerfile should follow a specific format. The backend-sp
 
 ## Container Build Flow
 
-<img src="container_strategy_proposal.png" width="600" alt="Container Strategy Diagram">
+<img src="container_strategy_proposal.png" width="500" height="350" alt="Container Strategy Diagram">
 
 The diagram above illustrates the proposed container strategy showing the relationships between:
 - Build Base Container with common dependencies
