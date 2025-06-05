@@ -67,7 +67,6 @@ Pinning/Fixing dependencies will ensure a unified build environment reducing "it
 The build-base container must be designed such that backend-specific Dockerfiles can integrate with it with minimal changes to their existing build process. This includes:
 - Clear documentation on how to use the base container
 - Standardized environment variables and paths
-- Well-defined extension points for backend-specific customizations
 
 ### REQ \<\#2\> \<Layered Container Structure\>
 Dockerfiles must follow a layered, super-set structure to optimize build efficiency:
@@ -87,8 +86,6 @@ Each build stage must have a clearly defined purpose and scope:
 
 # Proposal
 
-**\[Required\]**
-
 In order to address the requirements, we propose the following changes to the Dynamo build process:
 
 ## Build-Base Container
@@ -105,13 +102,12 @@ Each backend-specific Dockerfile should follow a specific format. The backend-sp
 | Runtime  | Customers/Production| Cuda base runtime image| Minimal image with only the dependencies required to deploy and run Dynamo; intended for production deployments.      |
 | CI       | Internal CI Pipelines/Local CI Debugging | Runtime image          | Adds CI-specific tools, QA test scripts, internal models, and other dependencies needed for automated testing.         |
 
-Describe the high level design / proposal. Use sub sections as needed, but start with an overview and then dig into the details. Try to provide images and diagrams to facilitate understanding.
 
 # Implementation Details
 
 ## Container Build Flow
 
-![Container Strategy Diagram](container_strategy_proposal.png)
+<img src="container_strategy_proposal.png" width="600" alt="Container Strategy Diagram">
 
 The diagram above illustrates the proposed container strategy showing the relationships between:
 - Build Base Container with common dependencies
@@ -123,8 +119,6 @@ This layered approach ensures consistent builds, reduces duplication, and improv
 
 
 ## Deferred to Implementation
-
-**\[Optional \- if not applicable omit\]**
 
 TBD
 
