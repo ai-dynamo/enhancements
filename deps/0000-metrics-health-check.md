@@ -6,13 +6,9 @@
 
 **Category**: Architecture 
 
-**Replaces**: [Link of previous proposal if applicable] 
+**Sponsor**: [Neelay Shah, Hongkuan Zhou Zicheng Ma]
 
-**Replaced By**: [Link of previous proposal if applicable] 
-
-**Sponsor**: [Name of code owner or maintainer to shepard process]
-
-**Required Reviewers**: [Names of technical leads that are required for acceptance]
+**Required Reviewers**: [Neelay Shah, Hongkuan Zhou, Ishan Dhanani, Kyle Kranen, Maksim Khadkevich, Alec Flowers, Biswa Ranjan Panda]
 
 **Review Date**: [Date for review]
 
@@ -22,47 +18,46 @@
 
 # Summary
 
-This proposal introduces a comprehensive metrics collection and health check system for Dynamo components. The design includes a centralized metrics gateway for aggregating and serving metrics data from all Dynamo components, and HTTP-based health check endpoints on each component for monitoring component health, liveness, and readiness. The solution aims to provide robust observability and monitoring capabilities while maintaining the distributed nature of the Dynamo architecture.
+This proposal introduces a unified HTTP endpoint infrastructure for Dynamo components, enabling comprehensive observability and monitoring capabilities at the component level. The core design centers around embedding an HTTP server within each Dynamo component to expose standardized endpoints for both metrics collection and health monitoring. This approach migrates the existing metrics monitoring system from centralized collection to component-level HTTP endpoints, while simultaneously introducing robust health check mechanisms including liveness, readiness, and custom health probes.
+
+The unified endpoint design provides a consistent interface across all Dynamo components, allowing external monitoring systems, 
+container orchestrators (such as Kubernetes), and operational tools to interact with each component through standard HTTP 
+protocols. By consolidating metrics exposure and health check functionality into a single HTTP server per component, this 
+solution simplifies deployment, reduces infrastructure complexity.
 
 # Motivation
 
-Currently, the Dynamo runtime does not provide direct support for comprehensive metrics collection or standardized health check mechanisms at the component level. While some metrics reporting to Prometheus exists in the Rust frontend, there is no centralized system for aggregating, querying, and managing metrics across all Dynamo components. Additionally, there is no standardized way to check the health, liveness, and readiness of individual Dynamo components, making it difficult to monitor system health and implement proper load balancing and failover mechanisms.
+Currently, the Dynamo runtime does not provide direct support for comprehensive metrics collection 
+or standardized health check mechanisms at the component level. While some metrics reporting to 
+Prometheus exists in the Rust frontend, there is no unified design for aggregating, querying, and managing metrics 
+across all Dynamo components. Additionally, there is no standardized way to check the health, liveness, and readiness of individual Dynamo components, making it difficult to monitor system health and implement proper load balancing and failover mechanisms.
 
 This lack of observability infrastructure creates several operational challenges:
-- Difficult to monitor system performance and troubleshoot issues
 - No standardized health check mechanism for container orchestration systems (e.g., Kubernetes)
 - Limited visibility into component-level metrics and resource utilization
-- No centralized way to query and aggregate metrics across the distributed system
+- No centralized way to query and aggregate metrics/health across the distributed system
 
 ## Goals
 
-* Implement a centralized metrics gateway that can scrape, aggregate, and serve metrics from all Dynamo components
-* Provide standardized HTTP-based health check endpoints on each Dynamo component
+* Implement a unified HTTP endpoint infrastructure for Dynamo components to expose metrics and health check endpoints
 * Enable customizable health checks through Python bindings while maintaining core health checks in Rust
 * Support standard observability patterns compatible with container orchestration systems
-* Maintain performance and minimize overhead on core Dynamo functionality
 
-### Non Goals
-- Specific metrics aggregation algorithms (sum, average, percentiles)
-- Metrics storage optimization and memory management strategies
-- Advanced health check dependency modeling (e.g., component A depends on component B)
-- Integration with external monitoring systems beyond basic HTTP endpoints
-- To be done...
 
 ## Requirements
 
-### REQ 1 Metrics Gateway Component
+### REQ 1 Unified HTTP Endpoint Infrastructure
 
-The system **MUST** include a standalone metrics gateway component that can:
-- Scrape metrics from all registered Dynamo components
-- Aggregate and store metrics data in memory with configurable retention
-- Expose HTTP endpoints for querying metrics data
-- Support standard metrics formats (e.g., Prometheus format)
+The system **MUST** include a unified HTTP endpoint infrastructure for Dynamo components to expose metrics and health check endpoints
 
 ### REQ 2 Performance Mrtics Requirements
 
 The metrics we want to monitor **MUST** include:
-- TO be done
+- Inflight/Total Request: updated when a new request arrives (and finishes for inflight)
+- TTFT: reported at first chunk response
+- ITL: reported at each new chunk response
+- ISL: reported at first chunk response (TODO: report right after tokenization)
+- OSL: reported when requests finishes
 
 ### REQ 3 Component Health Check Endpoints
 
@@ -90,12 +85,19 @@ The system **MUST** provide Python bindings that allow users to:
 
 ## Overview
 
-The proposed solution consists of two main components:
+The proposed solution consists of three main components:
 
-1. **Metrics Gateway**: A standalone Dynamo component responsible for collecting, aggregating, and serving metrics from all Dynamo components
-2. **Component Health Check Endpoints**: HTTP server embedded in each Dynamo component that exposes standardized health check endpoints
+1. **Unified HTTP Server Port**: Each Dynamo component will embed a single HTTP server that provides a unified interface for both metrics exposure and health check endpoints, eliminating the need for multiple ports or separate servers per component.
 
-## Metrics Gateway Architecture
+2. **Metrics**: Component-level metrics collection and exposure through standardized HTTP endpoints, migrating from the existing approach implemented for Rust frontend where each component serves its own metrics data in standard formats (e.g., Prometheus).
+
+3. **Health Check**: Comprehensive health monitoring system with both Rust-implemented core health checks (etcd, NATS connectivity) and extensible Python-binding framework for custom health checks, exposed through standard HTTP endpoints compatible with container orchestration systems.
+
+## Unified HTTP Server Port
+
+To be done
+
+## Metrics Architecture
 
 To be done
 
@@ -132,18 +134,12 @@ class MyService:
 - **`/liveness`**: Basic liveness probe (component is running and responsive)
 - **`/readiness`**: Readiness probe (component is ready to serve requests)
 
-# Implementation Details
-
-## Metrics Gateway Component
-To be done
-
-## Component Health Check Implementation
-
 ### Rust Core Implementation design
 To be done
 
 ### Python Binding Interface design
 To be done
+
 
 
 
