@@ -50,9 +50,9 @@ This lack of observability infrastructure creates several operational challenges
 
 The system **MUST** include a unified HTTP endpoint infrastructure for Dynamo components to expose metrics and health check endpoints
 
-### REQ 2 Performance Mrtics Requirements
+### REQ 2 Performance Mrtics Requirements for worker nodes
 
-The metrics we want to monitor **MUST** include:
+The metrics for worker nodes we want to monitor **MUST** include:
 - Inflight/Total Request: updated when a new request arrives (and finishes for inflight)
 - TTFT: reported at first chunk response
 - ITL: reported at each new chunk response
