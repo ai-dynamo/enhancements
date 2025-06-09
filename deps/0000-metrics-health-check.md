@@ -18,7 +18,7 @@
 
 # Summary
 
-This proposal introduces a unified HTTP endpoint infrastructure for Dynamo components, enabling comprehensive observability and monitoring capabilities at the component level. The core design centers around embedding an HTTP server within each Dynamo component to expose standardized endpoints for both metrics collection and health monitoring. This approach migrates the existing metrics monitoring system from centralized collection to component-level HTTP endpoints, while simultaneously introducing robust health check mechanisms including liveness, readiness, and custom health probes.
+This proposal introduces a unified HTTP endpoint infrastructure for Dynamo components, enabling comprehensive observability and monitoring capabilities at the component level. The core design centers around embedding an HTTP server within each Dynamo component to expose standardized endpoints for both metrics collection and health monitoring. This approach migrates the existing metrics monitoring system from Hongkaun's [implementation](https://github.com/ai-dynamo/dynamo/pull/1315), while simultaneously introducing robust health check mechanisms including liveness, readiness, and custom health probes. Currently, the metrics collection is implemented in the Rust frontend with Prometheus integration, but lacks a unified approach across all components so we need to migrate to a component-level HTTP endpoint approach.
 
 The unified endpoint design provides a consistent interface across all Dynamo components, allowing external monitoring systems, 
 container orchestrators (such as Kubernetes), and operational tools to interact with each component through standard HTTP 
@@ -52,12 +52,14 @@ The system **MUST** include a unified HTTP endpoint infrastructure for Dynamo co
 
 ### REQ 2 Performance Mrtics Requirements for worker nodes
 
-The metrics for worker nodes we want to monitor **MUST** include:
+The metrics for rust frontend we want to monitor **MUST** include:
 - Inflight/Total Request: updated when a new request arrives (and finishes for inflight)
 - TTFT: reported at first chunk response
 - ITL: reported at each new chunk response
 - ISL: reported at first chunk response (TODO: report right after tokenization)
 - OSL: reported when requests finishes
+
+The system **MUST** provide a standardized approach to collect and expose native metrics from AI inference frameworks (e.g., vLLM, SGLang, TensorRT-LLM) through the unified HTTP endpoint, using Prometheus format as the standard metrics exposition format.
 
 ### REQ 3 Component Health Check Endpoints
 
