@@ -61,21 +61,18 @@ List out any additional requirements in numbered subheadings.
 Replace `serve_dynamo` with each component's main function. An example is shown below for the SGL Decode Worker. 
 
 ```python
-# imports
+from dynamo.deploy import Deployment
+from dynamo.runtime import {...}
 
-@service(
-    dynamo={
-        "enabled": True,
-        "namespace": "dynamo",
-    },
-    resources={"gpu": 1},
-    workers=1,
-)
-class SGLangDecodeWorker:
+class Deployment(BaseDeployment):
+    namespace = "dynamo"
+    name = "sgldecode"
+    resources = {"gpu": 1}
+
+class DecodeHandler(BaseDecodeClass):
     def __init__(self, engine_args: ServerArgs):
         self.engine_args = engine_args
         self.engine = sgl.Engine(server_args=self.engine_args)
-
         logger.info("Decode worker initialized")
 
     async def generate(self, req: DisaggPreprocessedRequest):
@@ -101,8 +98,10 @@ if __name__ == "__main__":
     @dynamo_worker()
     async def worker(runtime: DistributedRuntime, engine_args):
         worker = SGLangDecodeWorker(engine_args)
+        deploy = Deployment()
 
-        component = runtime.namespace("dynamo").component(SGLangDecodeWorker.__name__)
+        ns = worker.namespace()
+        component = runtime.namespace(deploy.ns).component(deploy.name)
         await component.create_service()
 
         # serve endpoint
