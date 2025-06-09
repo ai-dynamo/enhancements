@@ -4,7 +4,7 @@
 
 **Authors**: Ishan Dhanani, Alec Flowers
 
-**Category**: Architecture 
+**Category**: Architecture
 
 **Required Reviewers**: Mohammed Abdulwahhab, Biswa Panda Rajan, Neelay Shah, Maksim Khadkevich
 
@@ -18,7 +18,7 @@ The current set of dynamo components that live under `examples/{llm, vllm_v1, vl
 
 # Motivation
 
-Dynamo is meant to be a distributed, modular framework that allows users to build inference graphs for modern day inference strategies like disaggregated serving and KV aware routing. The CLI tool `dynamo serve` (which stems from the BentoML CLI) is used to launch multiple components as subprocesses controlled by a process watcher named `circusd`. Dynamo serve provides a very clean user experience allowing first time users to run a single commmand and interact with each inference strategy. However, due to the limitations of the BentoML component syntax - our components are now only usable via the `dynamo serve` tool with all of dynamo logic that makes our platform special hidden behind a single `serve_dynamo.py` file about 6 folder down. 
+Dynamo is meant to be a distributed, modular framework that allows users to build inference graphs for modern day inference strategies like disaggregated serving and KV aware routing. The CLI tool `dynamo serve` (which stems from the BentoML CLI) is used to launch multiple components as subprocesses controlled by a process watcher named `circusd`. Dynamo serve provides a very clean user experience allowing first time users to run a single commmand and interact with each inference strategy. However, due to the limitations of the BentoML component syntax - our components are now only usable via the `dynamo serve` tool with all of dynamo logic that makes our platform special hidden behind a single `serve_dynamo.py` file about 6 folder down.
 
 1. Our framework has lost its modularity. A user cannot run each component using just python
 2. The core of our framework has been lost to the BentoML-style path of running all logic for a component using a single python module
@@ -30,22 +30,23 @@ As we start ramping up to a production version of dynamo, it is paramount that w
 
 ## Goals
 
+- Each Dynamo component **MUST** be runnable using `python3 component.py <flags>`
 
-* Each Dynamo component **MUST** be runnable using `python3 component.py <flags>`
+- `dynamo serve` **MUST** be able to launch multiple component using `python3 -m component.py <flags>`
 
-* `dynamo serve` **MUST** be able to launch multiple component using `python3 -m component.py <flags>`
+- We **SHOULD** have a common way of argument parsing for each component (similar to the `ServiceConfig`) that is used during a standalone component run and `dynamo serve`
 
-* We **SHOULD** have a common way of argument parsing for each component (similar to the `ServiceConfig`) that is used during a standalone component run and `dynamo serve`
+- We **SHOULD NOT** hide our dynamo core bindings code (component, namespace, endpoint, etc) that is used in each component
 
-* We **SHOULD NOT** hide our dynamo core bindings code (component, namespace, endpoint, etc) that is used in each component
+- We **SHOULD** have a single source of worker (sglang, vllm, tensorrtllm) code in our repository that is compatible with `dynamo-run` and `dynamo serve`
 
-* We **SHOULD** have a single source of worker (sglang, vllm, tensorrtllm) code in our repository that is compatible with `dynamo-run` and `dynamo serve`
+- We **SHOULD** have a local -> K8s experience that mirrors the top OSS projects in the community today
 
 ### Non Goals
 
-* We **SHOULD NOT** deprecate dynamo serve 
+- We **SHOULD NOT** deprecate dynamo serve. The UX is very helpful
 
-* This proposal will not address other  abstractions like `depends()` and `link` that are currently present in the SDK
+- This proposal will not address other abstractions like `depends()` and `link` that are currently present in the SDK
 
 ## Requirements
 
@@ -54,11 +55,12 @@ As we start ramping up to a production version of dynamo, it is paramount that w
 
 List out any additional requirements in numbered subheadings.
 
-**\<numbered subheadings\>**
-
 ### REQ 1 - `main` per component
 
-Replace `serve_dynamo` with each component's main function. An example is shown below for the SGL Decode Worker. 
+Replace `serve_dynamo` with each component's main function. An example is shown below for the SGL Decode Worker. ote:
+Note that we remove the `@service` decorator (a BentoML construct). The purpose of this decorator was to hold information on `resources` and top level dynamo info like `namespace`. Instead - we propose a `BaseDeployment` class that can hold this information. A user can extend this class to overwrite or use default values. This class can contain information/helpers in order to faciliate the K8s deployment. This also allows us to eliminate a couple different confusing aspects of the current code including `async_on_start` and `dynamo_endpoint`. This also allows us to move away from injecting the runtime into each worker via the `dynamo_context`. This concept is very confusing to an end user and there is no reason to have it.
+
+Additionally - there has been discussion on repeated code between components. We can start using `BaseDecodeClass` and other variants to handle this logic.
 
 ```python
 from dynamo.deploy import Deployment
@@ -100,50 +102,55 @@ if __name__ == "__main__":
         worker = SGLangDecodeWorker(engine_args)
         deploy = Deployment()
 
-        ns = worker.namespace()
-        component = runtime.namespace(deploy.ns).component(deploy.name)
+        component = runtime.namespace(deploy.namespace).component(deploy.name)
         await component.create_service()
 
         # serve endpoint
         endpoint = component.endpoint("generate")
         await endpoint.serve_endpoint(worker.generate)
 
-
     uvloop.install()
     asyncio.run(worker(engine_args))
 ```
 
-Above - we have a combination of the BentoML component syntax combined with our python bindings. At a high level - we move the `async_init` into the main and create our endpoints and components there. This also allows us to move back to our original pattern of `async worker` and `RequestHandler` while maintaining the `@service` decorator that is required by `dynamo serve`. This also allows us to eliminate a couple different confusing aspects of the current code including `async_on_start` and `dynamo_endpoint`. This also allows us to move away from injecting the runtime into each worker via the `dynamo_context`. This concept is very confusing to an end user and there is no reason to have it.
-
 ### REQ 2 - FlexibleArgumentParser for Dynamo
 
-Currently - we pass in arguments for each worker via a YAML file. This YAML file is combined with any CLI overrides, saved in an environment variable, and then exported in each workers process. An end user has no idea how this works unless they dive into the `ServiceConfig` class. Instead, we propose a `DynFlexibleArgumentParser`. This works similarly to the current `ServiceConfig` but is expanded to also be used if a user is running `python3 component.py <flags>`. 
+Currently - we pass in arguments for each worker via a YAML file. This YAML file is combined with any CLI overrides, saved in an environment variable, and then exported in each workers process. An end user has no idea how this works unless they dive into the `ServiceConfig` class. Instead, we propose a `DynFlexibleArgumentParser`. This works similarly to the current `ServiceConfig` but is expanded to also be used if a user is running `python3 component.py <flags>`.
 
-# Proposal
+# SDK and Runtime relationship
 
-<TODO>
+Over the last few months - there have been efforts on the SDK side to create a set of abstract classes and abstract endpoints that can be used to create a more flexible inference graph. An example of this graph is below
 
-# Alternate Solutions
+```python
+class WorkerInterface(AbstractService):
+    """Interface for LLM workers."""
 
-**\[Required, if not applicable write N/A\]**
+    @abstract_endpoint  # enforces that the service implements the method, but also that it is properly decorated
+    async def generate(self, request: ChatRequest):
+        pass
 
-List out solutions that were considered but ultimately rejected. Consider free form \- but a possible format shown below.
 
-## Alt \<\#\> \<Title\>
+class RouterInterface(AbstractService):
+    """Interface for request routers."""
 
-**Pros:**
+    @abstract_endpoint
+    async def generate(self, request: ChatRequest):
+        pass
 
-\<bulleted list or pros describing the positive aspects of this solution\>
 
-**Cons:**
+@service(
+    dynamo={"namespace": "llm-hello-world"},
+    image=DYNAMO_IMAGE,
+)
+class VllmWorker(WorkerInterface):
+    @endpoint()
+    async def generate(self, request: ChatRequest):
+        # Convert to Spongebob case (randomly capitalize letters)
+        for token in request.text.split():
+            spongebob_token = "".join(
+                c.upper() if random.random() < 0.5 else c.lower() for c in token
+            )
+            yield spongebob_token
+```
 
-\<bulleted list or pros describing the negative aspects of this solution\>
-
-**Reason Rejected:**
-
-\<bulleted list or pros describing why this option was not used\>
-
-**Notes:**
-
-\<optional: additional comments about this solution\>
-
+Note that this includes new endpoints that abstract away the SDK (and require `dynamo serve` to run). It is an open question as to whether we should be using this approach or not.
