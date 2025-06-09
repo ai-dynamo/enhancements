@@ -195,3 +195,22 @@ class VllmWorker(WorkerInterface):
 ```
 
 We believe this can be met by the proposal above using a set of abstract classes for request handlers (to avoid repeated code) and a `BaseDeployment` class to hold the resources and namespace info to faciliate the K8s deployment.
+
+## Unified README/examples
+
+Work in progress. Would love feedback!
+
+examples/
+├── README.md
+├── common/
+│ ├── frontend.py
+│ └── base_classes.py
+├── sglang/
+│ ├── sglang_engine.py
+│ └── utils.py
+├── vllm/
+│ ├── vllm_engine.py
+│ └── utils.py
+└── trtllm/
+├── trtllm_engine.py
+└── utils.py
