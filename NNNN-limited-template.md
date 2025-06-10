@@ -53,7 +53,9 @@ Dynamo is meant to be a distributed, modular framework for building inference gr
 
 - Decorators hide critical logic, making debugging nearly impossible. Runtime injection of `CUDA_VISIBLE_DEVICES`, namespace overrides in K8s, and other "magic" configurations surprise users with no clear error messages.
 
-- Large model deployment requires unintuitive flags and `.link` files. We've hit significant issues with `mpi` and `circus` when running tensorrt-llm examples on SLURM clusters for benchmarking.
+- Large model deployment requires unintuitive flags and `.link` files.
+
+- We've hit significant issues with `mpi` and `circus` when running tensorrt-llm examples on SLURM clusters for benchmarking.
 
 - We maintain two separate sets of examples - [dynamo serve](https://github.com/ai-dynamo/dynamo/blob/main/examples/sglang/components/worker.py) and [dynamo run](https://github.com/ai-dynamo/dynamo/blob/main/launch/dynamo-run/src/subprocess/sglang_inc.py) - with duplicated logic and no code sharing.
 
