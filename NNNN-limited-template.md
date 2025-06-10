@@ -106,6 +106,7 @@ As we ramp up to production, fixing this UX split is critical. This proposal pro
 
 ```python
 from dynamo.deploy import BaseDeployment # adding this class turns this into a valid deployment
+from dynamo.sglang.utils import parse_sglang_args
 
 class Deployment(BaseDeployment):
     namespace = "dynamo"
@@ -202,6 +203,7 @@ We believe this can be met by the proposal above using a set of abstract classes
 
 Work in progress. Would love feedback!
 
+```bash
 examples/
 ├── README.md
 ├── common/
@@ -214,5 +216,8 @@ examples/
 │ ├── vllm_engine.py
 │ └── utils.py
 └── trtllm/
-├── trtllm_engine.py
-└── utils.py
+│ ├── trtllm_engine.py
+│ └── utils.py
+```
+
+Each engine's `utils.py` would contain things like argument parsing/validation and any other helper functions. The `common/base_classes.py` could contain abstract classes for the `BaseDecodeWorker` or the `BaseWorker` class.
