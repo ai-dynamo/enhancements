@@ -1,8 +1,22 @@
-# Model Manager for Triton Server
+# Model Manager for Dynamo
+
+**Status**: Under Review
+
+**Authors**: Kavin Krishnan, Nicolas Noble, 
+Zhongdongming Dai
+
+**Category**: Architecture
+
+**Required Reviewers**: Itay Neeman, Ganesh Kudleppanavar, Neelay Shah,
+Maksim Khadkevich, Julien Mancuso, Ishan Dhanani, Kyle Kranen
+
+**Review Date**: 06/11/2025
+
+**Implementation PR / Tracking Issue**: WIP
 
 ## Problem Statement
 
-When the Triton Server runs, it needs to access model files organized in repositories. The architecture is backend-agnostic, with file types restricted only by the framework backend used. The current mechanism allows downloading model files from various cloud services or using the local filesystem.
+When the Dynamo workes runs, they needs to access model files organized in repositories. The architecture is backend-agnostic, with file types restricted only by the framework backend used. The current mechanism allows downloading model files from various cloud services or using the local filesystem.
 
 With model files becoming larger and cluster sizes growing, having every node fetch files from the cloud results in:
 - Increasing ingress flow
@@ -17,7 +31,7 @@ We propose a distributed proxy system that:
 ## Goals
 
 ### Primary Goals
-- **Startup Time Reduction**: Drastically decrease median startup time for Triton Servers fetching model files from external servers
+- **Startup Time Reduction**: Drastically decrease median startup time for Dynamo workers fetching model files from external servers
 - **Ingress Bandwidth Reduction**: Significantly reduce total ingress bandwidth by using a single inner data fetching node instead of multiple nodes
 - **Versioning**: Automatically detect and update local cache when new model file versions are available
 - **TRT Models Pre-compilation**: Support pre-compilation of downloaded models for various TensorRT formats to further speed up start-up time
@@ -25,6 +39,8 @@ We propose a distributed proxy system that:
 ### Future Goals
 - **Storage**: Potential for custom storage system leveraging locality and hardware
 - **Encryption**: Support for asset encryption for private model files
+- **Optimized Model Sharing** Utilizing NIXL library to reduce latency for sharing models between nodes
+- **Fast Checkpoint Transfer** Optimizing transfer between RL workloads and inference deployment with the NIXL library
 
 ### Non-Goals
 - **Optimized Routing**: Load balancing, network throttling, and advanced network features
@@ -49,7 +65,7 @@ We propose a distributed proxy system that:
 ### Caching Tiers
 1. Distributed storage for cold caching
 2. Per-pod in-memory caching (faster, shorter TTL)
-3. Local client cache in Triton servers
+3. Local client cache in Dynamo nodes
 
 ### Database Requirements
 Minimal information storage:
@@ -59,6 +75,14 @@ Minimal information storage:
 - Content hash value
 - Pub-sub channel ID (if downloading)
 - Pod ID with in-memory cache
+
+### Third-Party Compatability
+Initially, enhancement should support [Fluid](https://fluid-cloudnative.github.io/) as a data storage for models.
+
+There is already an example of [Fluid with Dynam](https://github.com/ai-dynamo/dynamo/blob/main/docs/guides/dynamo_deploy/model_caching_with_fluid.md) in the main repository.
+
+We will be open to other data orcehstrators down the roadmap.
+
 
 ## Architecture
 
@@ -79,7 +103,7 @@ Minimal information storage:
 
 ## Alternative Solutions
 
-### Direct Competitors
+### Partner Approaches
 1. **JuiceFS Distributed Cache**
    - Used by BentoML for LLM loading
    - Generic solution lacking specialized model features
@@ -101,3 +125,4 @@ Minimal information storage:
 - [Run AI Model Streamer](https://www.run.ai/blog/accelerating-model-loading-with-run-ai-model-streamer)
 - [NVIDIA NIM](https://developer.nvidia.com/nim)
 - [NVIDIA NIM Operator Cache](https://docs.nvidia.com/nim-operator/latest/cache.html)
+- [NVIDIA NeMo Datastore](https://docs.nvidia.com/nim-operator/latest/data-store.html)
