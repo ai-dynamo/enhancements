@@ -1,4 +1,4 @@
-# Model Manager for Dynamo
+# Dynamo Model Manager
 
 **Status**: Under Review
 
