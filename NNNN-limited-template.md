@@ -161,44 +161,6 @@ Currently - we pass in arguments for each worker via a YAML file. This YAML file
 
 # Appendix
 
-## SDK abstractions
-
-Over the last few months - there have been efforts on the SDK side to create a set of abstract classes and abstract endpoints. An example of this graph is below
-
-```python
-class WorkerInterface(AbstractService):
-    """Interface for LLM workers."""
-
-    @abstract_endpoint  # enforces that the service implements the method, but also that it is properly decorated
-    async def generate(self, request: ChatRequest):
-        pass
-
-
-class RouterInterface(AbstractService):
-    """Interface for request routers."""
-
-    @abstract_endpoint
-    async def generate(self, request: ChatRequest):
-        pass
-
-
-@service(
-    dynamo={"namespace": "llm-hello-world"},
-    image=DYNAMO_IMAGE,
-)
-class VllmWorker(WorkerInterface):
-    @endpoint()
-    async def generate(self, request: ChatRequest):
-        # Convert to Spongebob case (randomly capitalize letters)
-        for token in request.text.split():
-            spongebob_token = "".join(
-                c.upper() if random.random() < 0.5 else c.lower() for c in token
-            )
-            yield spongebob_token
-```
-
-We believe this can be met by the proposal above using a set of abstract classes for request handlers (to avoid repeated code) and a `BaseDeployment` class to hold the resources and namespace info to faciliate the K8s deployment.
-
 ## Unified README/examples
 
 Work in progress. Would love feedback!
