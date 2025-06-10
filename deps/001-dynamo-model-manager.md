@@ -23,7 +23,7 @@ With model files becoming larger and cluster sizes growing, having every node fe
   - Inefficient resource utilization
 
 We propose a distributed proxy system that:
-  - Downloads files from the same repositories as the base Triton Server
+  - Downloads files from the same repositories as the base Dynamo & Triton Server
   - Caches them locally
   - Allows local cluster nodes to download from cache instead of external repositories
 
@@ -53,7 +53,7 @@ We propose a distributed proxy system that:
 - Uses content hashing for idempotent file operations
 
 ### Networking
-- Utilizes UCX framework for client-to-pod communication
+- Utilizes NIXL framework and TCP for client-to-pod communication
 - Optimized for HPC networking
 
 ### Load Balancing
@@ -93,12 +93,115 @@ We will be open to other data orchestrators down the roadmap.
 2. **Client Library**
    - Embedded within servers
    - Multi-language support
-   - Uses UCX for data plane
+   - Uses NIXL framework and TCP for data plane
    - Uses gRPC for control plane
 
 ### Distribution
 - Distributed as Kubernetes manifest
 - Includes deployments and operators for stateless and stateful components
+
+## Proposed API
+
+The Client API from the Model Manager Client library is intended to be a drop-in replacement for typical model downloaders such as HuggingFace's downloader.
+
+```
+from huggingface_hub import hf_hub_download
+import joblib
+const HF_TOKEN_ENV_VAR: &str = "HF_TOKEN";
+
+REPO_ID = "YOUR_REPO_ID"
+FILENAME = "sklearn_model.joblib"
+
+model = joblib.load(
+    hf_hub_download(repo_id=REPO_ID, filename=FILENAME)
+)
+```
+
+The Model Manager abstracts away the complexity of model provider-specific implementations like huggingface, shielding the end user from the underlying details.
+
+Using the Model Manager Downloader, this process becomes as simple as:
+
+```
+from modelmanager_client import modelmanager_download
+import joblib
+
+let downloadInfo = DownloadInfo {
+    repo_id = "YOUR_REPO_ID",
+    filename = "sklearn_model.joblib",
+    host = "modelmanager-server",
+    provider = "HuggingFace",
+};
+
+model = joblib.load
+    modelmanager_download(downloadInfo)
+);
+```
+
+We will begin with HuggingFace for the initial release, with the long-term goal of the model manager being to support a wide range of storage providers — including cloud services like AWS S3 and Azure Storage, as well as custom solutions such as Weka, DDN, and others.
+
+For future releases: Every model manager client will maintain a distributed hash table containing information about which client node holds which model and its associated metadata.
+When a new client or node comes online, it will use NIXL's cost API to identify the optimal node for transferring the model weights between the two nodes.
+
+### Proposed Kubernetes Workflow
+
+Model Manager is a Kubernetes application itself. It advertises to the Kubernetes cluster, and any application in there can access it through its name.
+
+For instance, a model manager service can be described using the following Kubernetes service file:
+
+```
+apiVersion: v1
+kind: Service
+metadata:
+  name: modelmanager-server
+spec:
+  selector:
+    app: modelmanager-server
+  ports:
+  - port: 3000
+    targetPort: 3000
+  type: ClusterIP
+```
+
+As an example, here is a deployment file for the model manager’s server itself:
+
+```
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: modelmanager-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: modelmanager-server
+  template:
+    metadata:
+      labels:
+        app: modelmanager-server
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: nnoble-desktop
+      containers:
+      - name: server
+        image: modelmanager-server:latest
+        command: ["./modelmanager"]
+        ports:
+        - containerPort: 3000
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: SERVER_URL
+          value: "http://modelmanager-server:3000"
+        volumeMounts:
+        - name: model-storage
+          mountPath: /root
+      volumes:
+      - name: model-storage
+        persistentVolumeClaim:
+          claimName: nnoble-pvc
+          readOnly: false
+```
+
+From there, the applications using the Model Manager client within the cluster can simply access the Model Manager server by specifying the string "model-manager-server" in its configuration.
 
 ## Alternative Solutions
 
