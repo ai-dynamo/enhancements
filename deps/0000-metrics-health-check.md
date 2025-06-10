@@ -52,7 +52,7 @@ The system **MUST** include a unified HTTP endpoint infrastructure for Dynamo co
 
 ### REQ 2 Performance Mrtics Requirements for worker nodes
 
-The metrics for rust frontend we want to monitor **MUST** include:
+The metrics from rust frontend we want to monitor **MUST** include:
 - Inflight/Total Request: updated when a new request arrives (and finishes for inflight)
 - TTFT: reported at first chunk response
 - ITL: reported at each new chunk response
@@ -91,7 +91,7 @@ The proposed solution consists of three main components:
 
 1. **Unified HTTP Server Port**: Each Dynamo component will embed a single HTTP server that provides a unified interface for both metrics exposure and health check endpoints, eliminating the need for multiple ports or separate servers per component.
 
-2. **Metrics**: Component-level metrics collection and exposure through standardized HTTP endpoints, migrating from the existing approach implemented for Rust frontend where each component serves its own metrics data in standard formats (e.g., Prometheus).
+2. **Metrics**: Component-level metrics collection and exposure through standardized HTTP endpoints, migrating from the existing approach implemented for Rust frontend where each component serves its own metrics data in standard Prometheus format.
 
 3. **Health Check**: Comprehensive health monitoring system with both Rust-implemented core health checks (etcd, NATS connectivity) and extensible Python-binding framework for custom health checks, exposed through standard HTTP endpoints compatible with container orchestration systems.
 
