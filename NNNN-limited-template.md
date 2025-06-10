@@ -42,24 +42,11 @@ Dynamo is meant to be a distributed, modular framework for building inference gr
 
 **Current Issues**:
 
-1. Duplicated dynamo-run examples vs dynamo-serve examples with no code sharing
-2. All rust bindings logic is buried in the SDK under `serve_dynamo.py`
-3. Current components in `examples/{llm, vllm_v1, vllm_v0, sglang, tensorrt_llm}` cannot be run outside the `dynamo serve` code path
-4. We no longer demonstrate the power of our rust/python bindings in an accessible way
-
-# Motivation
-
-- Users must use `dynamo-serve` for all components - they can no longer run any example code with `python3 component.py <flags>`. This breaks the pythonic, hackable experience that made Dynamo accessible.
-
-- Decorators hide critical logic, making debugging nearly impossible. Runtime injection of `CUDA_VISIBLE_DEVICES`, namespace overrides in K8s, and other "magic" configurations surprise users with no clear error messages.
-
-- Large model deployment requires unintuitive flags and `.link` files.
-
-- We've hit significant issues with `mpi` and `circus` when running tensorrt-llm examples on SLURM clusters for benchmarking.
-
-- We maintain two separate sets of examples - [dynamo serve](https://github.com/ai-dynamo/dynamo/blob/main/examples/sglang/components/worker.py) and [dynamo run](https://github.com/ai-dynamo/dynamo/blob/main/launch/dynamo-run/src/subprocess/sglang_inc.py) - with duplicated logic and no code sharing.
-
-- We've hidden the rust↔python interoperability that differentiates Dynamo. Users can't see or interact with our core bindings (component, namespace, endpoint).
+1. We maintain two separate sets of examples - [dynamo serve](https://github.com/ai-dynamo/dynamo/blob/main/examples/sglang/components/worker.py) and [dynamo run](https://github.com/ai-dynamo/dynamo/blob/main/launch/dynamo-run/src/subprocess/sglang_inc.py) - with duplicated logic and no code sharing.
+2. Users must use `dynamo-serve` for all components - they can no longer run any example code with `python3 component.py <flags>`. This breaks the pythonic, hackable experience that made Dynamo accessible.
+3. Decorators hide critical logic, making debugging nearly impossible. Runtime injection of `CUDA_VISIBLE_DEVICES`, namespace overrides in K8s, and other "magic" configurations surprise users with no clear error messages.
+4. Large model deployment requires unintuitive flags and `.link` files.
+5. We've hidden the rust↔python interoperability that differentiates Dynamo. Users can't see or interact with our core bindings (component, namespace, endpoint).
 
 As we ramp up to production, fixing this UX split is critical. This proposal provides a path to maintain `dynamo serve`'s developer experience while staying true to our rust core and making components standalone + runnable.
 
