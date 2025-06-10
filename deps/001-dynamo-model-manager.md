@@ -2,8 +2,7 @@
 
 **Status**: Under Review
 
-**Authors**: Kavin Krishnan, Nicolas Noble, 
-Zhongdongming Dai
+**Authors**: Kavin Krishnan, Nicolas Noble, Zhongdongming Dai
 
 **Category**: Architecture
 
@@ -16,17 +15,17 @@ Maksim Khadkevich, Julien Mancuso, Ishan Dhanani, Kyle Kranen
 
 ## Problem Statement
 
-When the Dynamo workes runs, they needs to access model files organized in repositories. The architecture is backend-agnostic, with file types restricted only by the framework backend used. The current mechanism allows downloading model files from various cloud services or using the local filesystem.
+Dynamo workers require access to model files stored in repositories. The architecture supports multiple backend frameworks, with file type compatibility determined by the chosen backend. Currently, model files can be downloaded from various cloud storage services or accessed directly from the local filesystem.
 
 With model files becoming larger and cluster sizes growing, having every node fetch files from the cloud results in:
-- Increasing ingress flow
-- Higher latency for backend startup
-- Inefficient resource utilization
+  - Increasing ingress flow
+  - Higher latency for backend startup
+  - Inefficient resource utilization
 
 We propose a distributed proxy system that:
-- Downloads files from the same repositories as the base Triton Server
-- Caches them locally
-- Allows local cluster nodes to download from cache instead of external repositories
+  - Downloads files from the same repositories as the base Triton Server
+  - Caches them locally
+  - Allows local cluster nodes to download from cache instead of external repositories
 
 ## Goals
 
@@ -34,13 +33,13 @@ We propose a distributed proxy system that:
 - **Startup Time Reduction**: Drastically decrease median startup time for Dynamo workers fetching model files from external servers
 - **Ingress Bandwidth Reduction**: Significantly reduce total ingress bandwidth by using a single inner data fetching node instead of multiple nodes
 - **Versioning**: Automatically detect and update local cache when new model file versions are available
-- **TRT Models Pre-compilation**: Support pre-compilation of downloaded models for various TensorRT formats to further speed up start-up time
+- **TensorRT Models Pre-compilation**: Support pre-compilation of downloaded models for various TensorRT formats to further speed up start-up time
 
 ### Future Goals
 - **Storage**: Potential for custom storage system leveraging locality and hardware
 - **Encryption**: Support for asset encryption for private model files
-- **Optimized Model Sharing** Utilizing NIXL library to reduce latency for sharing models between nodes
-- **Fast Checkpoint Transfer** Optimizing transfer between RL workloads and inference deployment with the NIXL library
+- **Optimized Model Sharing**: Utilize NIXL library to reduce latency for sharing models between nodes
+- **Fast Checkpoint Transfer**: Optimize transfer between RL workloads and inference deployment with the NIXL library
 
 ### Non-Goals
 - **Optimized Routing**: Load balancing, network throttling, and advanced network features
@@ -76,13 +75,12 @@ Minimal information storage:
 - Pub-sub channel ID (if downloading)
 - Pod ID with in-memory cache
 
-### Third-Party Compatability
+### Third-Party Compatibility
 Initially, enhancement should support [Fluid](https://fluid-cloudnative.github.io/) as a data storage for models.
 
-There is already an example of [Fluid with Dynam](https://github.com/ai-dynamo/dynamo/blob/main/docs/guides/dynamo_deploy/model_caching_with_fluid.md) in the main repository.
+There is already an example of [Fluid integration with Dynamo](https://github.com/ai-dynamo/dynamo/blob/main/docs/guides/dynamo_deploy/model_caching_with_fluid.md) in the main repository.
 
-We will be open to other data orcehstrators down the roadmap.
-
+We will be open to other data orchestrators down the roadmap.
 
 ## Architecture
 
@@ -90,6 +88,7 @@ We will be open to other data orcehstrators down the roadmap.
 1. **Service Cluster**
    - Handles caching and downloading of models
    - Implements distributed proxy functionality
+   - Manages cluster-wide operations
 
 2. **Client Library**
    - Embedded within servers
