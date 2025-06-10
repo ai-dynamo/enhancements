@@ -6,7 +6,7 @@
 
 **Category**: Architecture 
 
-**Sponsor**: [Neelay Shah, Hongkuan Zhou Zicheng Ma]
+**Sponsor**: [Neelay Shah, Hongkuan Zhou, Zicheng Ma]
 
 **Required Reviewers**: [Neelay Shah, Hongkuan Zhou, Ishan Dhanani, Kyle Kranen, Maksim Khadkevich, Alec Flowers, Biswa Ranjan Panda]
 
