@@ -95,6 +95,11 @@ The proposed solution consists of three main components:
 
 3. **Health Check**: Comprehensive health monitoring system with both Rust-implemented core health checks (etcd, NATS connectivity) and extensible Python-binding framework for custom health checks, exposed through standard HTTP endpoints compatible with container orchestration systems.
 
+<figure>
+  <img src="imgs/metric%20and%20helath%20check%20arch.png" alt="Metrics and Health Check Architecture" width="800">
+  <figcaption>Figure 1: Metrics and Health Check Architecture Overview</figcaption>
+</figure>
+
 ## Unified HTTP Server Port
 
 To be done
