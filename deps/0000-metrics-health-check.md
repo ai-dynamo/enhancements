@@ -162,21 +162,15 @@ To be done
 
 ## Terminology & Definitions
 
-| **Term** | **Definition** |
-| :---- | :---- |
-| **Health Check** | A mechanism to verify if a component or service is functioning correctly |
-| **Liveness Probe** | A health check that determines if a component is running and should be restarted if failing |
-| **Readiness Probe** | A health check that determines if a component is ready to receive traffic |
+| **Term**            | **Definition**                                                                               |
+| :------------------ | :------------------------------------------------------------------------------------------- |
+| **Health Check**    | A mechanism to verify if a component or service is functioning correctly                     |
+| **Liveness Probe**  | A health check that determines if a component is running and should be restarted if failing  |
+| **Readiness Probe** | A health check that determines if a component is ready to receive traffic                    |
 | **Metrics Gateway** | A centralized service that collects, aggregates, and serves metrics from multiple components |
-| **Scraping** | The process of collecting metrics data from components at regular intervals |
-
-## Acronyms & Abbreviations
-
-**TTFT:** Time To First Token
-**ITL:** Inter Token Latency  
-**ISL:** Input Sequence Length
-**OSL:** Output Sequence Length
-**HTTP:** HyperText Transfer Protocol
-**API:** Application Programming Interface
-**CPU:** Central Processing Unit
+| **Scraping**        | The process of collecting metrics data from components at regular intervals                  |
+| **TTFT**            | Time To First Token                                                                          |
+| **ITL**             | Inter Token Latency                                                                          |
+| **ISL**             | Input Sequence Length                                                                        |
+| **OSL**             | Output Sequence Length                                                                       |
 
