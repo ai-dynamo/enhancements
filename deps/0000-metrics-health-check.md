@@ -124,7 +124,7 @@ Python bindings will allow users to register custom health check functions(examp
 
 ```python
 # Custom health check example
-from dynamo.core import liveness # implemented in rust 
+from dynamo.runtime import liveness # implemented in rust 
 
 @service
 class MyService:
