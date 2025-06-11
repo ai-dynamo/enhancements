@@ -22,7 +22,7 @@
 
 # Summary
 
-Introduce `Instance` as the foundational identifier system for distributed components, providing THE canonical string representation for namespaces, components, and endpoints. This establishes a robust foundation with strong validation rules and type safety, while separating identifier concerns from etcd path generation and key-value operations.
+Introduce `Instance` as the foundational identifier system for distributed components, providing THE canonical string representation for namespaces, components, and endpoints through the `Identity` trait. This establishes a robust foundation with strong validation rules and type safety, while separating identifier concerns from etcd path generation and key-value operations.
 
 # Motivation
 
@@ -43,6 +43,7 @@ Dynamo requires a structured approach to component identification that enforces 
 - **Hierarchical Navigation**: Support parent/child traversal in namespace hierarchies
 - **Strong Validation**: Implement comprehensive validation for component identifiers
 - **Clean Separation**: Identifier logic separate from etcd operations and key-value storage
+- **Uniform Interface**: All types implement `Identity` trait for consistent access to canonical strings
 
 # Current Implementation
 
@@ -126,7 +127,17 @@ pub struct Instance {
 }
 ```
 
-### 2. Typed Entity Structs
+### 2. Identity Trait
+
+```rust
+/// Trait for types that can produce a canonical string identifier
+pub trait Identity {
+    /// Get the canonical string representation
+    fn to_string(&self) -> String;
+}
+```
+
+### 3. Typed Entity Structs
 
 ```rust
 /// Represents a validated namespace hierarchy with runtime context
@@ -150,14 +161,57 @@ pub struct Endpoint {
     name: String,
     lease_id: Option<i64>,
 }
+
+impl Identity for Namespace {
+    fn to_string(&self) -> String {
+        // Create temporary Instance and use it as single source of truth
+        let instance = Instance {
+            namespace: self.hierarchy.clone(),
+            component: None,
+            endpoint: None,
+            lease_id: None,
+        };
+        instance.to_string()
+    }
+}
+
+impl Identity for Component {
+    fn to_string(&self) -> String {
+        // Create temporary Instance and use it as single source of truth
+        let instance = Instance {
+            namespace: self.namespace.hierarchy.clone(),
+            component: Some(self.name.clone()),
+            endpoint: None,
+            lease_id: None,
+        };
+        instance.to_string()
+    }
+}
+
+impl Identity for Endpoint {
+    fn to_string(&self) -> String {
+        // Create temporary Instance and use it as single source of truth
+        let instance = Instance {
+            namespace: self.component.namespace.hierarchy.clone(),
+            component: Some(self.component.name.clone()),
+            endpoint: Some(self.name.clone()),
+            lease_id: self.lease_id,
+        };
+        instance.to_string()
+    }
+}
 ```
-### 3. Entity Creation and Canonical Identification
+
+### 4. Entity Creation and Identity
 
 ```rust
-impl Instance {
+impl Identity for Instance {
     /// Provides THE canonical string identifier for this component
     /// This is the authoritative representation used throughout the system
-    pub fn to_string(&self) -> String {
+    ///
+    /// IMPORTANT: This is the SINGLE SOURCE OF TRUTH for canonical string format.
+    /// All other Identity implementations MUST delegate to this method.
+    fn to_string(&self) -> String {
         let mut identifier = format!("{{{}}}", self.namespace);
 
         if let Some(component) = &self.component {
@@ -175,7 +229,9 @@ impl Instance {
         identifier.push('}');
         identifier
     }
+}
 
+impl Instance {
     /// Create a Namespace entity from this descriptor
     pub fn to_namespace(&self, drt: &DistributedRuntime) -> Namespace {
         Namespace {
@@ -336,7 +392,7 @@ impl Instance {
 ## 7. Usage Examples
 
 ```rust
-use dynamo::discovery::{Instance, DistributedRuntime};
+use dynamo::discovery::{Instance, DistributedRuntime, Identity};
 
 // Create descriptors at different levels
 let namespace_desc = Instance::new_namespace("production.api.v1")?;
@@ -357,6 +413,11 @@ let endpoint = endpoint_desc.to_endpoint(&drt).unwrap();
 // Navigate hierarchy - compound namespace produces child, use parent() to access parents
 let parent_ns = namespace.parent();  // Returns Option<Namespace> for parent
 let child_ns = namespace.child("v2")?;  // Creates production.api.v1.v2 namespace
+
+// All types implement Identity trait - same interface everywhere
+println!("From namespace: {}", namespace.to_string());  // {production.api.v1}
+println!("From component: {}", component.to_string());  // {production.api.v1.gateway}
+println!("From endpoint: {}", endpoint.to_string());    // {production.api.v1.gateway.http}
 ```
 
 # 8. Benefits
@@ -366,6 +427,8 @@ let child_ns = namespace.child("v2")?;  // Creates production.api.v1.v2 namespac
 3. **Typed Entities**: Create `Namespace`, `Component`, and `Endpoint` entities with runtime context
 4. **Hierarchical Navigation**: Support parent/child relationships with compound namespace handling
 5. **Validation Enforcement**: Comprehensive validation for all identifier components
+6. **Consistent Interface**: All types implement `Identity` trait, providing uniform access to canonical strings
+7. **Single Source of Truth**: All canonical string generation delegates to `Instance.to_string()`, ensuring consistency
 
 # 9. Alternate Solutions
 

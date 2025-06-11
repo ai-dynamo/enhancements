@@ -22,7 +22,7 @@
 
 # Summary
 
-Introduce the **Discovery trait system** (`DiscoveryKV` and `DiscoveryPlane`) that provides structured etcd operations for `ComponentDescriptor`, `Namespace`, `Component`, and `Endpoint` entities. The `DiscoveryPlane` trait handles discovery operations (list, exists, join), while `DiscoveryKV` handles key-value operations. The `join()` method returns `Path` objects that implement `DiscoveryKV` for extended key operations, replacing unstructured etcd access patterns.
+Introduce the **Discovery trait system** that provides structured etcd operations for entities created from `Instance` descriptors. The system includes four traits: `DiscoveryKV` (key-value operations), `DiscoveryPlane` (discovery operations), `EtcdIdentity` (etcd path mapping), and `PathExtension` (path creation). These traits replace unstructured etcd access patterns with type-safe operations.
 
 # Motivation
 
@@ -30,216 +30,255 @@ Prior to this enhancement, Namespace, Component, and Endpoint entities had limit
 
 ## Current Problems
 
-1. **Unstructured Operations**: No standardized interface for discovery operations across entity types
-2. **Limited Validation**: Minimal validation rules for namespace, component, and endpoint naming
-3. **Inconsistent Patterns**: Each component implements its own discovery and listing logic
-4. **No Type Safety**: Operations not validated against entity structure at compile time
-5. **Poor Discoverability**: No clear way to enumerate available namespaces, components, or endpoints
+1. **Unstructured Operations**: No standardized interface for discovery operations
+2. **Inconsistent Patterns**: Each component implements its own discovery logic
+3. **No Type Safety**: Operations not validated at compile time
+4. **Poor Discoverability**: No clear way to enumerate entities
 
 ## Dependencies
 
 This proposal builds upon:
-- **DEP: Component Descriptor Model** - Provides the foundational typed entities with rigorous naming conventions and validation rules
+- **DEP: Instance Model** - Provides `Instance` descriptors for creating typed entities and the `Identity` trait
 
-The ComponentDescriptor model establishes the strict validation rules that make these traits safe and reliable. See [Component Descriptor Model](deps/0000-component-descriptor-model.md) for detailed naming convention rationale.
+This proposal adds discovery operations through new traits (`EtcdIdentity`, `PathExtension`, `DiscoveryKV`, `DiscoveryPlane`) and the `Path` type for extended paths. A unified `canonical_to_etcd_path()` function provides deterministic transformation from canonical strings to etcd paths.
 
 ## Goals
 
-- **Standardized Operations**: Consistent interface across all discovery entity types
-- **Type Safety**: Compile-time validation of discovery operations using ComponentDescriptor foundation
-- **Discovery Capabilities**: List and enumerate Keys, Namespaces, Components, and Endpoints
-- **Structured Access**: All operations use validated ComponentDescriptor paths with reserved keywords
-- **Developer Experience**: Clear, discoverable API with rich listing capabilities
+- **Standardized Operations**: Consistent interface across all entity types
+- **Type Safety**: Compile-time validation of discovery operations
+- **Discovery Capabilities**: List and enumerate paths, namespaces, components, and endpoints
+- **Developer Experience**: Clear, discoverable API with deterministic path transformation
 
 # Proposal
-
-## Discovery Trait System
 
 ### 1. `DiscoveryKV` Trait - Key-Value Operations
 
 ```rust
-/// Trait for key-value operations on etcd paths
 pub trait DiscoveryKV {
-    /// Atomically create a key if it does not exist
     async fn create(&self, value: Vec<u8>, lease_id: Option<i64>) -> Result<()>;
-
-    /// Create key or validate existing value matches
     async fn create_or_validate(&self, value: Vec<u8>, lease_id: Option<i64>) -> Result<()>;
-
-    /// Put/update a key-value pair
     async fn put(&self, value: Vec<u8>, lease_id: Option<i64>) -> Result<PutResponse>;
-
-    /// Get value(s) for this key
     async fn get(&self) -> Result<Vec<KeyValue>>;
-
-    /// Delete this key
     async fn delete(&self) -> Result<i64>;
-
-    /// Watch for changes to this key/prefix
     async fn watch(&self) -> Result<PrefixWatcher>;
-
-    /// Get the etcd path this entity represents
-    fn path(&self) -> String;
-
-    /// Get the display name for this entity (namespace.component.endpoint format)
-    fn name(&self) -> String;
 }
 ```
 
 ### 2. `DiscoveryPlane` Trait - Discovery Operations
 
 ```rust
-/// Discovery operations for listing, existence checks, and path joining
 pub trait DiscoveryPlane {
-    /// List all entities under this path, returning structured collections
     async fn list(&self) -> Result<DiscoveryList>;
-
-    /// Check if this entity exists
     async fn exists(&self) -> Result<bool>;
-
-    /// Join additional path segments, returning a Path for KV operations
-    fn join(&self, segments: &[&str]) -> Result<Path, DiscoveryError>;
-
-    /// Get the ComponentDescriptor canonical representation with additional segments
-    fn to_component_descriptor_with_segments(&self, segments: &[String]) -> String;
-
-    /// Get the etcd path this entity represents
-    fn path(&self) -> String;
-
-    /// Get the display name for this entity
-    fn name(&self) -> String;
 }
 
-/// Structured result from list operations
 #[derive(Debug, Clone)]
 pub struct DiscoveryList {
-    /// Path entries found under _keys_ reserved word
     pub paths: Vec<String>,
-    /// Nested namespaces
     pub namespaces: Vec<Namespace>,
-    /// Components in this namespace
     pub components: Vec<Component>,
-    /// Endpoints in this component
     pub endpoints: Vec<Endpoint>,
 }
 ```
 
-### 3. `Path` Object - Result of Join Operations
+### 3. `EtcdIdentity` Trait - Etcd Path Mapping
 
 ```rust
-/// Represents an extended path created via join() operations
-/// Implements DiscoveryKV for key-value operations
+#[derive(Debug, Clone, Copy)]
+pub enum EntityType {
+    Namespace,
+    Component,
+    Endpoint,
+    Path,
+}
+
+/// Trait for types that have a representation in etcd
+pub trait EtcdIdentity: Identity {
+    fn entity_type(&self) -> EntityType;
+
+    /// Transforms canonical string to etcd path
+    fn etcd_path(&self) -> String {
+        canonical_to_etcd_path(&self.to_string(), self.entity_type())
+    }
+}
+
+/// Transform canonical identifier to etcd path: {a.b.c} → dynamo://a/b/c
+fn canonical_to_etcd_path(canonical: &str, entity_type: EntityType) -> String {
+    let trimmed = canonical.trim_start_matches('{').trim_end_matches('}');
+    let (path_part, lease_suffix) = trimmed.rsplit_once(':').map_or((trimmed, ""), |(p, l)| (p, &trimmed[p.len()..]));
+    let parts: Vec<&str> = path_part.split('.').collect();
+
+    match entity_type {
+        EntityType::Namespace => format!("dynamo://{}", parts.join("/")),
+        EntityType::Component => {
+            let (ns_parts, comp) = parts.split_at(parts.len() - 1);
+            format!("dynamo://{}/_component_/{}", ns_parts.join("/"), comp[0])
+        },
+        EntityType::Endpoint => {
+            let (ns_and_comp, ep) = parts.split_at(parts.len() - 1);
+            let (ns_parts, comp) = ns_and_comp.split_at(ns_and_comp.len() - 1);
+            format!("dynamo://{}/_component_/{}/_endpoint_/{}{}",
+                ns_parts.join("/"), comp[0], ep[0], lease_suffix)
+        },
+        EntityType::Path => panic!("Path entities must override etcd_path()"),
+    }
+}
+```
+
+### 4. `PathExtension` Trait - Path Creation
+
+```rust
+/// Trait for types that can be extended with path segments
+pub trait PathExtension: EtcdIdentity {
+    fn to_path(&self, segments: &[&str]) -> Result<Path, InstanceError> {
+        for segment in segments {
+            validate_path_segment(segment)?;
+        }
+        Ok(Path {
+            base: Box::new(self.clone()),
+            segments: segments.iter().map(|s| s.to_string()).collect(),
+        })
+    }
+}
+```
+
+### 5. Implementation Details
+
+```rust
+/// Extended path created via to_path()
 #[derive(Clone)]
 pub struct Path {
-    /// The base entity this path extends from
-    pub base: Box<dyn DiscoveryPlane>,
-    /// Additional path segments
+    pub base: Box<dyn EtcdIdentity>,
     pub segments: Vec<String>,
 }
 
+// Display implementations
 impl std::fmt::Display for Path {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} @ {}", self.path(), self.component_descriptor())
+        write!(f, "{} @ {}", self.etcd_path(), self.to_string())
     }
 }
 
 impl std::fmt::Debug for Path {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Path({} @ {})", self.path(), self.component_descriptor())
+        write!(f, "Path({} @ {})", self.etcd_path(), self.to_string())
     }
 }
 
+// Trait implementations for entity types
+impl EtcdIdentity for Namespace {
+    fn entity_type(&self) -> EntityType { EntityType::Namespace }
+}
+
+impl EtcdIdentity for Component {
+    fn entity_type(&self) -> EntityType { EntityType::Component }
+}
+
+impl EtcdIdentity for Endpoint {
+    fn entity_type(&self) -> EntityType { EntityType::Endpoint }
+}
+
+impl EtcdIdentity for Path {
+    fn entity_type(&self) -> EntityType { EntityType::Path }
+
+    fn etcd_path(&self) -> String {
+        if self.segments.is_empty() {
+            self.base.etcd_path()
+        } else {
+            format!("{}/_keys_/{}", self.base.etcd_path(), self.segments.join("/"))
+        }
+    }
+}
+
+impl Identity for Path {
+    fn to_string(&self) -> String {
+        if self.segments.is_empty() {
+            self.base.to_string()
+        } else {
+            format!("{}/{}", self.base.to_string(), self.segments.join("/"))
+        }
+    }
+}
+
+// All etcd identities can create paths
+impl PathExtension for Namespace {}
+impl PathExtension for Component {}
+impl PathExtension for Endpoint {}
+impl PathExtension for Path {}
+
+// Path implements discovery operations
 impl DiscoveryKV for Path {
     async fn create(&self, value: Vec<u8>, lease_id: Option<i64>) -> Result<()> {
-        let etcd = get_etcd_client();
-        etcd.create(self.path(), value, lease_id).await
+        get_etcd_client().create(self.etcd_path(), value, lease_id).await
     }
-
-    fn path(&self) -> String {
-        format!("{}/_keys_/{}",
-            self.base.path(),
-            self.segments.join("/")
-        )
-    }
-
-            fn name(&self) -> String {
-        format!("{}/{}",
-            self.base.name(),
-            self.segments.join("/")
-        )
-    }
-
-    // ... other DiscoveryKV methods
+    // ... other methods
 }
 
-impl Path {
-    /// Get the ComponentDescriptor representation of this path
-    fn component_descriptor(&self) -> String {
-        // Convert base entity + segments back to ComponentDescriptor canonical format
-        // This recreates the {namespace.component.endpoint:lease_id} format
-        self.base.to_component_descriptor_with_segments(&self.segments)
+impl DiscoveryPlane for Path {
+    async fn list(&self) -> Result<DiscoveryList> {
+        get_etcd_client().list_prefix(&self.etcd_path()).await
+    }
+
+    async fn exists(&self) -> Result<bool> {
+        Ok(!self.get().await?.is_empty())
     }
 }
 ```
 
-## Design Requirements
+## Design
 
-### 1. Naming and Path Conventions
+### Trait Hierarchy
 
-**Display Names** use different delimiters to avoid ambiguity:
-- **Namespace hierarchy**: `.` (DNS-like) → `production.api.v1`
-- **Component/Endpoint separation**: `/` (filesystem-like) → `production.api.v1/gateway/grpc`
-
-**Etcd Paths** use reserved keywords:
-- Format: `dynamo://namespace/_component_/name/_endpoint_/name/_keys_/path`
-- Reserved keyword ordering: `_component_` before `_endpoint_`, `_keys_` always last
-
-### 2. Trait Responsibilities
-
-**DiscoveryKV**: Pure key-value operations (create, put, get, delete, watch)
-**DiscoveryPlane**: Discovery operations (list, exists, join)
-**Path**: Result of `join()` operations, implements DiscoveryKV
-
-### 3. Rich Debugging Format
-
-All entities provide `path @ descriptor` format:
 ```
-dynamo://production.api/_component_/gateway @ {production.api.gateway}
+Identity (from Instance model)
+    ↑
+EtcdIdentity - Maps to etcd paths
+    ↑
+PathExtension - Creates Path objects
 ```
+
+### Implementation Matrix
+
+| Type | Identity | EtcdIdentity | PathExtension | DiscoveryKV | DiscoveryPlane |
+|------|----------|--------------|---------------|-------------|----------------|
+| Instance | ✓ | ✗ | ✗ | ✗ | ✗ |
+| Namespace, Component, Endpoint | ✓ | ✓ | ✓ | ✗ | ✗ |
+| Path | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+### Canonical to Etcd Path Transformation
+
+The system transforms canonical identifiers to etcd paths deterministically:
+
+| Canonical | Etcd Path |
+|-----------|-----------|
+| `{production.api.v1}` | `dynamo://production/api/v1` |
+| `{production.api.v1.gateway}` | `dynamo://production/api/v1/_component_/gateway` |
+| `{production.api.v1.gateway.http}` | `dynamo://production/api/v1/_component_/gateway/_endpoint_/http` |
+| `{production.api.v1.gateway}/config` | `dynamo://production/api/v1/_component_/gateway/_keys_/config` |
+
+Reserved keywords follow strict ordering: `_component_` → `_endpoint_` → `_keys_`
 
 ## Usage Examples
 
-### 1. Basic Entity Operations
-
 ```rust
-// Create entities - these implement both DiscoveryKV and DiscoveryPlane
-let namespace = Namespace { hierarchy: "production.api".to_string(), runtime: drt };
-let component = Component { namespace, name: "gateway".to_string() };
-let endpoint = Endpoint { component, name: "grpc".to_string(), lease_id: None };
+// Create entities from Instance descriptors
+let namespace_desc = Instance::new_namespace("production.api")?;
+let component_desc = Instance::new_component("production.api", "gateway")?;
+let endpoint_desc = Instance::new_endpoint("production.api", "gateway", "grpc")?;
 
-// Direct key-value operations via DiscoveryKV
-component.put(serde_json::to_vec(&metadata)?, Some(lease_id)).await?;
-let data = endpoint.get().await?;
-let exists = namespace.exists().await?;
-```
+let drt = DistributedRuntime::new();
+let namespace = namespace_desc.to_namespace(&drt);
+let component = component_desc.to_component(&drt).unwrap();
+let endpoint = endpoint_desc.to_endpoint(&drt).unwrap();
 
-### 2. Path Extension with join()
-
-```rust
-// Use join() to create extended paths for additional data storage
-let health_path = endpoint.join(&["health", "status"])?;  // Returns Path object
-health_path.put(b"healthy".to_vec(), None).await?;
-// Creates: dynamo://production.api/_component_/gateway/_endpoint_/grpc/_keys_/health/status
-
-let config_path = component.join(&["config", "server"])?;
+// Path creation and KV operations
+let config_path = component.to_path(&["config", "server"])?;
 config_path.put(b"server_config".to_vec(), None).await?;
-// Creates: dynamo://production.api/_component_/gateway/_keys_/config/server
-```
 
-### 3. Discovery Operations
+let health_path = endpoint.to_path(&["health", "status"])?;
+health_path.put(b"healthy".to_vec(), None).await?;
 
-```rust
-// List entities and paths under a namespace
+// Discovery operations
 let discovery_list = namespace.list().await?;
 println!("Found {} paths, {} components, {} endpoints",
     discovery_list.paths.len(),
@@ -247,63 +286,12 @@ println!("Found {} paths, {} components, {} endpoints",
     discovery_list.endpoints.len()
 );
 
-// Rich debugging output shows both etcd path and canonical descriptor
+// Debug output shows etcd path @ canonical
 println!("{}", endpoint);
-// Output: dynamo://production.api/_component_/gateway/_endpoint_/grpc @ {production.api.gateway.grpc}
+// dynamo://production/api/_component_/gateway/_endpoint_/grpc @ {production.api.gateway.grpc}
+
+// Instance is just a descriptor - must create entities first
+let instance = Instance::new_endpoint("ns", "comp", "ep")?;
+// instance.etcd_path()     // Compile error!
+// instance.to_path(&["x"]) // Compile error!
 ```
-
-### 4. Reserved Keyword Patterns
-
-The trait system enforces proper reserved keyword usage:
-- `_component_` always comes before `_endpoint_` (enforced by entity structure)
-- `_keys_` always comes last (automatically added by `join()`)
-- Path structure validation prevents invalid combinations
-
-```rust
-// Valid patterns automatically generated:
-namespace.join(&["config"])        // dynamo://ns/_keys_/config
-component.join(&["health"])        // dynamo://ns/_component_/comp/_keys_/health
-endpoint.join(&["metrics", "cpu"]) // dynamo://ns/_component_/comp/_endpoint_/ep/_keys_/metrics/cpu
-```
-
-## Implementation Strategy
-
-### Phase 1: Foundation
-- Implement Discovery traits for ComponentDescriptor entities
-- Add `join()` method with Path object creation
-- Establish naming convention patterns
-
-### Phase 2: Integration
-- Generic etcd client interface (removes `kv_*` method dependencies)
-- Structured list parsing that returns DiscoveryList collections
-- Rich Display/Debug implementations with `path @ descriptor` format
-
-### Phase 3: Adoption
-- Migration from unstructured etcd access patterns
-- Developer tooling and validation
-- Documentation and examples
-
-## Generic Etcd Client Requirements
-
-The trait implementations must use a generic etcd client interface:
-
-```rust
-trait EtcdClient {
-    async fn create(&self, key: &str, value: Vec<u8>, lease_id: Option<i64>) -> Result<()>;
-    async fn put_with_options(&self, key: &str, value: Vec<u8>, options: Option<PutOptions>) -> Result<PutResponse>;
-    async fn get(&self, key: &str, options: Option<GetOptions>) -> Result<Vec<KeyValue>>;
-    async fn delete(&self, key: &str, options: Option<DeleteOptions>) -> Result<i64>;
-    async fn get_prefix(&self, prefix: &str) -> Result<Vec<KeyValue>>;
-    async fn watch_prefix(&self, prefix: &str) -> Result<PrefixWatcher>;
-}
-```
-
-**Benefits:**
-- Removes dependencies on specific `kv_*` method names
-- Enables testing with mock etcd clients
-- Clean separation between discovery logic and etcd operations
-- Flexible client implementations
-
-# Benefits
-
-1. **Clean Trait Separation**: `
