@@ -1,4 +1,4 @@
-# Consolidating dynamo-serve and dynamo-run component API
+# How to Author and Run Dynamo Components
 
 **Status**: Under Review
 
@@ -6,13 +6,13 @@
 
 **Category**: Architecture
 
-**Required Reviewers**: Itay Neeman, Kyle Kranen, Mohammed Abdulwahhab, Maksim Khadkevich, Biswa Panda Rajan
+**Required Reviewers**: Itay Neeman, Kyle Kranen, Mohammed Abdulwahhab, Maksim Khadkevich, Biswa Panda Rajan, Ryan McCormick
 
 **Review Date**: 06/09/2025
 
 **Implementation PR / Tracking Issue**: WIP
 
-# Background: Dynamo-serve vs Dynamo-run
+# Background: Running a component using dynamo-serve vs dynamo-run
 
 Right now we have 2 different ways of running components that go through different code paths:
 
@@ -50,7 +50,7 @@ Dynamo is meant to be a distributed, modular framework for building inference gr
 
 As we ramp up to production, fixing this UX split is critical. This proposal provides a path to maintain `dynamo serve`'s developer experience while staying true to our rust core and making components standalone + runnable.
 
-## Goals
+## Principles
 
 1. Each Dynamo component **MUST** be runnable using `python3 component.py <flags>`
 
@@ -145,6 +145,91 @@ if __name__ == "__main__":
 ### FlexibleArgumentParser for Dynamo
 
 Currently - we pass in arguments for each worker via a YAML file. This YAML file is combined with any CLI overrides, saved in an environment variable, and then exported in each workers process. An end user has no idea how this works unless they dive into the `ServiceConfig` class. Instead, we propose a `DynamoFlexibleArgumentParser`. This works similarly to the current `ServiceConfig` but is expanded to also be used if a user is running `python3 component.py <flags>`.
+
+# Team Discussion Notes
+
+## 6/10/2025
+
+We had an intial discussion about the DEP where we primarily discussed the issues with the current component writing/running experience.
+
+### Issues we brought up
+
+**Running components**
+
+- Impossible to run components using python3. Major issue for development
+- Inflexibility for power users
+
+### Specific examples we discussed
+
+<details>
+<summary>Example 1</summary>
+
+Pain Points:
+
+1. dynamo_context: dict[str, Any] = {}
+
+   - This is the definition of dynamo_context which is a variable you have to import and then gets populated at runtime
+   - You can't tell what it gets populated with, when it get populated, or where it gets populated
+
+2. VLLM_WORKER_ID = dynamo_context["endpoints"][0].lease_id()
+
+   - To get endpoints you have to know that there is a list of endpoints
+   - Have to guess which one is the endpoint you actually want
+
+3. Too much going on under the hood
+
+   - If I try to set CUDA_VISIBLE_DEVICES in the command line, dynamo-serve silently overwrites my selection
+   - Had to search source code to find fix via "magic" environment variable DYN_DISABLE_AUTO_GPU_ALLOCATION
+   - See: https://github.com/ai-dynamo/dynamo/blob/main/deploy/sdk/src/dynamo/sdk/cli/allocator.py#L37
+   - All of our dynamo logic is hidden behind the service decorator which decides which function of serve_dynamo.py to call
+   - Decorators currently stem from an abstracted version of BentoML. None of these have been architected with dynamo in mind.
+
+4. @endpoint() decorator is an example of above issue
+
+   - Expected simple boilerplate replacement like:
+     ```python
+     endpoint = namespace().component().endpoint()
+     endpoint.serve_endpoint(fn)
+     ```
+   - Instead get opaque class implementation:
+     ```python
+     class DynamoEndpoint(DynamoEndpointInterface):
+         """Base class for dynamo endpoints
+         Dynamo endpoints are methods decorated with @endpoint."""
+     ```
+   - Unclear what functionality is actually being added
+   - The SDK contains a lot fo this.
+
+5. dynamo-serve deployment issues
+
+   - Doesn't work well with bare metal, slurm, or non-k8s deployments
+   - These environments require manual process launch per node
+   - Conflicts with "create graph and launch once" model
+   - This also means you cannot run any sort of profiling on each component
+   - Running multinode is not intuitive and requires work arounds and backward commands for an end user
+
+6. Double code
+
+   - We have a lot of code that is duplicated between the `dynamo-run` and `dynamo-serve` components
+   - This is confusing and makes it difficult to maintain
+   - We should have a single source of truth for the component but this isn't possible because we can't only have dynamo-serve as a way to run these
+
+</details>
+
+### Open Questions
+
+- Do we need `dynamo serve`?
+
+### Things we agreed on as a team
+
+- Components should be runnable using `python3 component.py <flags>`
+- Handling of CLI flags and the ServiceConfig should be much simpler
+
+### Next Steps
+
+- Small group discussion between component writers and SDK team
+- Daily standup starting Thursday to track
+- Goal is to come to an understanding and conclusion by end of the week with goal to ship unified dev experience
 
 # Appendix
 
