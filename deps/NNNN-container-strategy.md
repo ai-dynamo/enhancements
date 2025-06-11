@@ -151,7 +151,7 @@ flowchart TD
 
     %% Styling
     classDef gray fill:#e5e7eb,stroke:#333,stroke-width:1px;
-</code_block_to_apply_changes_from>
+```
 
 The diagram above illustrates the proposed container strategy showing the relationships between:
 - Build Base Container with common dependencies
