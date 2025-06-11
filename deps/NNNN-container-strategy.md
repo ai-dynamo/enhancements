@@ -25,7 +25,7 @@
 This document outlines a container strategy for Dynamo to enhance the developer experience by 
 organizing Dockerfiles to maximize coverage and reuse. The primary goal for this document is to define a clear and maintainable structure for our Dockerfiles—specifically, to determine how many Dockerfiles we need and clarify the relationships between base, runtime, development, and CI images. The aim is to ensure each environment's Dockerfile builds upon the previous (as supersets), maximizing environment consistency and coverage during daily development and testing. 
 To achieve this goal, this document proposes certain optimizations to improve the current build process:
-- Restructuring the build process to provide a build-base container which contains all build dependencies, enabling specific backends to use the build base container to build the final binary.
+- Restructuring the build process to provide a base container with a pre-built version of Dynamo + NIXL available on all distributions, enabling splitting of specific backends from the dynamo build process.
 - Defining a structure/template for all Dockerfiles to follow to ensure consistent and reproducible builds across backends along with specific roles/use cases targeted for each stage.
 
 # Motivation
@@ -43,9 +43,9 @@ As Dynamo continues to scale to support multiple LLM backends along with efforts
 
 ## Goals
 
-* Remove duplicate code in current dockerfile implementations and define a single build base image containing all the necessary dependencies to build Dynamo/NIXL specific dependencies.
+* Remove duplicate code in current dockerfile implementations and define a single build base image which provides a pre-built container with Dynamo + NIXL.
 
-This build-base image should operate as a single base container which can then be used as base containers for backend-specific images. By leveraging a build base container, We can reduce the redundant code across Dockerfiles and establish a single-source of truth for all Dynamo-builds.
+This base image should operate as a single base container which can then be used as base containers for backend-specific images. By leveraging a base container, We can reduce the redundant code across Dockerfiles and establish a single-source of truth for all Dynamo-builds.
 
 * Define the relationships between base, runtime, development, and CI images for each Dockerfile and provide a structure/template to follow for Dockerfiles. 
 
@@ -77,10 +77,10 @@ Dockerfiles must follow a layered, super-set structure to optimize build efficie
 
 ### REQ \<\#3\> \<Stage Purpose Definition\>
 Each build stage must have a clearly defined purpose and scope:
-- Base: Common build dependencies and tools
-- Development: Additional debugging and development tools
+- Base: NIXL + Dynamo build from a manylinux container (Enables support on multiple platforms)
+- Backend Build: Builds the specified backend along with any dependencies required for the backend
 - Runtime: Minimal production deployment requirements
-- CI: Testing tools and validation requirements
+- CI: Testing tools and validation requirements built on runtime
 
 
 
@@ -90,7 +90,7 @@ In order to address the requirements, we propose the following changes to the Dy
 
 ## Build-Base Container
 
-The build-base container will be a pre-built container that will be used by the backends to build the final container image. This build base container will contain all the necessary dependencies to build Dynamo. The dependencies should either be pinned or fixed to a particular commit SHA to promote reproducibility. The container will also include a NIXL build + NATS + ETCD installation since this is common across all backends. We will create a new Dockerfile in the /containers directory for this container and provide the image through our CI registry for developers to use for local development.
+The base container will be a pre-built container that will be used by the backends to build the final container image. This build base container will contain a Dynamo build for all backends to use for their framework-specific build. The base image will leverage a manylinux base image to enable support for multiple distributions (U22, U24, etc). The container will also include a NIXL build since this is common across all backends. We will create a new Dockerfile in the /containers directory for this container and provide the image through our CI registry for developers to use for local development.
 
 ## Use-case of build stages along with relationship between stages (base, runtime, devel, ci_minimum)
 
@@ -98,16 +98,60 @@ Each backend-specific Dockerfile should follow a specific format. The backend-sp
 
 | Stage    | Targeted User                | Base Image           | Functionality                                                                                                         |
 |----------|---------------------|----------------------|----------------------------------------------------------------------------------------------------------------------|
-| Devel    | Developers          | Dynamo Build base image     | Builds targeted backend and Dynamo; includes development tools for debugging and continuous development.              |
-| Runtime  | Customers/Production| Cuda base runtime image| Minimal image with only the dependencies required to deploy and run Dynamo; intended for production deployments.      |
-| CI       | Internal CI Pipelines/Local CI Debugging | Runtime image          | Adds CI-specific tools, QA test scripts, internal models, and other dependencies needed for automated testing.         |
+| Backend Build    | Developers          | Cuda base devel image     | Builds targeted backend along with backend-specific dependencies. 
+| Runtime  | Customers/Production| Cuda base runtime image| Minimal image with only the dependencies required to deploy and run Dynamo w/backend from the backend build stage; intended for production deployments. Copies dynamo artifacts from base image and backend artifaces from backend build image. |
+| CI       | Developers/Internal CI Pipelines/Local Debugging | Runtime image          | Adds CI-specific tools, QA test scripts, internal models, and other dependencies needed for automated testing.         |
 
 
 # Implementation Details
 
 ## Container Build Flow
 
-<img src="container_strategy_proposal.png" width="600" alt="Container Strategy Diagram" style="object-fit: contain;">
+```mermaid
+flowchart TD
+    A[Manylinux build base image]:::gray
+    B[NIXL Setup/Build NIXL Wheel]
+    C[Build Dependencies]
+    D[Build Dynamo]
+    E[Dynamo Base Container]:::gray
+    F[Build Backend-specific code]
+    G[Backend Build Image]
+    H[Copy Backend Build]
+    I[Copy Dynamo + NIXL]
+    J[Cuda Runtime<br/>nvcr.io/nvidia/cuda.XX.YY-runtime]:::gray
+    K[Install NATS + ETCD]
+    L[Runtime-specific dependencies]
+    M[pip install dynamo[Backend] && NIXL]
+    N[Backend Runtime Image]:::gray
+    O[Install CI/Test/Dev dependencies]
+    P[CI Minimum image]:::gray
+
+    %% Main build flow (left)
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+    E --> F
+    F --> G
+    G --> H
+
+    %% Runtime flow (right)
+    J --> K
+    K --> L
+    L --> M
+    M --> N
+    N --> O
+    O --> P
+
+    %% Cross-links
+    E -.-> I
+    D -.-> I
+    I -.-> M
+    H -.-> M
+
+    %% Styling
+    classDef gray fill:#e5e7eb,stroke:#333,stroke-width:1px;
+</code_block_to_apply_changes_from>
 
 The diagram above illustrates the proposed container strategy showing the relationships between:
 - Build Base Container with common dependencies
