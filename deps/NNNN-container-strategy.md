@@ -115,9 +115,7 @@ flowchart TD
     D[Build Dynamo]
     E[Dynamo Base Container]:::gray
     F[Build Backend-specific code]
-    G[Backend Build Image]
-    H[Copy Backend Build]
-    I[Copy Dynamo + NIXL]
+    G[Backend Build Image]:::gray
     J[Cuda Runtime<br/>nvcr.io/nvidia/cuda.XX.YY-runtime]:::gray
     K[Install NATS + ETCD]
     L[Runtime-specific dependencies]
@@ -133,7 +131,6 @@ flowchart TD
     D --> E
     E --> F
     F --> G
-    G --> H
 
     %% Runtime flow (right)
     J --> K
@@ -143,11 +140,9 @@ flowchart TD
     N --> O
     O --> P
 
-    %% Cross-links
-    E -.-> I
-    D -.-> I
-    I -.-> M
-    H -.-> M
+    %% Cross-links with text
+    E -.->|Copy Dynamo & NIXL Build Wheels| M
+    G -.->|Copy Backend build| M
 
     %% Styling
     classDef gray fill:#e5e7eb,stroke:#333,stroke-width:1px;
