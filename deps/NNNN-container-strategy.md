@@ -121,7 +121,7 @@ flowchart TD
     J[Cuda Runtime<br/>nvcr.io/nvidia/cuda.XX.YY-runtime]:::gray
     K[Install NATS + ETCD]
     L[Runtime-specific dependencies]
-    M[pip install dynamo[Backend] && NIXL]
+    M[pip install dynamo + Backend && NIXL]
     N[Backend Runtime Image]:::gray
     O[Install CI/Test/Dev dependencies]
     P[CI Minimum image]:::gray
