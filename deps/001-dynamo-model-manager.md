@@ -17,8 +17,8 @@ Maksim Khadkevich, Julien Mancuso, Ishan Dhanani, Kyle Kranen
 
 Dynamo workers require access to model files stored in repositories. The architecture supports multiple backend frameworks, with file type compatibility determined by the chosen backend. Currently, model files can be downloaded from various cloud storage services or accessed directly from the local filesystem.
 
-With model files becoming larger and cluster sizes growing, having every node fetch files from the cloud results in:
-  - Increasing ingress flow
+As model checkpoints become larger and cluster sizes grow, having every node fetch files from the cloud results in:
+  - Increased ingress flow
   - Higher latency for backend startup
   - Inefficient resource utilization
 
@@ -30,8 +30,8 @@ We propose a distributed proxy system that:
 ## Goals
 
 ### Primary Goals
-- **Startup Time Reduction**: Drastically decrease median startup time for Dynamo workers fetching model files from external servers
-- **Ingress Bandwidth Reduction**: Significantly reduce total ingress bandwidth by using a single inner data fetching node instead of multiple nodes
+- **Startup Time Reduction**: Reduce median startup time for Dynamo workers fetching model files from external servers
+- **Ingress Bandwidth Reduction**: Minimize total ingress bandwidth by using a single inner data fetching node instead of multiple nodes
 - **Versioning**: Automatically detect and update local cache when new model file versions are available
 - **TensorRT Models Pre-compilation**: Support pre-compilation of downloaded models for various TensorRT formats to further speed up start-up time
 
@@ -42,8 +42,8 @@ We propose a distributed proxy system that:
 - **Fast Checkpoint Transfer**: Optimize transfer between RL workloads and inference deployment with the NIXL library
 
 ### Non-Goals
-- **Optimized Routing**: Load balancing, network throttling, and advanced network features
-- **Security**: No additional security beyond existing file validation and authentication mechanisms
+- **Optimized Routing**: Load balancing, network throttling, and advanced network features are excluded to maintain simplicity and focus on core functionality
+- **Security**: No additional security beyond existing file validation and authentication mechanisms, as these are handled by the underlying storage systems
 
 ## Requirements
 
@@ -62,9 +62,9 @@ We propose a distributed proxy system that:
 - Handles thundering herd effect during cluster startup
 
 ### Caching Tiers
-1. Distributed storage for cold caching
-2. Per-pod in-memory caching (faster, shorter TTL)
-3. Local client cache in Dynamo nodes
+1. Distributed storage for cold caching (long-term storage)
+2. Per-pod in-memory caching (faster access, shorter TTL)
+3. Local client cache in Dynamo nodes (fastest access, shortest TTL)
 
 ### Database Requirements
 Minimal information storage:
@@ -76,11 +76,11 @@ Minimal information storage:
 - Pod ID with in-memory cache
 
 ### Third-Party Compatibility
-Initially, enhancement should support [Fluid](https://fluid-cloudnative.github.io/) as a data storage for models.
+Initially, the enhancement will support [Fluid](https://fluid-cloudnative.github.io/), a cloud-native data orchestration system that provides efficient data caching and acceleration capabilities. Fluid was chosen for its Kubernetes-native design and proven performance in similar use cases.
 
 There is already an example of [Fluid integration with Dynamo](https://github.com/ai-dynamo/dynamo/blob/main/docs/guides/dynamo_deploy/model_caching_with_fluid.md) in the main repository.
 
-We will be open to other data orchestrators down the roadmap.
+We will be open validating support for other data orchestrators in future releases.
 
 ## Architecture
 
@@ -104,11 +104,11 @@ We will be open to other data orchestrators down the roadmap.
 
 The Client API from the Model Manager Client library is intended to be a drop-in replacement for typical model downloaders such as HuggingFace's downloader.
 
-```
+```python
 from huggingface_hub import hf_hub_download
 import joblib
-const HF_TOKEN_ENV_VAR: &str = "HF_TOKEN";
 
+HF_TOKEN_ENV_VAR = "HF_TOKEN"
 REPO_ID = "YOUR_REPO_ID"
 FILENAME = "sklearn_model.joblib"
 
@@ -117,27 +117,27 @@ model = joblib.load(
 )
 ```
 
-The Model Manager abstracts away the complexity of model provider-specific implementations like huggingface, shielding the end user from the underlying details.
+The Model Manager abstracts away the complexity of model provider-specific implementations like HuggingFace, shielding the end user from the underlying details.
 
 Using the Model Manager Downloader, this process becomes as simple as:
 
-```
+```python
 from modelmanager_client import modelmanager_download
 import joblib
 
-let downloadInfo = DownloadInfo {
-    repo_id = "YOUR_REPO_ID",
-    filename = "sklearn_model.joblib",
-    host = "modelmanager-server",
-    provider = "HuggingFace",
-};
+download_info = {
+    "repo_id": "YOUR_REPO_ID",
+    "filename": "sklearn_model.joblib",
+    "host": "modelmanager-server",
+    "provider": "HuggingFace"
+}
 
-model = joblib.load
-    modelmanager_download(downloadInfo)
-);
+model = joblib.load(
+    modelmanager_download(download_info)
+)
 ```
 
-We will begin with HuggingFace for the initial release, with the long-term goal of the model manager being to support a wide range of storage providers — including cloud services like AWS S3 and Azure Storage, as well as custom solutions such as Weka, DDN, and others.
+We will begin with HuggingFace for the initial release, with the long-term goal of supporting a wide range of storage providers — including cloud services like AWS S3 and Azure Storage, as well as custom solutions such as Weka, DDN, and others.
 
 For future releases: Every model manager client will maintain a distributed hash table containing information about which client node holds which model and its associated metadata.
 When a new client or node comes online, it will use NIXL's cost API to identify the optimal node for transferring the model weights between the two nodes.
@@ -148,7 +148,7 @@ Model Manager is a Kubernetes application itself. It advertises to the Kubernete
 
 For instance, a model manager service can be described using the following Kubernetes service file:
 
-```
+```yaml
 apiVersion: v1
 kind: Service
 metadata:
@@ -162,9 +162,9 @@ spec:
   type: ClusterIP
 ```
 
-As an example, here is a deployment file for the model manager’s server itself:
+As an example, here is a deployment file for the model manager's server itself:
 
-```
+```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -179,8 +179,6 @@ spec:
       labels:
         app: modelmanager-server
     spec:
-      nodeSelector:
-        kubernetes.io/hostname: nnoble-desktop
       containers:
       - name: server
         image: modelmanager-server:latest
@@ -197,11 +195,11 @@ spec:
       volumes:
       - name: model-storage
         persistentVolumeClaim:
-          claimName: nnoble-pvc
+          claimName: model-storage-pvc
           readOnly: false
 ```
 
-From there, the applications using the Model Manager client within the cluster can simply access the Model Manager server by specifying the string "model-manager-server" in its configuration.
+From there, the applications using the Model Manager client within the cluster can simply access the Model Manager server by specifying the string "modelmanager-server" in its configuration.
 
 ## Alternative Solutions
 
