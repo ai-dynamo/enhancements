@@ -162,7 +162,7 @@ We had an intial discussion about the DEP where we primarily discussed the issue
 ### Specific examples we discussed
 
 <details>
-<summary>Example 1</summary>
+<summary>Expand for pain points</summary>
 
 Pain Points:
 
