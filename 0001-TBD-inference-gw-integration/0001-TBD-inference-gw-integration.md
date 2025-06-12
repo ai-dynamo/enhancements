@@ -82,7 +82,18 @@ Dynamo EPP **MUST** be compatible with Inference Gateway
 
 # Proposal
 
+## Problems
+1. Tight coupling with golang based tokenizer:
+  current llm-d based implementation has tight coupling between EPP and tokenizer. 
+  It's hard to scale/maintain it accross different LLM/VLM architectures.
+2. Larger tokens payload transfer from processor to worker: 
+ VLM encoded tokens generated in pre-processing/encode steps could be much larger payload than original request's (image_url)[https://github.com/ai-dynamo/dynamo/tree/main/examples/multimodal#client]. Updating the request body with tokens will increase payload size of request.
+
 ## Design Principles
+
+1. EPP should externalize pre-processing and/or routing decision
+2. Maintain full compatibility with inference gateway api
+3. Support offloading tokens to external storage if needed
 
 ## Architecture Overview
 
