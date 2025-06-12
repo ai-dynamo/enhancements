@@ -52,45 +52,9 @@ class VllmWorker:
     async def generate(self, request: PreprocessedRequest):
 ```
 
+# Class based component
 
-# Issues
-
-## 1.  Dynamo Context is a free-form dict
-Use unified Dynamo Identifier based on [component descriptor proposal](https://github.com/ai-dynamo/enhancements/blob/89d87e9b962a953cd9d5e66b205eda53a6810baa/enhancements/0000-component-descriptor-model.md#descriptor-types)
-
-```python
-
-class Identifier(BaseModel):
-    """Base descriptor for component identification."""
-    namespace: str
-    component: Optional[str] = None
-    endpoint: Optional[str] = None
-
-
-class Instance(BaseModel):
-    """Identifier with instance ID (immutable once created)."""
-    identifier: Identifier
-    instance_id: int
-
-```
-
-## 2. hard to get runtime inner details 
-
-Sample Issue:
-```
-VLLM_WORKER_ID = dynamo_context["endpoints"][0].lease_id()
-
-To get endpoints you have to know that there is a list of endpoints
-Have to guess which one is the endpoint you actually want
-```
-
-Resolution: 
-
-Instance provides direct access to operational entities and runtime
-```python
-VLLM_WORKER_ID = self.instance.instance_id
-```
-
+Example:
 
 ```python
 import asyncio
@@ -127,6 +91,54 @@ if __name__ == "__main__":
     uvloop.run(MyComponent.run())
 ```
 
+
+
+# Resolved Issues
+
+## 1.  Dynamo Context is a free-form dict
+Use unified Dynamo Identifier based on [component descriptor proposal](https://github.com/ai-dynamo/enhancements/blob/89d87e9b962a953cd9d5e66b205eda53a6810baa/enhancements/0000-component-descriptor-model.md#descriptor-types)
+
+```python
+
+class Identifier(BaseModel):
+    """Base descriptor for component identification."""
+    namespace: str
+    component: Optional[str] = None
+    endpoint: Optional[str] = None
+
+
+class Instance(BaseModel):
+    """Identifier with instance ID (immutable once created)."""
+    identifier: Identifier
+    instance_id: int
+
+```
+
+## 2. hard to get runtime inner details 
+
+Sample Issue:
+```
+VLLM_WORKER_ID = dynamo_context["endpoints"][0].lease_id()
+
+To get endpoints you have to know that there is a list of endpoints
+Have to guess which one is the endpoint you actually want
+```
+
+Resolution: 
+
+Instance provides direct access to operational entities and runtime
+```python
+VLLM_WORKER_ID = self.instance.instance_id
+```
+## 3 Inability to launch with python3
+
+with proposed footer user can launch individual component or graph (using `dynamo serve`)
+
+```python
+if __name__ == "__main__":
+    uvloop.install()
+    uvloop.run(MyComponent.run())
+```
 
 # References:
 - [component + discovery](https://github.com/ai-dynamo/enhancements/pull/11)
