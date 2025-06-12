@@ -131,8 +131,3 @@ if __name__ == "__main__":
 # References:
 - [component + discovery](https://github.com/ai-dynamo/enhancements/pull/11)
 - [Consolidating dynamo-serve and dynamo-run component API](https://github.com/ai-dynamo/enhancements/pull/10)
-
-
-# ~wip~
-
-## 3 unified settings
