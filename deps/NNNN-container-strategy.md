@@ -190,10 +190,10 @@ The minimum requirements and processes required for releasing these containers:
 - Containers image must be built in CI and built in the release pipeline. These containers can then be staged in the release pipeline before being pushed to NGC.
 - Container images must go through CVE & secrets scanning in CI to ensure no vulnerabilties exist or secrets are exposed.
 - Container images must be pushed to NGC, a public container registry for customers to download NVIDIA containers. To publish to NGC, the container must meet the following requirements:
-1. Container must not container any high/critical vulnerabilities
-2. Container must not container any secrets
-3. Container must be approved to be released as an open-source container
- Given the requirements to push to NGC include several checks (such as CVE & secrets scanning), we could temporarily use Github container registry to push the release containers.
+  * No high/critical vulnerabilities present in the container
+  * No secrets or sensitive information exposed in the container
+  * Container must be approved for open-source release
+  Given the requirements to push to NGC include several checks (such as CVE & secrets scanning), we could temporarily use Github container registry to push the release containers.
 - To ensure container freshness, The base container should be updated use the latest CUDA runtime images when available. This will reduce the vulnerability surface area for the containers. Can be a separate effort but is required for getting the containers published to NGC.
 
 
