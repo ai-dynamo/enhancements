@@ -137,11 +137,6 @@ class MyService:
      self.vllm_engine.health() == HEALTHY 
 ```
 
-### Health Check Endpoints
-
-- **`/health`**: Aggregated health status combining all registered health checks
-- **`/liveness`**: Basic liveness probe (component is running and responsive)
-- **`/readiness`**: Readiness probe (component is ready to serve requests)
 
 ### Rust Core Implementation design
 Modification will mainly happen in the `lib/src/runtime/distributed.rs` and `lib/src/runtime/component/endpoint.rs`
