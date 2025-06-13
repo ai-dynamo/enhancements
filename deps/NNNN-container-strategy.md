@@ -68,7 +68,7 @@ Pinning/Fixing dependencies will ensure a unified build environment reducing "it
 
 * Outline possible further improvements including external caching/multi-context docker builds to reduce build times. 
 
-# Minimize effort for providing multi-arch support across various backends for Dynamo by leveraging manylinux to build for multiple distributions
+* Minimize effort for providing multi-arch support across various backends for Dynamo by leveraging manylinux to build for multiple distributions
 
 * Outline a container release strategy which enables Dynamo team to release containers as part of Dynamo releases
 
