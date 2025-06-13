@@ -63,10 +63,10 @@ The system **MUST** provide a standardized approach to collect and expose native
 
 ### REQ 3 Component Health Check Endpoints
 
-Each Dynamo component **MUST** expose HTTP endpoints for health monitoring:
+Each Dynamo component **MUST** expose HTTP endpoint for health monitoring:
 - `/health` - Overall component health status
-- `/liveness` - Component liveness probe
-- `/readiness` - Component readiness probe
+We will use `/health` for both liveness and readiness probes. If there is extra health check needed from k8s operator, we can add more endpoints.
+
 
 ### REQ 4 Core Health Check Implementation
 
@@ -78,8 +78,6 @@ The Rust runtime **MUST** implement basic health checks including:
 
 The system **MUST** provide Python bindings that allow users to:
 - Register custom health check functions
-- Define component-specific health criteria
-- Customize health check response formats and thresholds
 
 
 
@@ -102,7 +100,11 @@ The proposed solution consists of three main components:
 
 ## Unified HTTP Server Port
 
-To be done
+Each Dynamo DRT/component will embed an HTTP server when it first registers an Endpoint. The HTTP server will be used to expose metrics and health check endpoints.
+
+Once the HTTP server is embedded, one entry contains the HTTP server port will be registered to etcd for discovery. Each DRT will have lock to avoid race condition and DRT is responsible to check whether the HTTP server has already been booted. i.e. When a DRT opens many endpoints at the same time, it will check if the HTTP server has already been booted and if not, it will boot the HTTP server and register the port to etcd.
+
+
 
 ## Metrics Architecture
 
@@ -142,7 +144,9 @@ class MyService:
 - **`/readiness`**: Readiness probe (component is ready to serve requests)
 
 ### Rust Core Implementation design
-To be done
+Modification will mainly happen in the `lib/src/runtime/distributed.rs` and `lib/src/runtime/component/endpoint.rs`
+
+Draft PR: https://github.com/ai-dynamo/dynamo/pull/1504
 
 ### Python Binding Interface design
 To be done
