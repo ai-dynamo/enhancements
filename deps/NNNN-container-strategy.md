@@ -66,8 +66,6 @@ This base image should operate as a single base container which can then be used
 
 Pinning/Fixing dependencies will ensure a unified build environment reducing "it works on my machine" problems or "this worked yesterday"
 
-* Outline possible further improvements including external caching/multi-context docker builds to reduce build times. 
-
 * Minimize effort for providing multi-arch support across various backends for Dynamo by leveraging manylinux to build for multiple distributions
 
 * Outline a container release strategy which enables Dynamo team to release containers as part of Dynamo releases
@@ -76,6 +74,7 @@ Pinning/Fixing dependencies will ensure a unified build environment reducing "it
 
 - Slim backend-specific runtime containers to use for performance testing. 
 - Unified build environment
+- Outline possible further improvements including external caching/multi-context docker builds to reduce build times. 
 
 
 ## Requirements
