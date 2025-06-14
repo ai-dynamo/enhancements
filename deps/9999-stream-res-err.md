@@ -1,8 +1,8 @@
-# Wrap Streaming Responses in Result<U, E>
+# Wrap Streaming Response in Result<U, E>
 
 **Status**: **Draft** | Under Review | Approved | Replaced | Deferred | Rejected
 
-**Authors**: [@kthui](https://github.com/kthui)
+**Authors**: [@nnshah1](https://github.com/nnshah1) [@kthui](https://github.com/kthui)
 
 **Category**: Architecture
 
@@ -10,9 +10,9 @@
 
 **Replaced By**: N/A
 
-**Sponsor**: [@nnshah1](https://github.com/nnshah1)
+**Sponsor**: [@ryanolson](https://github.com/ryanolson) [@grahamking](https://github.com/grahamking)
 
-**Required Reviewers**: [@ryanolson](https://github.com/ryanolson)
+**Required Reviewers**: [@ryanolson](https://github.com/ryanolson) [@grahamking](https://github.com/grahamking)
 
 **Review Date**: [Date for review]
 
@@ -54,20 +54,51 @@ N/A
 
 # Proposal
 
-Each response streamed should be wrapped in a `Result<U, E>`, where `U` is the response type and `E`
-is the error type, for propagating error occured while streaming responses from the server back to
-the client response stream listener.
+Each response streamed to be wrapped in a `Result<U, E>`, where `U` is the response type and `E` is
+the error type, for propagating error occured while streaming responses from the server back to the
+client response stream listener.
 
-Change the
+For instance, change the
 [`Ingress<SingleIn<T>, ManyOut<U>>`](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/ingress/push_handler.rs#L20)
 type to `Ingress<SingleIn<T>, ManyOut<Result<U, E>>>` and 
 [`Egress<SingleIn<T>, ManyOut<U>>`](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network.rs#L246-L247)
 type to `Egress<SingleIn<T>, ManyOut<Result<U, E>>>`.
 
-The `Result<...>` wrapper around the opaque response type provides the ability for the
+The `Result<U, E>` wrapper around the opaque response type `U` provides the ability for the
 network/router to relay error information back to the client response stream consumer. Without the
 additional wrapper, it is impossible for the network/router to yield an error response from a
 stream, because the response object is opaque to the network/router.
+
+The error type `E` is
+```rust
+#[derive(Serialize, Deserialize, Debug)]
+pub struct StreamError {
+    pub flags: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+```
+where each bit on the `flags` carries a boolean message. Currently, only the most significant bit is
+defined:
+```
+ 0: stream incomplete
+```
+and the `message` is optional and currently unused.
+
+At the end of the stream, the server will stream an extra error response to the client, with bit 0
+set, indicating the end of stream. If the client picks up the error response from the server with
+the end of stream bit set and then the stream ends, the client ends its response stream. If the
+stream ends without the error response with end of stream bit set, the client yields an extra error
+response with the stream incomplete bit set to its response stream, and then ends its response
+stream.
+
+At the client response stream consumer, if all the responses are Ok, then there is no error. If a
+response is Err, then an error occured while responses are being streamed from the server to the
+client, and the error can be determined by checking the `StreamError.flags`.
+
+The server response stream producer does not implement the `StreamError`, because it is used
+exclusively for handling network/router layer error. Any error at the server above the
+network/router layer should be handled within the opaque response type `U`.
 
 # Alternate Solutions
 
