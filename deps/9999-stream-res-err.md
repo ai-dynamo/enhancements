@@ -22,8 +22,8 @@
 
 # Summary
 
-Network level errors occur while streaming responses from the server back to the client must be made
-available to the client response stream listener.
+Network level errors may occur while streaming responses from the server back to the client. If they
+occur, these errors must be made available to the client response stream listener.
 
 # Motivation
 
