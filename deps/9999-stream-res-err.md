@@ -22,17 +22,17 @@
 
 # Summary
 
-Error occured while streaming responses from server back to client must be relayed back to the
-client response stream listener.
+Network level errors occur while streaming responses from the server back to the client must be made
+available to the client response stream listener.
 
 # Motivation
 
 The client response stream listener currently does not know why a stream is closed. Normally, a
-stream is closed due to the server has done with producing all the responses, but it can also due to
-failure of the server or the network connecting the client to the server.
+stream is closed because the server has finished producing all the responses, but it can also be due
+to failure of the server or the network connecting the client to the server.
 
 Knowing why the stream is closed at the network/router layer is vital to the ability of detecting
-fault while the server is streaming response back to the client. 
+faults while the server is streaming responses back to the client.
 
 For instance, in the current
 [router implementation](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/egress/addressed_router.rs#L165-L174),
@@ -54,9 +54,9 @@ N/A
 
 # Proposal
 
-Each response streamed to be wrapped in a `Result<U, E>`, where `U` is the response type and `E` is
-the error type, for propagating error occured while streaming responses from the server back to the
-client response stream listener.
+Each response streamed will be wrapped in a `Result<U, E>`, where `U` is the response type and `E`
+is the error type, for propagating errors that occur while streaming responses from the server back
+to the client response stream listener.
 
 For instance, change the
 [`Ingress<SingleIn<T>, ManyOut<U>>`](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/ingress/push_handler.rs#L20)
@@ -79,11 +79,14 @@ pub struct StreamError {
 }
 ```
 where each bit on the `flags` carries a boolean message. Currently, only the most significant bit is
-defined:
+used:
 ```
  0: stream incomplete
+ 1: (reserved)
+...
+31: (reserved)
 ```
-and the `message` is optional and currently unused.
+The `message` is optional and currently unused.
 
 At the end of the stream, the server will stream an extra error response to the client, with bit 0
 set, indicating the end of stream. If the client picks up the error response from the server with
@@ -93,12 +96,13 @@ response with the stream incomplete bit set to its response stream, and then end
 stream.
 
 At the client response stream consumer, if all the responses are Ok, then there is no error. If a
-response is Err, then an error occured while responses are being streamed from the server to the
+response is Err, then an error occurred while responses were being streamed from the server to the
 client, and the error can be determined by checking the `StreamError.flags`.
 
-The server response stream producer does not implement the `StreamError`, because it is used
-exclusively for handling network/router layer error. Any error at the server above the
-network/router layer should be handled within the opaque response type `U`.
+The server response stream producers do not implement the `StreamError`, because it is used
+exclusively for handling network/router layer errors. Any error at the server above the
+network/router layer should be handled within the opaque response type `U`, for instance the
+`Annotated<R>` wrapper.
 
 # Alternate Solutions
 
@@ -113,13 +117,72 @@ wrapper, such that in `ManyOut<U>`, `U = Result<...>`.
 
 **Cons:**
 
-* It is cumbersome for each and every client implementations to implement the same basic error
+* It is cumbersome for each and every client implementation to implement the same basic error
 detection and reporting mechanism that can be easily done at the network/router layer.
 
 **Reason Rejected:**
 
-* This should be done at the network/router layer.
+* Network error handling should be done by the network/router layer.
 
 **Notes:**
 
 N/A
+
+## Alt 2 Add a Fault Tolerance Layer on top of the current Router Layer
+
+Add a FaultTolerance Layer that implements the `Result<...>` wrapper that will become the `U` type
+at the current Router Layer. The FaultTolerance Layer should implement the same
+[`PushWorkHandler`](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network.rs#L323)
+trait and accept objects implementing the
+[`AsyncEngine`](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/engine.rs#L104)
+trait, so it shares the same interface as the Router.
+
+**Pros:**
+
+* No change to the current network/router interface, as the `U` opaque type is retained.
+* Fault Tolerance implementations can be added to this layer, and written in Rust.
+
+**Cons:**
+
+* The additional layer is overly complicated, because the FaultTolerance Layer is basically an
+extension to the Router Layer without overriding any Router functionalities.
+
+**Reason Rejected:**
+
+* Network error handling should be done by the network/router layer.
+
+**Notes:**
+
+The current Python bindings can be updated from
+```
+Python binding    |    runtime
+|                 |    |
+`--> Client       |    `--> component
+     |            |    |    |
+     |            |    |    `--> client <.
+     |            |    |                 | owns an instance of; and
+     |            |    `--> pipeline     | obtains available instances from etcd and tracks/reports downed ones
+     |            |         |            |
+     |            |         `--> network/router
+     |            |                      ^
+     `-----------------------------------'
+       owns an instance of
+```
+to
+```
+Python binding    |    runtime
+|                 |    |
+`--> Client       |    `--> component
+     |            |    |    |
+     |            |    |    `--> client <.
+     |            |    |                 | owns an instance of; and
+     |            |    `--> pipeline     | obtains available instances
+     |            |         |            |
+     |            |         `--> network/router <--.
+     |            |         |                      | owns an instance of; and
+     |            |         `--> fault_tolerance --' reports downed instances over router to client
+     |            |              ^
+     `---------------------------'
+       owns an instance of
+```
+when creating a client.
