@@ -65,7 +65,7 @@ Dynamo EPP **MUST** be compatible with Inference Gateway
 
 This architecture unifies Inference Gateway with Dynamo Graph deployment. See diagram below for detailed component interactions.
 
-![Architecture Diagram](./arch3.png)
+![Architecture Diagram](./arch.png)
 
 ### Data flow
 
@@ -114,9 +114,12 @@ Note: This could be ideally routed to Frontend service because Frontend/Processo
 
 ### Decision Points
 
-#### EPP integration with Dynamo: plugin vs sidecar vs external callout service
+#### 1. EPP integration with Dynamo: plugin vs sidecar vs external callout service
 
-##### sidecar container 
+![EPP integration with Dynamo](./alt-epp-dyn.png)
+##### sidecar container (Preffered)
+Needs support in EPP to deploy a sidecar container and specify the port to request at.
+
 Pro
 - Reduced network hops: Direct communication between EPP and Dynamo components within the same pod
 - Lower latency: No network overhead for inter-component communication
@@ -147,6 +150,15 @@ Con
 - Hard to scale across models
 - Tight coupling with golang based implementation
 
+#### 2. Dynamo component co-location
+Issue: Higher latency due to several network hops
+This is a dynamo specific problem/question. It's orthogonal to IGW but correlated to some extent. (may be it'd be a separte DEP)
+
+![Dynamo component co-location](./dyn_comp_deployment.png)
+alt.1: Single binary/pod
+alt.2: Separate pods
+alt.3: Frontend as entrypoint and Processor/Router as sidecars
+
 ## Problems
 1. Currently EPP schedluling has tightly coupling with in-porcess preprocessing.
   It's hard to scale/maintain it accross different models.
@@ -176,7 +188,7 @@ Each dynamo component deployment creates a Kuberenetes deployment which manages 
 | Module | Dynamo | IGW
 | :---- | :---- |
 | **Event Plane** | Push based KV/capacity related metric events using Nats | Scrapers populate Datastore with metrics for a pod (pull based)
-| **Service Plane** | Custom nats/tcp based protocol, uses json serialization | Standard HTTP based protocol
+| **Service/Data Plane** | Custom nats/tcp based protocol, uses json serialization | Standard HTTP based protocol
 | **Control Plane** | Planner is responsible for scaling decisions, Orchestration happens via operator | TODO
 
 
