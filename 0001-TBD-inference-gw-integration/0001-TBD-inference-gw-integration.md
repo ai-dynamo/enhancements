@@ -89,7 +89,7 @@ Dynamo EPP **MUST** be compatible with Inference Gateway
 2. Larger tokens payload transfer from processor to worker: 
  VLM encoded tokens generated in pre-processing/encode steps could be much larger payload than original request's (image_url)[https://github.com/ai-dynamo/dynamo/tree/main/examples/multimodal#client]. Updating the request body with tokens will increase payload size of request.
 
-## Design Principles
+## Guiding Principles
 
 1. EPP should externalize pre-processing and/or routing decision
 2. Maintain full compatibility with inference gateway api
@@ -102,6 +102,31 @@ The updated architecture unifies Inference Gateway with Dynamo Graph deployment.
 ![Architecture Diagram](./arch1.png)
 
 ## Sequence Diagram
+
+Inference GW Request flow
+```
+HTTP Request
+     │
+     ▼
+┌─────────────┐    Extract model name   ┌──────────────────┐
+│   Gateway   │ ──────────────────────► │ InferenceModel   │
+│ (HTTPRoute) │                         │ (Model Config)   │
+└─────────────┘                         └──────────────────┘
+     │                                           │
+     │ Route to backend                          │ References
+     ▼                                           ▼
+┌─────────────┐    Smart routing via     ┌──────────────────┐
+│InferencePool│ ◄─────────────────────── │ Endpoint Picker  │
+│ (Compute)   │      EPP extension       │ Extension (EPP)  │
+└─────────────┘                          └──────────────────┘
+     │
+     ▼
+┌─────────────┐
+│ Model Server│
+│    Pods     │
+└─────────────┘
+```
+
 
 ```mermaid
 sequenceDiagram
