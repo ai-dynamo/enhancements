@@ -37,7 +37,6 @@ The current Inference Gateway is tightly coupled with model's tokenizer. However
 | **Dynamo EPP** | Enhanced Endpoint Picker Protocol service with Dynamo integration |
 | **Dynamo Processor** | Dynamo component responsible for request tokenization and preprocessing |
 | **Dynamo Router** | Dynamo component responsible for KV aware Routing strategy |
-| **Token Cache / Side Channel** | External storage system for tokenized request |
 
 ## Acronyms & Abbreviations
 
