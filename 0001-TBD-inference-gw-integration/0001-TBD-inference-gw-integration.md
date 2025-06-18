@@ -24,7 +24,7 @@
 
 This proposal outlines the integration of Dynamo components with the Gateway API Inference Extension. 
 
-## Acronyms & Abbreviations
+## Acronyms
 
 **EPP:** Endpoint Picker Protocol
 **IGW:** Inference Gateway
@@ -69,6 +69,49 @@ This architecture unifies Inference Gateway with Dynamo Graph deployment. See di
 
 ### Data flow
 
+1. The client sends an HTTP inference request to the Gateway.
+2. Gateway receives the request and extracts the model name and relevant metadata.  
+   Gateway consults the InferenceModel configuration to determine the inference pool (dynamo graph) to route the request.
+3. Gateway calls EPP over grpc for worker scehduling based on envoy ext_proc protocol.
+4. EPP forwards the request to Frontend sidecar
+```yaml
+Request: 
+    - req header: set x-routing-request: true
+    - req body: original request body (For example, Chat completion request)
+
+Respose:
+    worker_id: this is dynamo specific worker_id
+    token_ids: (Optional) tokens generated from processor step
+```
+4. Dynamo Frontend accepts OAI request and forwards request through dynamo request plane (nats)
+5. Dynamo Processor performs necessary pre-processing and generates tokens. It calls routers to decide worker_id.
+6. Dynamo Router takes tokens as input and decides worker_id based on scheduling policies and KV metrics
+7. EPP sets headers (x-gateway-destination-endpoint and x-gateway-worker-id)
+Optional optimization: We can inject the tokens in request body to avoid recomputing tokens in service path.
+Note: `tokens` key in request body is not OpenAI compatible.
+```
+Set Req Header: 
+- `x-gateway-destination-endpoint`: worker address of the Dynamo frontend pod
+- `x-gateway-worker-id`: Dynamo worker id of Backend LLM worker instance 
+
+Add to Req Body (Optional):
+- `tokens`
+```
+8. IGW forwards the request to appropriate Dynamo frontend based on request header `x-gateway-destination-endpoint`
+Note: This could be ideally routed to Frontend service because Frontend/Processor deployment is decoupled from LLM workers.
+
+9. Processor skips pre-processing 
+- `tokens` in request body and skips pre-processing step
+- `x-gateway-worker-id` in the request and skips call to router
+
+10. Request is sent to LLM Backend and response is streamed back through 
+- processsor: Postprocessing steps
+- Frontend: Change response shape from Dynamo native to OpenAI compatible response
+
+**Notes:**
+- All inter-component communication within Dynamo (Processor, Router, Workers) uses NATS with two-part JSON messages.
+- Deployment is unified via a single Helm chart for version compatibility.
+
 ### Decision Points
 
 #### EPP integration with Dynamo: plugin vs sidecar vs external callout service
@@ -81,6 +124,7 @@ Pro
 
 Con
 - Tightly coupled scaling: Scaling decisions for EPP and Frontend are coupled
+- Deployment of EPP is coupled with Dynamo sidecar image. Version upgrades should be done in-sync. 
 
 ##### external callout service
 Pro
