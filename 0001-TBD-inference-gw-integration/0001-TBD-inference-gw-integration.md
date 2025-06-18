@@ -91,19 +91,19 @@ Dynamo EPP **MUST** be compatible with Inference Gateway
 
 ## Guiding Principles
 
-1. EPP should externalize pre-processing and/or routing decision
-2. Maintain full compatibility with inference gateway api
-3. Support offloading tokens to external storage if needed
+1. Composibiltiy: EPP should externalize scheduling decision to dynamo router
+2. DRY: Aim to reduce duplications in preprocessing steps (tokenization, prompt template application)
+3. Compatibility: Maintain full compatibility with inference gateway api
 
 ## Architecture Overview
 
-The updated architecture unifies Inference Gateway with Dynamo Graph deployment. See architecture diagram below for detailed component interactions.
+This architecture unifies Inference Gateway with Dynamo Graph deployment. See diagram below for detailed component interactions.
 
 ![Architecture Diagram](./arch1.png)
 
 ## Sequence Diagram
 
-Inference GW Request flow
+Inference Gateway Request flow:
 ```
 HTTP Request
      │
@@ -128,6 +128,7 @@ HTTP Request
 ```
 
 
+## TODO: replace with simpler version
 ```mermaid
 sequenceDiagram
     participant Client
@@ -228,16 +229,15 @@ sequenceDiagram
 
 ### Dynamo EPP (ext-proc)
 - Integrates with Gateway via ext-proc protocol
-- Parses model names and sets `X-Gateway-Model-Name` header
+- Parses model names and sets headers `X-Gateway-Model-Name` 
 - Calls External LLM Processor for tokenization
 - Handles both external and internal routing strategies
-- Manages token key/value header and body modifications
 
 ### Dynamo Processor
 - Performs request tokenization
 - Supports both routing modes (external via Router, internal via EPP)
-- Manages token transfer strategies (cache vs direct)
-- Returns worker selection and dynamo backend framework (vLLM/Trtllm/sglang) agnostic request 
+- 
+- Optional: Returns worker selection and dynamo backend framework (vLLM/Trtllm/sglang) agnostic request 
 
 ### Dynamo Router Service
 - Implements KV-aware routing algorithms
@@ -265,12 +265,9 @@ sequenceDiagram
 
 ### Headers
 - `X-Gateway-Model-Name`: Set by EPP from parsed model name in user request's body
-- `x-req-tokens-key`: Token cache key (when using external cache)
-- `x-req-tokens-value`: Direct token values (alternative to cache)
 
 ## Deferred to Implementation
 
-- Specific token cache implementation details (Redis vs alternatives)
 - Fallback mechanisms for external service failures
 - Metrics and observability integration
 
@@ -279,15 +276,14 @@ sequenceDiagram
 ## Phase 1 Core Integration
 **Supported API / Behavior:**
 - External tokenization via Dynamo Processor
-- External scheduling/routiung using Dynamo Router
-- Direct token value passing to workers
+- External scheduling/routing using Dynamo Router
 
 **Not Supported:**
-- External cache-based token passing 
+- Pass tokens in request body
 
-## Phase 2 Tokens transfer thrugh side channel/cache
+## Phase 2 Tokens transfer
 **Supported API / Behavior:**
-- External cache-based token passing 
+- Pass tokens in request body
 
 # Related Proposals
 * Gateway API Inference Extension Architecture
@@ -296,7 +292,7 @@ sequenceDiagram
 
 # Alternate Solutions
 
-## Alt 1 Direct Tokenizer Integration in EPP (current EPP architecture)
+## Alt 1 Direct Tokenizer Integration in golang based EPP (current EPP architecture)
 
 **Pros:**
 - Simpler architecture without additional layer
@@ -312,8 +308,15 @@ sequenceDiagram
 - Reduces portability across models
 - Increases complexity/TCO by using golang based tokenizer
 
-## Alt 2 Sidecar Pattern
-- TODO
+## Alt 2 Frontend+Processor as Sidecar 
+**Pros:**
+- Lesser network hops from IGW to worker
+- Can use Zmq/IPC to avoid a network round trip through Nats
+
+**Cons:**
+- Harder to maintain separation of concerns
+- Hard to scale Frontend+Processor (cpu bound) independent of workers (gpu bound)
+- Added complexity at operator and bootstraping
 
 ## References
 
