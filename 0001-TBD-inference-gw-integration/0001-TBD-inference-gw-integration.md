@@ -34,6 +34,7 @@ This proposal outlines the integration of Dynamo components with the Gateway API
 * Support Inference gataway concepts in Dynamo 
 * Maintain backward compatibility with existing EPP functionality
 * Reuse dynamo components
+* Minimize network hops
 
 ### Non Goals
 
@@ -45,19 +46,15 @@ This proposal outlines the integration of Dynamo components with the Gateway API
 
 ### REQ 1 External Processing Integration
 
-Dynamo EPP (Endpoint picker) **MUST** support calling LLM processors for request preprocessing and tokenization while maintaining the existing ext-proc interface.
+Dynamo EPP (Endpoint picker) **MUST** support calling Frontend and processor for request preprocessing and scheduling while maintaining the existing ext-proc interface.
 
-### REQ 2 Flexible Routing Strategies
+### REQ 3 Unified Dynamo deployment
 
-The system **SHOULD** support both external routing (via Dynamo Router) and internal EPP scheduling based on request configuration.
+Dynamo EPP and components (Frontend, Processor, Router, Workers) **MUST** be deployable within Kubernetes through a unified helm chart to maintain version compatibility.
 
-### REQ 4 Unified Dynamo deployment
+### REQ 4 Maintain compatibility with Inference Gateway protocols
 
-Dynamo EPP and components (Processor, Router, Workers) **MUST** be deployable within Kubernetes through a unified helm chart to maintain version compatibility.
-
-### REQ 5 Maintain compatibility with Inference Gateway protocols
-
-Dynamo EPP **MUST** be compatible with Inference Gateway
+Dynamo EPP **MUST** be compatible with Inference Gateway API and concepts (InferencePool, InferenceModel)
 
 # Proposal
 
@@ -155,9 +152,24 @@ Issue: Higher latency due to several network hops
 This is a dynamo specific problem/question. It's orthogonal to IGW but correlated to some extent. (may be it'd be a separte DEP)
 
 ![Dynamo component co-location](./dyn_comp_deployment.png)
-alt.1: Single binary/pod
-alt.2: Separate pods
-alt.3: Frontend as entrypoint and Processor/Router as sidecars
+
+##### Alt.1: Single binary/pod
+ component is deployed as independently scalable deployment.
++ lower latency
++ Reduced network hops
++ tight coupling
+- Scaled as a unit
+
+##### Alt.2: Separate deployment
+Each component is deployed as independently scalable deployment.  
+This is current state.
+
++ simpler to scale
+- More hops
+
+##### Alt.3: Frontend as entrypoint and Processor/Router as sidecars
++ easier to deploy and manage
+- Scaled as a unit
 
 ## Problems
 1. Currently EPP schedluling has tightly coupling with in-porcess preprocessing.
