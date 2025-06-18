@@ -22,7 +22,7 @@
 
 # Summary
 
-This proposal outlines the integration of Dynamo components with the Gateway API Inference Extension. 
+This proposal outlines the integration of Dynamo components with the [Gateway API Inference Extension](https://gateway-api-inference-extension.sigs.k8s.io)
 
 ## Acronyms
 
@@ -109,6 +109,35 @@ Note: This could be ideally routed to Frontend service because Frontend/Processo
 - All inter-component communication within Dynamo (Processor, Router, Workers) uses NATS with two-part JSON messages.
 - Deployment is unified via a single Helm chart for version compatibility.
 
+### Mapping Inference Pool/Model with Dynamo
+1. There would be 1:1 mapping between an inference pool, a dynamo graph deployment and EPP deployment.
+Reasoning: Dynamo Graph represents a cohesive deployment unit with compute resources. Each dynamo graph deployment should correspond to one Inference Pool. 
+
+2. EPP is 1:1 with Inference Pool and responsible for scheduling decisions within a dynamo graph.
+
+3. Inference Model maps user-facing model names to backend implementations.  Multiple inference models can refer to same Inference Pool (Dynamo Graph).
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│ Inference Model │    │ Inference Model  │    │ Inference Model │
+│   (gpt-4)       │    │  (my-lora)       │    │   (gemma)       │
+└─────────┬───────┘    └─────────┬────────┘    └─────────┬───────┘
+          └──────────────────────┼───────────────────────┘
+                                 │ N:1
+                    ┌────────────▼────────────┐
+                    │    Inference Pool       │
+                    └────────────┬────────────┘
+                                 │ 1:1
+                    ┌────────────▼────────────┐
+                    │      Dynamo EPP         │
+                    └────────────┬────────────┘
+                                 │ 1:1
+                    ┌────────────▼────────────┐
+                    │ Dynamo Graph Deployment │
+                    └─────────────────────────┘
+```
+
+
 ### Decision Points
 
 #### 1. EPP integration with Dynamo: plugin vs sidecar vs external callout service
@@ -154,7 +183,8 @@ This is a dynamo specific problem/question. It's orthogonal to IGW but correlate
 ![Dynamo component co-location](./dyn_comp_deployment.png)
 
 ##### Alt.1: Single binary/pod
- component is deployed as independently scalable deployment.
+3 required components (Frontend/Processor/Router) are deployed as independently scalable deployment using `dynamo-run`
+
 + lower latency
 + Reduced network hops
 + tight coupling
@@ -183,10 +213,12 @@ This is current state.
 2. DRY: Aim to reduce duplications in preprocessing steps (tokenization, prompt template application)
 3. Compatibility: Maintain full compatibility with inference gateway api
 4. Reduce network hops to minimize tail latency
+5. EPP doesn't replace Dynamo's Router but delegates scheduling decisions to it, preserving Dynamo's scheduling logic
 
 ## Design constraints
 - Dynamo componetns (processor, router) use dynamo native transport (two part json messsages over nats)
 - Dynamo does not support co-scheduling in disaggregated mode. Currently request flow goes from decode to prefill.
+- An EPP can only be associated with a [single InferencePool](https://gateway-api-inference-extension.sigs.k8s.io/api-types/inferencepool)
 
 ## Current state of IGW and Dynamo
 
