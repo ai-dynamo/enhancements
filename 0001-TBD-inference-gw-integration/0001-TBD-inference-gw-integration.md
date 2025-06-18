@@ -102,7 +102,7 @@ Dynamo EPP **MUST** be compatible with Inference Gateway
 
 This architecture unifies Inference Gateway with Dynamo Graph deployment. See diagram below for detailed component interactions.
 
-![Architecture Diagram](./arch1.png)
+![Architecture Diagram](./arch2.png)
 
 
 ### Dynamo Graph deployment
