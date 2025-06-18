@@ -10,7 +10,7 @@
 
 **Replaced By**: [Link of previous proposal if applicable] 
 
-**Sponsor**: [Name of code owner or maintainer to shepard process]
+**Sponsor**: Itay, Maksim, Neelay
 
 **Required Reviewers**: [Names of technical leads that are required for acceptance]
 
@@ -24,19 +24,6 @@
 
 This proposal outlines the integration of Dynamo components with the Gateway API Inference Extension. 
 
-1. **External Tokenization**: Preprocessing requests outside the gateway for specialized tokenization logic
-2. **KV-Aware Routing**: Intelligent routing based on prefix cache status and token analysis
-3. **Flexible side channel to offload tokens**: Support for both external cache and direct token passing strategies. This would be helpful for transfering large blob of tokens for VLMs (image/audio/video tokens)
-4. **Unified Dynamo Architecture**: Consolidated deployment model for all processing components
-
-## Terminology & Definitions
-
-| Term | Definition |
-| :---- | :---- |
-| **Dynamo EPP** | Enhanced Endpoint Picker Protocol service with Dynamo integration |
-| **Dynamo Processor** | Dynamo component responsible for request tokenization and preprocessing |
-| **Dynamo Router** | Dynamo component responsible for KV aware Routing strategy |
-
 ## Acronyms & Abbreviations
 
 **EPP:** Endpoint Picker Protocol
@@ -44,25 +31,15 @@ This proposal outlines the integration of Dynamo components with the Gateway API
 
 ## Goals
 
-* Integrate Dynamo Processor for request preprocessing and tokenization
-* Enable KV-aware routing through Dynamo Router Service
-* Support flexible token management (cache keys vs direct values)
-* Provide unified deployment architecture for all Dynamo components
+* Support Inference gataway concepts in Dynamo 
 * Maintain backward compatibility with existing EPP functionality
+* Reuse dynamo components
 
 ### Non Goals
 
-* Replace existing EPP internal scheduling completely
+* Replace existing EPP internal scheduling
 * Modify core Gateway API specifications
-* Change existing worker pod interfaces significantly
-
-## Current state of IGW and Dynamo
-
-| Module | Dynamo | IGW
-| :---- | :---- |
-| **Event Plane** | Push based KV/capacity related metric events using Nats | Scrapers populate Datastore with metrics for a pod (pull based)
-| **Service Plane** | Custom nats/tcp based protocol, uses json serialization | Standard HTTP based protocol
-| **Control Plane** | Planner is responsible for scaling decisions, Orchestration happens via operator | TODO
+* Change existing Dynamo worker interfaces significantly
 
 ## Requirements
 
@@ -84,68 +61,17 @@ Dynamo EPP **MUST** be compatible with Inference Gateway
 
 # Proposal
 
-## Problems
-1. Currently EPP schedluling has tightly coupling with in-porcess preprocessing.
-  It's hard to scale/maintain it accross different models.
-
-2. double tokenization
-
-3. 
-
-## Guiding Principles
-
-1. Composibiltiy: EPP should externalize scheduling decision to dynamo router
-2. DRY: Aim to reduce duplications in preprocessing steps (tokenization, prompt template application)
-3. Compatibility: Maintain full compatibility with inference gateway api
-4. Reduce network hops to minimize tail latency
-
-## Design constraints
-- Dynamo componetns (processor, router) use dynamo native transport (two part json messsages over nats)
-- Dynamo does not support co-scheduling in disaggregated mode. Currently request flow goes from decode to prefill.
-
 ## Architecture Overview
 
 This architecture unifies Inference Gateway with Dynamo Graph deployment. See diagram below for detailed component interactions.
 
-![Architecture Diagram](./arch2.png)
+![Architecture Diagram](./arch3.png)
 
-
-### Dynamo Graph deployment
-A `Dynamo Graph` contains one or more `Dynamo Component`s and this one-to-many relation is reflected in corresponding Kubernetes deployment Kubernetes CRs DynamoGraphDeployment and DynamoComponentDeployments respectively.
-
-Each dynamo component deployment creates a Kuberenetes deployment which manages component's pods.
-
-![Dynamo Graph Deployment](./graph_deployment.png)
-
-### Inference Gateway Request Flow:
-
-```
-HTTP Request
-     │
-     ▼
-┌─────────────┐    Extract model name   ┌──────────────────┐
-│   Gateway   │ ──────────────────────► │ InferenceModel   │
-│ (HTTPRoute) │                         │ (Model Config)   │
-└─────────────┘                         └──────────────────┘
-     │                                           │
-     │ Route to backend                          │ References
-     ▼                                           ▼
-┌─────────────┐    Smart routing via     ┌──────────────────┐
-│InferencePool│ ◄─────────────────────── │ Endpoint Picker  │
-│ (Compute)   │      EPP extension       │ Extension (EPP)  │
-└─────────────┘                          └──────────────────┘
-     │
-     ▼
-┌─────────────┐
-│ Model Server│
-│    Pods     │
-└─────────────┘
-```
-
+### Data flow
 
 ### Decision Points
 
-#### EPP Extension to Dynamo: plugin vs sidecar vs external callout service
+#### EPP integration with Dynamo: plugin vs sidecar vs external callout service
 
 ##### sidecar container 
 Pro
@@ -169,107 +95,102 @@ Con
 ##### plugin
 Pro
 - Minimum number of network hops
-- Most optimized solution
+- Simpler architecture without additional layer
+- Lower latency for request processing
 
 Con
 - Dynamo runtime/component don't have native integration with golang
 - Hard to scale across models
 - Tight coupling with golang based implementation
 
-#### Frontend as a sidecar container 
+## Problems
+1. Currently EPP schedluling has tightly coupling with in-porcess preprocessing.
+  It's hard to scale/maintain it accross different models.
+
+2. double tokenization during scheduling and service path
+
+## Guiding Principles
+
+1. Composibiltiy: EPP should externalize scheduling decision to dynamo router
+2. DRY: Aim to reduce duplications in preprocessing steps (tokenization, prompt template application)
+3. Compatibility: Maintain full compatibility with inference gateway api
+4. Reduce network hops to minimize tail latency
+
+## Design constraints
+- Dynamo componetns (processor, router) use dynamo native transport (two part json messsages over nats)
+- Dynamo does not support co-scheduling in disaggregated mode. Currently request flow goes from decode to prefill.
+
+## Current state of IGW and Dynamo
+
+### Dynamo Graph deployment
+A `Dynamo Graph` contains one or more `Dynamo Component`s and this one-to-many relation is reflected in corresponding Kubernetes deployment Kubernetes CRs DynamoGraphDeployment and DynamoComponentDeployments respectively.
+
+Each dynamo component deployment creates a Kuberenetes deployment which manages component's pods.
+
+![Dynamo Graph Deployment](./graph_deployment.png)
+
+| Module | Dynamo | IGW
+| :---- | :---- |
+| **Event Plane** | Push based KV/capacity related metric events using Nats | Scrapers populate Datastore with metrics for a pod (pull based)
+| **Service Plane** | Custom nats/tcp based protocol, uses json serialization | Standard HTTP based protocol
+| **Control Plane** | Planner is responsible for scaling decisions, Orchestration happens via operator | TODO
 
 
-### TODO: Sequence diagram
-
-### TODO: headers and req/response message formats
-
-# Implementation Details
-
-## Dynamo Components
-
-### Dynamo EPP (ext-proc)
-- Integrates with Gateway via ext-proc protocol
-- Parses model names and sets headers `X-Gateway-Model-Name` 
-- Calls LLM Processor for tokenization
-
-### Dynamo Processor
-- Performs request tokenization
-- Optional: Returns worker selection and dynamo backend framework (vLLM/Trtllm/sglang) agnostic request 
-
-### Dynamo Router Service
-- Implements KV-aware routing algorithms
-- Analyzes token_ids for optimal worker selection based on prefix cache
-
-### Dynamo Worker Pods
-- Perform LLM inference with preprocessed tokens
-- Support both token retrieval methods (cache keys, direct values)
-- Maintain compatibility with existing worker interfaces
-- exposes HTTP endpoint for direct intgerration with Inference gateway
-
-### Headers
-- `X-Gateway-Model-Name`: Set by EPP from parsed model name in user request's body
+### Inference Gateway Request Flow:
+```
+HTTP Request
+     │
+     ▼
+┌─────────────┐    Extract model name   ┌──────────────────┐
+│   Gateway   │ ──────────────────────► │ InferenceModel   │
+│ (HTTPRoute) │                         │ (Model Config)   │
+└─────────────┘                         └──────────────────┘
+     │                                           │
+     │ Route to backend                          │ References
+     ▼                                           ▼
+┌─────────────┐    Smart routing via     ┌──────────────────┐
+│InferencePool│ ◄─────────────────────── │ Endpoint Picker  │
+│ (Compute)   │      EPP extension       │ Extension (EPP)  │
+└─────────────┘                          └──────────────────┘
+     │
+     ▼
+┌─────────────┐
+│ Model Server│
+│    Pods     │
+└─────────────┘
+```
 
 ## Deferred to Implementation
 - Fallback mechanisms for failures
 - Metrics and observability integration
-
-# Implementation Phases
-
-## Phase 1 Core Integration
-**Supported API / Behavior:**
-- External tokenization via Dynamo Processor
-- External scheduling/routing using Dynamo Router
-
-**Not Supported:**
-- Pass tokens in request body
-
-## Phase 2 Tokens transfer
-**Supported API / Behavior:**
-- Pass tokens in request body
-
-# Related Proposals
-* Gateway API Inference Extension Architecture
-* EPP Architecture Proposal 
-* Model Server Protocol
 
 # Alternate Solutions
 
 ## Alt 1 Direct Tokenizer Integration in golang based EPP (current EPP architecture)
 
 **Pros:**
-- Simpler architecture without additional layer
-- Lower latency for request processing
-- Fewer network hops
-
 **Cons:**
 - Less flexible for different models
 - Harder to maintain separation of concerns
-
-**Reason Rejected:**
-- Violates Gateway API integration principles
-- Reduces portability across models
-- Increases complexity/TCO by using golang based tokenizer
 
 # Alt 2: Tokenization Extension Chain
 Instead of embedding tokenization in EPP, create a dedicated tokenization extension that runs before EPP in the processing chain:
 
 ```
-Client → Tokenization Extension → EPP → Model Server
+Client -> Tokenization Extension -> EPP ->  Model Server
 ```
 
 Pro:
 - Follows Gateway API's extensible processing chain philosophy
 - Separates concerns
 - Can be reused across different routing strategies
-- Avoids EPP becoming monolithic
 
 Con:
+- complicated deployment
 - Additional network hop
 - More complex chain management
 
-
-## References
-
+# Related Proposals
 * [Gateway API Inference Extension Documentation](https://gateway-api-inference-extension.sigs.k8s.io/)
 * [Envoy External Processing Filter](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ext_proc_filter)
 * [Gateway API Specification](https://gateway-api.sigs.k8s.io/)
