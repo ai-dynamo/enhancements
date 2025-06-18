@@ -234,12 +234,17 @@ HTTP Request
 
 # Alternate Solutions
 
-## Alt 1 Direct Tokenizer Integration in golang based EPP (current EPP architecture)
+## Alt 1 Entire Dynamo Graph as a blackbox
+
+![Dynamo Graph as a blackbox](./alt_dyn_black_box.png)
 
 **Pros:**
++ Simple to deploy
++ Gateway+EPP deployment is orthogonal to Dynamo cloud/graphs deployment
+
 **Cons:**
-- Less flexible for different models
-- Harder to maintain separation of concerns
+- Unable to reuse Dynamo KV router component
+- Metrics Service Protocol: Currently dynamo components are not MSP compatible
 
 # Alt 2: Tokenization Extension Chain
 Instead of embedding tokenization in EPP, create a dedicated tokenization extension that runs before EPP in the processing chain:
