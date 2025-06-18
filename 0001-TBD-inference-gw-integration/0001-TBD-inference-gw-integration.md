@@ -137,6 +137,10 @@ HTTP Request
 └─────────────┘
 ```
 
+### TODO: Sequence diagram
+
+### TODO: headers and req/response message formats
+
 
 ## TODO: replace with simpler version
 ```mermaid
