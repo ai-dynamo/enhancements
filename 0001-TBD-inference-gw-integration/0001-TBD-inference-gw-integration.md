@@ -57,6 +57,14 @@ The current Inference Gateway is tightly coupled with model's tokenizer. However
 * Modify core Gateway API specifications
 * Change existing worker pod interfaces significantly
 
+## Current state of IGW and Dynamo
+
+| Module | Dynamo | IGW
+| :---- | :---- |
+| **Event Plane** | Push based KV/capacity related metric events using Nats | Scrapers populate Datastore with metrics for a pod (pull based)
+| **Service Plane** | Custom nats/tcp based protocol, uses json serialization | Standard HTTP based protocol
+| **Control Plane** | Planner is responsible for scaling decisions, Orchestration happens via operator | TODO
+
 ## Requirements
 
 ### REQ 1 External Processing Integration
@@ -67,13 +75,9 @@ Dynamo EPP (Endpoint picker) **MUST** support calling LLM processors for request
 
 The system **SHOULD** support both external routing (via Dynamo Router) and internal EPP scheduling based on request configuration.
 
-### REQ 3 Token offloading capability 
+### REQ 4 Unified Dynamo deployment
 
-The system **SHOULD** support both external cache-based token storage and direct token value passing to worker pods.
-
-### REQ 4 Unified Dynamo Architecture
-
-Dynamo EPP and components (Processor, Router, Workers) **MUST** be deployable as a unified dynamo graph within Kubernetes.
+Dynamo EPP and components (Processor, Router, Workers) **MUST** be deployable within Kubernetes through a unified helm chart to maintain version compatibility.
 
 ### REQ 5 Maintain compatibility with Inference Gateway protocols
 
@@ -100,9 +104,16 @@ This architecture unifies Inference Gateway with Dynamo Graph deployment. See di
 
 ![Architecture Diagram](./arch1.png)
 
-## Sequence Diagram
 
-Inference Gateway Request flow:
+### Dynamo Graph deployment
+A `Dynamo Graph` contains one or more `Dynamo Component`s and this one-to-many relation is reflected in corresponding Kubernetes deployment Kubernetes CRs DynamoGraphDeployment and DynamoComponentDeployments respectively.
+
+Each dynamo component deployment creates a Kuberenetes deployment which manages component's pods.
+
+![Dynamo Graph Deployment](./graph_deployment.png)
+
+### Inference Gateway Request Flow:
+
 ```
 HTTP Request
      │
