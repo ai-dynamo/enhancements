@@ -113,14 +113,11 @@ Note: This could be ideally routed to Frontend service because Frontend/Processo
 1. There would be 1:1 mapping between an inference pool, a dynamo graph deployment and EPP deployment.
 Reasoning: Dynamo Graph represents a cohesive deployment unit with compute resources. Each dynamo graph deployment should correspond to one Inference Pool. 
 
-2. EPP is 1:1 with Inference Pool and responsible for scheduling decisions within a dynamo graph.
-
-3. Inference Model maps user-facing model names to backend implementations.  Multiple inference models can refer to same Inference Pool (Dynamo Graph).
-
+ This is the view from IGW perspective - 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │ Inference Model │    │ Inference Model  │    │ Inference Model │
-│   (gpt-4)       │    │  (my-lora)       │    │   (gemma)       │
+│   (lora1)       │    │    (lora2)       │    │     (gemma)     │
 └─────────┬───────┘    └─────────┬────────┘    └─────────┬───────┘
           └──────────────────────┼───────────────────────┘
                                  │ N:1
@@ -137,6 +134,43 @@ Reasoning: Dynamo Graph represents a cohesive deployment unit with compute resou
                     └─────────────────────────┘
 ```
 
+2. EPP has 1:1 relation with Inference Pool and its responsible for scheduling decisions within a dynamo graph.
+
+3. Inference Model maps user-facing model names to backend implementations.  Multiple inference models can refer to same Inference Pool (Dynamo Graph).
+
+
+```mermaid
+erDiagram
+    %% IGW Entities
+    Gateway
+    HTTPRoute
+    InferenceModel
+    InferencePool
+    EPP
+    
+    %% Dynamo Entities
+    DynamoGraph
+    Frontend
+    Worker
+    
+    %% IGW Relationships
+    Gateway ||--o{ HTTPRoute : "routes traffic via"
+    HTTPRoute ||--o{ InferenceModel : "matches model name to"
+    InferenceModel }o--|| InferencePool : "references backend"
+    InferencePool ||--|| EPP : "delegates scheduling to"
+    EPP ||--o{ Worker : "selects worker instances"
+    
+    %% Dynamo Relationships  
+    DynamoGraph ||--|| Frontend : "has single entrypoint"
+    DynamoGraph ||--o{ Worker : "contains multiple workers"
+    
+    %% Cross-System Mapping
+    InferencePool ||--|| DynamoGraph : "maps to"
+    EPP ||--|| Frontend : "deployed as sidecar"
+    
+    %% Internal Dynamo Communication
+    Frontend ||--o{ Worker : "routes to selected worker"
+```
 
 ### Decision Points
 
