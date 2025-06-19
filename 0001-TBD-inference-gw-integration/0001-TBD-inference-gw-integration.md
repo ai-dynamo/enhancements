@@ -48,11 +48,11 @@ This proposal outlines the integration of Dynamo components with the [Gateway AP
 
 Dynamo EPP (Endpoint picker) **MUST** support calling Frontend and processor for request preprocessing and scheduling while maintaining the existing ext-proc interface.
 
-### REQ 3 Unified Dynamo deployment
+### REQ 2 Unified Dynamo deployment
 
 Dynamo EPP and components (Frontend, Processor, Router, Workers) **MUST** be deployable within Kubernetes through a unified helm chart to maintain version compatibility.
 
-### REQ 4 Maintain compatibility with Inference Gateway protocols
+### REQ 3 Maintain compatibility with Inference Gateway protocols
 
 Dynamo EPP **MUST** be compatible with Inference Gateway API and concepts (InferencePool, InferenceModel)
 
