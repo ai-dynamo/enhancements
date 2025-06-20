@@ -210,31 +210,6 @@ Con
 - Hard to scale across models
 - Tight coupling with golang based implementation
 
-#### 2. Dynamo component co-location
-Issue: Higher latency due to several network hops
-This is a dynamo specific problem/question. It's orthogonal to IGW but correlated to some extent. (may be it'd be a separte DEP)
-
-![Dynamo component co-location](./dyn_comp_deployment.png)
-
-##### Alt.1: Single binary/pod
-3 required components (Frontend/Processor/Router) are deployed as independently scalable deployment using `dynamo-run`
-
-+ lower latency
-+ Reduced network hops
-+ tight coupling
-- Scaled as a unit
-
-##### Alt.2: Separate deployment
-Each component is deployed as independently scalable deployment.  
-This is current state.
-
-+ simpler to scale
-- More hops
-
-##### Alt.3: Frontend as entrypoint and Processor/Router as sidecars
-+ easier to deploy and manage
-- Scaled as a unit
-
 ## Problems
 1. Currently EPP schedluling has tightly coupling with in-porcess preprocessing.
   It's hard to scale/maintain it accross different models.
