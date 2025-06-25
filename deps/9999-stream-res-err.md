@@ -1,6 +1,6 @@
-# Wrap Streaming Response in Result<U, E>
+# Sending Complete Final Flag with Annotated<...> Wrapper
 
-**Status**: **Draft** | Under Review | Approved | Replaced | Deferred | Rejected
+**Status**: Draft | **Under Review** | Approved | Replaced | Deferred | Rejected
 
 **Authors**: [@nnshah1](https://github.com/nnshah1) [@kthui](https://github.com/kthui)
 
@@ -14,7 +14,7 @@
 
 **Required Reviewers**: [@ryanolson](https://github.com/ryanolson) [@grahamking](https://github.com/grahamking)
 
-**Review Date**: [Date for review]
+**Review Date**: Jun 24 2025
 
 **Pull Request**: [Link to Pull Request of the Proposal itself]
 
@@ -31,14 +31,8 @@ The client response stream listener currently does not know why a stream is clos
 stream is closed because the server has finished producing all the responses, but it can also be due
 to failure of the server or the network connecting the client to the server.
 
-Knowing why the stream is closed at the network/router layer is vital to the ability of detecting
-faults while the server is streaming responses back to the client.
-
-For instance, in the current
-[router implementation](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/egress/addressed_router.rs#L165-L174),
-if it is unable to restore the bytes back to the original object, it cannot relay the error back to
-the client response stream consumer for proper handling, and instead it silently skips the response
-that failed to restore.
+Knowing why the stream is closed is vital to the ability of detecting faults while the server is
+streaming responses back to the client.
 
 ## Goals
 
@@ -53,6 +47,59 @@ N/A
 N/A
 
 # Proposal
+
+The
+[`Annotated<...>`](https://github.com/ai-dynamo/dynamo/blob/2becce569d59f8dc064c2f07b7995d1e979ade66/lib/runtime/src/protocols/annotated.rs#L32)
+wrapper is typically used by
+[higher level implementations](https://github.com/ai-dynamo/dynamo/blob/2becce569d59f8dc064c2f07b7995d1e979ade66/lib/bindings/python/rust/engine.rs#L145-L146)
+as the opaque `U` type in the `ManyOut<U>` type returned from the
+[network/router layer](https://github.com/ai-dynamo/dynamo/blob/2becce569d59f8dc064c2f07b7995d1e979ade66/lib/runtime/src/pipeline/network/egress/push_router.rs#L165).
+
+The
+[`event`](https://github.com/ai-dynamo/dynamo/blob/2becce569d59f8dc064c2f07b7995d1e979ade66/lib/runtime/src/protocols/annotated.rs#L38)
+field in the `Annotated<...>` object will see a new string `complete_final`, in addition to the
+existing `error` string, that signals the stream is completed and the response with `complete_final`
+is the last response to be sent by the server.
+
+At the server, once response generation is completed, the server MUST send an additional empty
+response with the `complete_final` flag set, before closing the stream.
+
+At the client, if the `complete_final` response arrived and then the stream ended, the client can be
+assured all responses intended to be sent by the server have been received. If the stream ended
+without the `complete_final` response, the client can infer that one or more responses to be sent by
+the server have not arrived, which indicates some error handling needs to be performed, for
+instance, returning an Error to the upper level or restarting the request at where it was left off
+at another node.
+
+Two additional methods are to be added to the `Annotated<...>` implementation
+```rust
+impl<R> Annotated<R> {
+    ...
+
+    /// Create a new annotated stream with complete final event
+    pub fn from_complete_final() -> Self {
+        Self {
+            data: None,
+            id: None,
+            event: Some("complete_final".to_string()),
+            comment: None,
+        }
+    }
+
+    ...
+
+    pub fn is_complete_final(&self) -> bool {
+        self.event.as_deref() == Some("complete_final")
+    }
+
+    ...
+}
+```
+to facilitate constructing and checking for complete final.
+
+# Alternate Solutions
+
+## Alt 1 Handle Errors at the Client Implementation Layer
 
 Each response streamed will be wrapped in a `Result<U, E>`, where `U` is the response type and `E`
 is the error type, for propagating errors that occur while streaming responses from the server back
@@ -104,25 +151,19 @@ exclusively for handling network/router layer errors. Any error at the server ab
 network/router layer should be handled within the opaque response type `U`, for instance the
 `Annotated<R>` wrapper.
 
-# Alternate Solutions
-
-## Alt 1 Handle Errors at the Client Implementation Layer
-
-The opaque response type defined by the client implementation can always start with a `Result<...>`
-wrapper, such that in `ManyOut<U>`, `U = Result<...>`.
-
 **Pros:**
 
-* No change to the current network/router interface, as the `U` opaque type is retained.
+* Network error is detected at the network/router layer and then propagated to the upper layers.
 
 **Cons:**
 
-* It is cumbersome for each and every client implementation to implement the same basic error
-detection and reporting mechanism that can be easily done at the network/router layer.
+* Interface change for current implementations on top of the network/router layer.
 
 **Reason Rejected:**
 
-* Network error handling should be done by the network/router layer.
+* Original design
+[does NOT intend to handle error](https://github.com/ai-dynamo/enhancements/pull/15#pullrequestreview-2954974976)
+at the network/router layer.
 
 **Notes:**
 
@@ -149,7 +190,7 @@ extension to the Router Layer without overriding any Router functionalities.
 
 **Reason Rejected:**
 
-* Network error handling should be done by the network/router layer.
+* Use the more generic `Annotated<...>` wrapper.
 
 **Notes:**
 
