@@ -97,6 +97,46 @@ impl<R> Annotated<R> {
 ```
 to facilitate constructing and checking for complete final.
 
+## Future Enhancements
+
+### Extension to NvExt
+
+While this proposal is intended for enhancing
+[dynamo/lib/runtime](https://github.com/ai-dynamo/dynamo/tree/2becce569d59f8dc064c2f07b7995d1e979ade66/lib/runtime)
+Python binding implementation, the same idea can also be applied to
+[dynamo/lib/llm](https://github.com/ai-dynamo/dynamo/tree/2becce569d59f8dc064c2f07b7995d1e979ade66/lib/llm)
+OpenAI implementation, at
+[`NVExt`](https://github.com/ai-dynamo/dynamo/blob/2becce569d59f8dc064c2f07b7995d1e979ade66/lib/llm/src/protocols/openai/nvext.rs#L25-L64).
+
+An EOS (end of stream) annotation can be appended to the
+[NVExt.annotations](https://github.com/ai-dynamo/dynamo/blob/2becce569d59f8dc064c2f07b7995d1e979ade66/lib/llm/src/protocols/openai/nvext.rs#L63)
+list, signaling that the response is the last one to be sent by the server.
+
+Ref: https://github.com/ai-dynamo/enhancements/pull/15#issuecomment-3002343978
+
+The
+[`NvCreateChatCompletionStreamResponse`](https://github.com/ai-dynamo/dynamo/blob/2becce569d59f8dc064c2f07b7995d1e979ade66/lib/llm/src/protocols/openai/chat_completions.rs#L64-L68)
+struct will need to include an optional
+```rust
+#[serde(skip_serializing_if = "Option::is_none")]
+pub nvext: Option<NvExt>
+```
+field, similar to the
+[request struct](https://github.com/ai-dynamo/dynamo/blob/2becce569d59f8dc064c2f07b7995d1e979ade66/lib/llm/src/protocols/openai/chat_completions.rs#L37-L44),
+in order to pass the flag with responses.
+
+**Open question**: The OpenAI API includes a
+["finish_reason"](https://platform.openai.com/docs/api-reference/chat-streaming/streaming)
+variable in its response JSON indicating the end of stream, for example:
+```json
+{..., "choices":[{"index":0,"delta":{"role":"assistant","content":""},"logprobs":null,"finish_reason":null}]}
+{..., "choices":[{"index":0,"delta":{"content":"Hello"},"logprobs":null,"finish_reason":null}]}
+....
+{..., "choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"stop"}]}
+```
+Since `NvCreateChatCompletionStreamResponse` contains the full OpenAI response in its `inner`, is
+the duplicate end of stream flag in `NVExt` in `NvCreateChatCompletionStreamResponse` needed?
+
 # Alternate Solutions
 
 ## Alt 1 Handle Errors at the Client Implementation Layer
