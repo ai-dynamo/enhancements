@@ -10,15 +10,15 @@
 
 **Replaced By**: N/A
 
-**Sponsor**: [@ryanolson](https://github.com/ryanolson) [@grahamking](https://github.com/grahamking)
+**Sponsor**: [@ryanolson](https://github.com/ryanolson) [@grahamking](https://github.com/grahamking) [@oandreeva-nv](https://github.com/oandreeva-nv)
 
-**Required Reviewers**: [@ryanolson](https://github.com/ryanolson) [@grahamking](https://github.com/grahamking)
+**Required Reviewers**: [@ryanolson](https://github.com/ryanolson) [@grahamking](https://github.com/grahamking) [@oandreeva-nv](https://github.com/oandreeva-nv)
 
 **Review Date**: Jun 24 2025
 
-**Pull Request**: [Link to Pull Request of the Proposal itself]
+**Pull Request**: https://github.com/ai-dynamo/enhancements/pull/15
 
-**Implementation PR / Tracking Issue**: [Link to Pull Request or Tracking Issue for Implementation]
+**Implementation PR / Tracking Issue**: https://github.com/ai-dynamo/dynamo/pull/1671
 
 # Summary
 
