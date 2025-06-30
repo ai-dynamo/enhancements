@@ -1,4 +1,4 @@
-# Sending Complete Final Flag with Annotated<...> Wrapper
+# Network/Router Level Error Propagation during Response Streaming
 
 **Status**: Draft | **Under Review** | Approved | Replaced | Deferred | Rejected
 
@@ -34,6 +34,12 @@ to failure of the server or the network connecting the client to the server.
 Knowing why the stream is closed is vital to the ability of detecting faults while the server is
 streaming responses back to the client.
 
+For instance, in the current
+[router implementation](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/egress/addressed_router.rs#L165-L174),
+if it is unable to restore the bytes back to the original object, it cannot relay the error back to
+the client response stream consumer for proper handling, and instead it silently skips the response
+that failed to restore.
+
 ## Goals
 
 N/A
@@ -47,6 +53,88 @@ N/A
 N/A
 
 # Proposal
+
+## Part 1: Add a New Generate Method for Propagating Error from Network/Router Layer
+
+The client starts its RPCs from
+[this `generate` method](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/egress/addressed_router.rs#L85),
+which returns a stream in `Result<ManyOut<U>, Error>` type.
+
+**Case 1**: The server is unreachable when the request is made
+
+This case is handled by the existing `Result<...>` wrapper around the `ManyOut<U>` stream type.
+
+**Case 2**: The server is disconnected while responses are being returned
+
+The `ManyOut<U>` stream yields responses in the `U` type, defined by the client, that is opaque to
+the network/router layer, so currently there is no way for the network/router layer to propagate any
+error back to the client while streaming responses.
+
+The proposal is to wrap the `U` type in a `Result<...>` wrapper, similar to how the stream is
+currently wrapped, so error detected at the network/router level can be propagated to the client.
+
+To avoid disrupting existing behaviors, a new
+```rust
+async fn generate_with_fault_detection(&self, request: SingleIn<AddressedRequest<T>>) -> Result<ManyOut<Result<U, Error>>, Error>
+```
+method is to be added alongside the existing `generate` method as a part of the
+[`AsyncEngine` trait](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/engine.rs#L101-L109).
+The new method should have a default implementation that just panics if called, so the change can be
+progressively applied to existing implementations.
+
+## Part 2: Implement End of Stream Detection into Network/Router Layer
+
+The server handles RPCs with the
+[`PushWorkHandler` trait](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/ingress/push_handler.rs#L20C24-L20C39),
+specifically each response over the stream goes through
+[here](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/ingress/push_handler.rs#L100-L109).
+This part of the code can reliably capture the end of stream signal, which will be made available to
+the client over the RPC.
+
+Instead of sending each response from the worker `generate` method directly back to the client, each
+response is contained in a new
+```rust
+#[derive(Serialize, Deserialize, Debug)]
+pub struct StreamItemWrapper<U> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<U>,
+    pub complete_final: bool
+}
+```
+where `data` holds the response and `complete_final` indicates if this is the last response.
+
+While the worker's `generate` method is producing new responses, each response is sent with the
+`complete_final = false`. After the last response is produced by the worker's `generate` method, an
+extra response with no data and `complete_final = true` is sent to the client, before ending the
+RPC.
+
+The client receives and processes responses at the
+[end of its `generate` method](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/egress/addressed_router.rs#L163-L174).
+The response is first reconstructed into the `StreamItemWrapper<U>`, and then the `data` is
+extracted and yielded back to the client.
+
+There are two cases of connection stream error detectable by the client's `generate` method at the
+network/router layer:
+
+**Case 1**: Connection stream ended before `complete_final`
+
+An `Err(...)` response, as discussed in
+[Part 1](#part-1-add-a-new-generate-method-for-propagating-error-from-networkrouter-layer), is
+yielded and then the response stream is closed.
+
+**Case 2**: `complete_final` is received and then more responses arrived
+
+An `Err(...)` response, as discussed in
+[Part 1](#part-1-add-a-new-generate-method-for-propagating-error-from-networkrouter-layer), is
+yielded upon arrival of the first response after the response with `complete_final`. After the
+`Err(...)` response is yielded, the response stream is closed.
+
+The `Err(...)`s will be constructed using
+[`anyhow::Error::msg`](https://docs.rs/anyhow/1.0.98/anyhow/struct.Error.html#method.msg).
+
+# Alternate Solutions
+
+## Alt 1 Handle Errors at the Client Implementation Layer
 
 The
 [`Annotated<...>`](https://github.com/ai-dynamo/dynamo/blob/2becce569d59f8dc064c2f07b7995d1e979ade66/lib/runtime/src/protocols/annotated.rs#L32)
@@ -97,9 +185,9 @@ impl<R> Annotated<R> {
 ```
 to facilitate constructing and checking for complete final.
 
-## Future Enhancements
+### Future Enhancements
 
-### Extension to NvExt
+#### Extension to NvExt
 
 While this proposal is intended for enhancing
 [dynamo/lib/runtime](https://github.com/ai-dynamo/dynamo/tree/2becce569d59f8dc064c2f07b7995d1e979ade66/lib/runtime)
@@ -137,84 +225,31 @@ variable in its response JSON indicating the end of stream, for example:
 Since `NvCreateChatCompletionStreamResponse` contains the full OpenAI response in its `inner`, is
 the duplicate end of stream flag in `NVExt` in `NvCreateChatCompletionStreamResponse` needed?
 
-# Alternate Solutions
-
-## Alt 1 Handle Errors at the Client Implementation Layer
-
-Each response streamed will be wrapped in a `Result<U, E>`, where `U` is the response type and `E`
-is the error type, for propagating errors that occur while streaming responses from the server back
-to the client response stream listener.
-
-For instance, change the
-[`Ingress<SingleIn<T>, ManyOut<U>>`](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/ingress/push_handler.rs#L20)
-type to `Ingress<SingleIn<T>, ManyOut<Result<U, E>>>` and 
-[`Egress<SingleIn<T>, ManyOut<U>>`](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network.rs#L246-L247)
-type to `Egress<SingleIn<T>, ManyOut<Result<U, E>>>`.
-
-The `Result<U, E>` wrapper around the opaque response type `U` provides the ability for the
-network/router to relay error information back to the client response stream consumer. Without the
-additional wrapper, it is impossible for the network/router to yield an error response from a
-stream, because the response object is opaque to the network/router.
-
-The error type `E` is
-```rust
-#[derive(Serialize, Deserialize, Debug)]
-pub struct StreamError {
-    pub flags: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-}
-```
-where each bit on the `flags` carries a boolean message. Currently, only the most significant bit is
-used:
-```
- 0: stream incomplete
- 1: (reserved)
-...
-31: (reserved)
-```
-The `message` is optional and currently unused.
-
-At the end of the stream, the server will stream an extra error response to the client, with bit 0
-set, indicating the end of stream. If the client picks up the error response from the server with
-the end of stream bit set and then the stream ends, the client ends its response stream. If the
-stream ends without the error response with end of stream bit set, the client yields an extra error
-response with the stream incomplete bit set to its response stream, and then ends its response
-stream.
-
-At the client response stream consumer, if all the responses are Ok, then there is no error. If a
-response is Err, then an error occurred while responses were being streamed from the server to the
-client, and the error can be determined by checking the `StreamError.flags`.
-
-The server response stream producers do not implement the `StreamError`, because it is used
-exclusively for handling network/router layer errors. Any error at the server above the
-network/router layer should be handled within the opaque response type `U`, for instance the
-`Annotated<R>` wrapper.
-
 **Pros:**
 
-* Network error is detected at the network/router layer and then propagated to the upper layers.
+* No change to the current network/router interface, as the `U` opaque type is retained.
 
 **Cons:**
 
-* Interface change for current implementations on top of the network/router layer.
+* It is cumbersome for each and every client implementation to implement the same basic error
+detection and reporting mechanism that can be easily done at the network/router layer.
 
 **Reason Rejected:**
+
+* Network error handling should be done by the network/router layer.
+
+**Notes:**
 
 * Original design
 [does NOT intend to handle error](https://github.com/ai-dynamo/enhancements/pull/15#pullrequestreview-2954974976)
 at the network/router layer.
-
-**Notes:**
-
-N/A
 
 ## Alt 2 Add a Fault Tolerance Layer on top of the current Router Layer
 
 Add a FaultTolerance Layer that implements the `Result<...>` wrapper that will become the `U` type
 at the current Router Layer. The FaultTolerance Layer should implement the same
 [`PushWorkHandler`](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network.rs#L323)
-trait and accept objects implementing the
+trait and accepts objects implementing the
 [`AsyncEngine`](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/engine.rs#L104)
 trait, so it shares the same interface as the Router.
 
