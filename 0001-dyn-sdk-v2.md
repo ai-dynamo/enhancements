@@ -1,28 +1,80 @@
-# Dynamo SDK v2
+# Dynamo SDK v2 and IR design
 
 **Status**: Draft
 
-**Authors**: [Name/Team] 
+**Authors**: [biswa](https://github.com/biswapanda)
 
 **Category**: Architecture
 
-**Replaces**: [Link of previous proposal if applicable] 
+**Replaces**: 
 
-**Replaced By**: [Link of previous proposal if applicable] 
+**Replaced By**: 
 
-**Sponsor**: [Name of code owner or maintainer to shepard process]
+**Sponsor**: 
 
-**Required Reviewers**: [Names of technical leads that are required for acceptance]
+**Required Reviewers**: Neelay, Ishan, Alec, Mohammed, Maksim
 
-**Review Date**: [Date for review]
-
-**Pull Request**: [Link to Pull Request of the Proposal itself]
-
-**Implementation PR / Tracking Issue**: [Link to Pull Request or Tracking Issue for Implementation]
+**Review Date**: [TBD]
 
 # Summary
 
+1. current `dynamo-run` will converge into `dynamo serve`
 
+2. separate responsibilities
+`dynamo serve` will launch single component
+`dynamo deploy` will launch multiple components (graph)
+
+
+# Motivation
+
+Issues
+## 1: tight coupling between component's implementation and deployment spec
+Dynamo user persona range from expert k8s to power dynamo component developers.
+Both dont't need handholding and full control.
+
+```python
+@service(
+    dynamo={
+        "namespace": "dynamo-demo",
+    },
+    resources={"gpu": 1, "cpu": "10", "memory": "20Gi"},
+    workers=1,
+)
+class PrefillWorker:
+```
+
+## 2: Too many levels of configuration 
+Configurations are managead in SDK decorators, CLI args, env variables and config files. 
+- Dynamo components authors are confused how to config and launch components
+- K8s savvy end-users are confused where and how to configure a dynamo graph in k8s
+
+## 3: Implicit resource allocation
+Users are unable to specify gpu resources explicitly
+
+
+## Design Principles
+
+* SOC: Separation of concerns
+1. Decouple component author API from k8s deployment related concerns
+2. Separate component and graph launch verbs (dynamo serve and dynamo deploy)
+
+
+* Dev-Ex: Simple is better than complex.
+1. Enable dynamo developers to completely control how to spin up a component   
+
+* Explicit is better than implicit
+Allow users to fully and explicitly specify all configurations (gpu resources, parameters etc.)
+
+
+## Requirements
+
+### REQ 1: Dynamo serve SHOULD not interleave deployment logic
+### REQ 2: Dynamo users MUST be able to explicitly specify exact configuration
+
+
+# Proposal
+
+## Graph IR
 ```yaml
 version: 1.0
 name: my-graph
@@ -145,80 +197,3 @@ components:
     node_selector:
       role: leader
 ```
-
-
-# Motivation
-
-**\[Required\]**
-
-Describe the problem that needs to be addressed with enough detail for
-someone familiar with the project to understand. Generally one to two
-short paragraphs. Additional details can be placed in the background
-section as needed. Cover **what** the issue is and **why** it needs to
-be addressed. Link to github issues if relevant.
-
-## Goals
-
-**\[Optional \- if not applicable omit\]**
-
-List out any additional goals in bullet points. Goals may be aspirational / difficult to measure but guide the proposal. 
-
-* Goal
-
-* Goal
-
-* Goal
-
-### Non Goals
-
-**\[Optional \- if not applicable omit\]**
-
-List out any items which are out of scope / specifically not required in bullet points. Indicates the scope of the proposal and issue being resolved.
-
-## Requirements
-
-**\[Optional \- if not applicable omit\]**
-
-List out any additional requirements in numbered subheadings.
-
-**\<numbered subheadings\>**
-
-### REQ \<\#\> \<Title\>
-
-Describe the requirement in as much detail as necessary for others to understand it and how it applies to the DEP. Keep in mind that requirements should be measurable and will be used to determine if a DEP has been successfully implemented or not.
-
-Requirement names should be prefixed using a monotonically increasing number such as “REQ 1 \<Title\>” followed by “REQ 2 \<Title\>” and so on. Use title casing when naming requirements. Requirement names should be as descriptive as possible while remaining as terse as possible.
-
-Use all-caps, bolded terms like **MUST** and **SHOULD** when describing each requirement. See [RFC-2119](https://datatracker.ietf.org/doc/html/rfc2119) for additional information.
-
-
-# Proposal
-
-**\[Required\]**
-
-Describe the high level design / proposal. Use sub sections as needed, but start with an overview and then dig into the details. Try to provide images and diagrams to facilitate understanding.
-
-# Alternate Solutions
-
-**\[Required, if not applicable write N/A\]**
-
-List out solutions that were considered but ultimately rejected. Consider free form \- but a possible format shown below.
-
-## Alt \<\#\> \<Title\>
-
-**Pros:**
-
-\<bulleted list or pros describing the positive aspects of this solution\>
-
-**Cons:**
-
-\<bulleted list or pros describing the negative aspects of this solution\>
-
-**Reason Rejected:**
-
-\<bulleted list or pros describing why this option was not used\>
-
-**Notes:**
-
-\<optional: additional comments about this solution\>
-
