@@ -128,7 +128,7 @@ components:
       - my_secret_name
   - name: sglang_worker
     image: ...
-    cmd: ["dynamo", "serve"] # current dynamo-run
+    cmd: ["dynamo", "serve"]
     run_config:
       input: "dyn://qwen3-32b.backend.generate" 
       output: sglang
@@ -143,7 +143,7 @@ components:
       gpu: 4
       memory: 64Gi
   - name: batch_processor
-    cmd: ["dynamo", "serve"] # current dynamo-run
+    cmd: ["dynamo", "serve"]
     run_config:
       input: "batch:/data/prompts.jsonl"
       output: mistralrs
@@ -154,7 +154,7 @@ components:
       memory: 16Gi
   # Multi-node distributed example
   - name: trtllm_leader
-    cmd: ["dynamo", "serve"] # current dynamo-run
+    cmd: ["dynamo", "serve"]
     run_config:
       input: "dyn://deepseek-70b.backend.generate"
       output: trtllm
@@ -170,37 +170,4 @@ components:
       memory: 80Gi
     node_selector:
       role: leader
-  # old
-  - name: frontend
-    py_class: a.b.c:Frontend
-    dependency:
-       backend1: dynamo://v1/ns1/backend_1
-       backend2: dynamo://v1/ns1/backend_2
-    parameters:
-       a: b 
-    resources:
-       cpu: 200m
-       gpu: 1
-    replicas: 4
-    environment:
-      CUDA_VISIBLE_DEVICES: "4,5"
-      SAMPLE_CONFIG: A1
-      DB_URI: "${{ secrets.DB_URI }}"
-    secrets:
-      - DB_URI
-  - name: backend_1
-    cmd: ["dynamo", "serve"]
-    arg: ["a.b.c:Backend"]
-    instances: 1
-    dependency:
-       backend: dynamo://v1/ns1/backend_2
-  - name: backend_2
-    # alternative syntax - dynamo serve
-    cmd: ["dynamo", "serve", "..."]    # python component
-    cmd: ["dynamo", "run", "..."]      # rust component
-    replicas: 2
-  - name: backend3
-    cmd: ["/my/rust_backend3"]
-    dependency:
-       backend: dynamo://v1/ns1/backend3
 ```
