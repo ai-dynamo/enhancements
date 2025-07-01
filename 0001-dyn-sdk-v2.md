@@ -21,14 +21,14 @@
 1. current `dynamo-run` will converge into `dynamo serve`
 
 2. separate responsibilities
-- `dynamo serve` will launch single component
+- `dynamo serve` will launch a single component only
 - `dynamo deploy` will launch multiple components (graph)
 
 
 # Motivation
 
 Issues
-## 1: tight coupling between component's implementation and deployment spec
+## Tight coupling between component's implementation and deployment
 Dynamo user persona range from expert k8s to power dynamo component developers.
 Both dont't need handholding and full control.
 
@@ -50,7 +50,6 @@ Configurations are managead in SDK decorators, CLI args, env variables and confi
 
 ## 3: Implicit resource allocation
 Users are unable to specify gpu resources explicitly
-
 
 ## Design Principles
 
@@ -74,12 +73,96 @@ Allow users to fully and explicitly specify all configurations (gpu resources, p
 
 # Proposal
 
-## Graph IR
+## Graph Deployment IR
+
+Dynamo deployment IR is where user can specify deployment spec in a deployment target agnostic 
+
+
+```bash
+# creates deploymenet manifests for the target (default=k8s) 
+dynmao deploy --target k8s -f ./my-graph-config.yaml --out_dir=dir_name
+dynmao deploy --target slurm -f ./my-graph-config.yaml --out_dir=dir_name
+```
+
+`my-graph-config.yaml`
 ```yaml
 version: 1.0
-name: my-graph
-namespace: ns1
+name: dynamo-graph
 components:
+  - name: http_ingress
+    cmd: ["dynamo", "serve"]    # default cmd, current dynamo-run
+    run_config:
+      input: http
+      output: dyn
+      port: 8080
+    replicas: 5
+    resources:
+      cpu: 500m
+      memory: 2Gi
+  - name: vllm_worker
+    cmd: ["dynamo", "serve"]
+    run_config:
+      input: "dyn://llama3-8b.backend.generate"
+      output: vllm
+      parameters:
+        model_path: "meta-llama/Meta-Llama-3-8B-Instruct"
+        tensor_parallel_size: 2
+        context_length: 8192
+        base_gpu_id: 0
+        extra_engine_args: "vllm_config.json"
+    replicas: 2
+    resources:
+      gpu: 2
+      memory: 24Gi
+    environment:
+      CUDA_VISIBLE_DEVICES: "0,1"
+      HF_TOKEN: "${{ secrets.HF_TOKEN }}"
+    secrets:
+      - HF_TOKEN 
+  - name: sglang_worker
+    cmd: ["dynamo", "serve"] # current dynamo-run
+    run_config:
+      input: "dyn://qwen3-32b.backend.generate" 
+      output: sglang
+      model_path: "/data/models/Qwen/Qwen3-32B"
+      tensor_parallel_size: 4
+      router_mode: "kv"
+      num_nodes: 2
+      node_rank: 0
+      leader_addr: "127.0.0.1:9876"
+    replicas: 1
+    resources:
+      gpu: 4
+      memory: 64Gi
+  - name: batch_processor
+    cmd: ["dynamo", "serve"] # current dynamo-run
+    run_config:
+      input: "batch:/data/prompts.jsonl"
+      output: mistralrs
+      model_path: "Qwen/Qwen3-4B"
+      verbosity: 2  # -vv flag
+    replicas: 1
+    resources:
+      memory: 16Gi
+  # Multi-node distributed example
+  - name: trtllm_leader
+    cmd: ["dynamo", "serve"] # current dynamo-run
+    run_config:
+      input: "dyn://deepseek-70b.backend.generate"
+      output: trtllm
+      model_path: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B"
+      tensor_parallel_size: 16
+      num_nodes: 2
+      node_rank: 0
+      leader_addr: "10.217.98.122:5000"
+      extra_engine_args: "trtllm_config.yaml"
+    replicas: 1
+    resources:
+      gpu: 8
+      memory: 80Gi
+    node_selector:
+      role: leader
+  # old
   - name: frontend
     py_class: a.b.c:Frontend
     dependency:
@@ -112,88 +195,4 @@ components:
     cmd: ["/my/rust_backend3"]
     dependency:
        backend: dynamo://v1/ns1/backend3
-  # New: dynamo run components
-  - name: http_ingress
-    cmd: ["dynamo", "serve"] # current dynamo-run
-    run_config:
-      input: http
-      output: dyn
-      port: 8080
-      model_name: "llama3-8b"
-    replicas: 1
-    resources:
-      cpu: 500m
-      memory: 2Gi
-  - name: vllm_worker
-    cmd: ["dynamo", "serve"] # current dynamo-run 
-    run_config:
-      input: "dyn://llama3-8b.backend.generate"
-      output: vllm
-      model_path: "meta-llama/Meta-Llama-3-8B-Instruct"
-      tensor_parallel_size: 2
-      context_length: 8192
-      base_gpu_id: 0
-      extra_engine_args: "vllm_config.json"
-    replicas: 2
-    resources:
-      gpu: 2
-      memory: 24Gi
-    environment:
-      CUDA_VISIBLE_DEVICES: "0,1"
-  - name: sglang_worker
-    cmd: ["dynamo", "serve"] # current dynamo-run
-    run_config:
-      input: "dyn://qwen3-32b.backend.generate" 
-      output: sglang
-      model_path: "/data/models/Qwen/Qwen3-32B"
-      tensor_parallel_size: 4
-      router_mode: "kv"
-      num_nodes: 2
-      node_rank: 0
-      leader_addr: "127.0.0.1:9876"
-    replicas: 1
-    resources:
-      gpu: 4
-      memory: 64Gi
-  - name: llamacpp_worker
-    cmd: ["dynamo", "serve"] # current dynamo-run
-    run_config:
-      input: text
-      output: llamacpp
-      model_path: "~/llms/Llama-3.2-3B-Instruct-Q4_K_M.gguf"
-      model_config: "meta-llama/Llama-3.2-3B-Instruct"
-      context_length: 4096
-    replicas: 1
-    resources:
-      cpu: 2000m
-      memory: 8Gi
-  - name: batch_processor
-    cmd: ["dynamo", "serve"] # current dynamo-run
-    run_config:
-      input: "batch:/data/prompts.jsonl"
-      output: mistralrs
-      model_path: "Qwen/Qwen3-4B"
-      verbosity: 2  # -vv flag
-    replicas: 1
-    resources:
-      gpu: 1
-      memory: 16Gi
-  # Multi-node distributed example
-  - name: trtllm_leader
-    cmd: ["dynamo", "serve"] # current dynamo-run
-    run_config:
-      input: "dyn://deepseek-70b.backend.generate"
-      output: trtllm
-      model_path: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B"
-      tensor_parallel_size: 16
-      num_nodes: 2
-      node_rank: 0
-      leader_addr: "10.217.98.122:5000"
-      extra_engine_args: "trtllm_config.yaml"
-    replicas: 1
-    resources:
-      gpu: 8
-      memory: 80Gi
-    node_selector:
-      role: leader
 ```
