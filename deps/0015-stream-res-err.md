@@ -75,12 +75,12 @@ currently wrapped, so error detected at the network/router level can be propagat
 
 To avoid disrupting existing behaviors, a new
 ```rust
-async fn generate_with_fault_detection(&self, request: SingleIn<AddressedRequest<T>>) -> Result<ManyOut<Result<U, Error>>, Error>
+async fn generate_with_error_detection(&self, request: SingleIn<AddressedRequest<T>>) -> Result<ManyOut<Result<U, Error>>, Error>
 ```
 method is to be added alongside the existing `generate` method as a part of the
-[`AsyncEngine` trait](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/engine.rs#L101-L109).
-The new method should have a default implementation that just panics if called, so the change can be
-progressively applied to existing implementations.
+[`AddressedPushRouter` struct](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/egress/addressed_router.rs#L59).
+The change can be progressively applied to existing implementations, by switching over from the
+existing `generate` method to the new `generate_with_error_detection` method.
 
 ## Part 2: Implement End of Stream Detection into Network/Router Layer
 
