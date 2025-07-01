@@ -100,11 +100,17 @@ dynamo serve in=dyn out=vllm -f config.yam
 
 ```bash
 # creates deploymenet manifests for the target (default=k8s) 
-dynmao deploy --target k8s -f ./my-graph-config.yaml --out_dir=k8s_deployment
-dynmao deploy --target slurm -f ./my-graph-config.yaml --out_dir=slum_deployment
+dynmao deploy --target k8s -f ./my-graph-deployment-config.yaml -c ./config.yaml --out_dir=k8s_deployment
+
+dynmao deploy --target slurm -f ./my-graph-deployment-config.yam -c ./config.yaml --out_dir=slum_deployment
 ```
 
- is where user can specify deployment spec in a deployment target agnostic 
+### Alternative 1: separate deployment and component configs
+
+
+
+### Alternative 2: Single config file with embedded component parameters
+Config is where user can specify deployment spec in a deployment target agnostic 
 
 `my-graph-deployment-config.yaml`
 ```yaml
