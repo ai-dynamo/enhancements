@@ -54,15 +54,15 @@ Users are unable to specify gpu resources explicitly
 
 ## Design Principles
 
-* SOC: Separation of concerns
+### SOC: Separation of concerns
 1. Decouple component author API from k8s deployment related concerns
 2. Separate component and graph launch verbs (dynamo serve and dynamo deploy)
 
 
-* Dev-Ex: Simple is better than complex.
+### Dev-Ex: Simple is better than complex.
 1. Enable dynamo developers to completely control how to spin up a component   
 
-* Explicit is better than implicit
+### Explicit is better than implicit
 Allow users to fully and explicitly specify all configurations (gpu resources, parameters etc.)
 
 
