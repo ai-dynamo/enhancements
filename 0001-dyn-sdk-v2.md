@@ -30,7 +30,6 @@
 
 # Motivation
 
-Issues
 ## Tight coupling between component's implementation and deployment
 Dynamo user persona range from expert k8s to power dynamo component developers.
 Both dont't need handholding and full control.
@@ -74,12 +73,29 @@ Allow users to fully and explicitly specify all configurations (gpu resources, p
 ### REQ 2: Dynamo users MUST be able to explicitly specify exact configuration
 ### REQ 3: Dynamo users MUST be able to deploy a dynamo graph using a simplified config
 
+## Scenarios
+
+Persona: Entrprise customer (K8s  Savvy)
+Persona: Compoent Developer
 
 # Proposal
 
-## Graph Deployment IR
+## Launching a component
 
-Dynamo deployment IR is where user can specify deployment spec in a deployment target agnostic 
+`dyanmo serve` command will launch individual component (single process) 
+
+Example:
+
+Launch Frontend (+Processor+Router)
+```bash
+dynamo serve in=http out=dyn -f config.yaml
+```
+Launch vllm worker
+```bash
+dynamo serve in=dyn out=vllm -f config.yam
+```
+
+## Launching a graph
 
 
 ```bash
@@ -88,7 +104,9 @@ dynmao deploy --target k8s -f ./my-graph-config.yaml --out_dir=k8s_deployment
 dynmao deploy --target slurm -f ./my-graph-config.yaml --out_dir=slum_deployment
 ```
 
-`my-graph-config.yaml`
+ is where user can specify deployment spec in a deployment target agnostic 
+
+`my-graph-deployment-config.yaml`
 ```yaml
 version: 1.0
 name: dynamo-graph
@@ -99,8 +117,8 @@ components:
     run_config:
       input: http
       output: dyn
-    parameters:
-      port: 8080
+      parameters:
+        port: 8080
     replicas: 5
     resources:
       cpu: 500m
