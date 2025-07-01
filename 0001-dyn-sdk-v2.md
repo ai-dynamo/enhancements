@@ -16,6 +16,9 @@
 
 **Review Date**: [TBD]
 
+**Related Docs**:
+-  [Dynamo SDK Abstractions design and Multi-Target Deployment](https://docs.google.com/document/d/1UNSD_MUOYa1cbGwHp0Wn53wdO0Ir55KR7rfDUZYvNto/edit?tab=t.0)
+
 # Summary
 
 1. current `dynamo-run` will converge into `dynamo serve`
@@ -69,6 +72,7 @@ Allow users to fully and explicitly specify all configurations (gpu resources, p
 
 ### REQ 1: Dynamo serve SHOULD not interleave deployment logic
 ### REQ 2: Dynamo users MUST be able to explicitly specify exact configuration
+### REQ 3: Dynamo users MUST be able to deploy a dynamo graph using a simplified config
 
 
 # Proposal
@@ -80,8 +84,8 @@ Dynamo deployment IR is where user can specify deployment spec in a deployment t
 
 ```bash
 # creates deploymenet manifests for the target (default=k8s) 
-dynmao deploy --target k8s -f ./my-graph-config.yaml --out_dir=dir_name
-dynmao deploy --target slurm -f ./my-graph-config.yaml --out_dir=dir_name
+dynmao deploy --target k8s -f ./my-graph-config.yaml --out_dir=k8s_deployment
+dynmao deploy --target slurm -f ./my-graph-config.yaml --out_dir=slum_deployment
 ```
 
 `my-graph-config.yaml`
@@ -90,7 +94,7 @@ version: 1.0
 name: dynamo-graph
 components:
   - name: http_ingress
-    image: ...
+    image: "<pre-built-image>"
     cmd: ["dynamo", "serve"]    # default cmd, current dynamo-run
     run_config:
       input: http
@@ -121,7 +125,7 @@ components:
       CUDA_VISIBLE_DEVICES: "0,1"
       HF_TOKEN: "${{ secrets.HF_TOKEN }}"
     secrets:
-      - HF_TOKEN 
+      - my_secret_name
   - name: sglang_worker
     image: ...
     cmd: ["dynamo", "serve"] # current dynamo-run
