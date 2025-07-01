@@ -21,8 +21,8 @@
 1. current `dynamo-run` will converge into `dynamo serve`
 
 2. separate responsibilities
-`dynamo serve` will launch single component
-`dynamo deploy` will launch multiple components (graph)
+- `dynamo serve` will launch single component
+- `dynamo deploy` will launch multiple components (graph)
 
 
 # Motivation
