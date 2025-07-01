@@ -90,10 +90,12 @@ version: 1.0
 name: dynamo-graph
 components:
   - name: http_ingress
+    image: ...
     cmd: ["dynamo", "serve"]    # default cmd, current dynamo-run
     run_config:
       input: http
       output: dyn
+    parameters:
       port: 8080
     replicas: 5
     resources:
@@ -101,6 +103,7 @@ components:
       memory: 2Gi
   - name: vllm_worker
     cmd: ["dynamo", "serve"]
+    image: ...
     run_config:
       input: "dyn://llama3-8b.backend.generate"
       output: vllm
@@ -120,6 +123,7 @@ components:
     secrets:
       - HF_TOKEN 
   - name: sglang_worker
+    image: ...
     cmd: ["dynamo", "serve"] # current dynamo-run
     run_config:
       input: "dyn://qwen3-32b.backend.generate" 
