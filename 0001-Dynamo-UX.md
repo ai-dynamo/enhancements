@@ -152,7 +152,7 @@ dynmao deploy --target slurm -c ./config.yaml -f ./deployment.yaml --out_dir=slu
 ### `config.yaml` 
 maps to [current config yaml](https://github.com/ai-dynamo/dynamo/blob/main/examples/vllm_v1/configs/disagg.yaml) and used with `dynamo serve ...  -c ./config.yaml` to run a service.
 
-`deployment-config.yaml`
+`deployment.yaml`
 ```yaml
 version: 0.1
 name: dynamo-graph
@@ -195,7 +195,7 @@ components:
 
 ### Alternative 2: Single config file with embedded component configs
 
-`deployment-config.yaml`
+`deployment.yaml`
 ```yaml
 version: 0.1
 name: dynamo-graph
