@@ -39,7 +39,7 @@ dynamo deploy <model-name>
 dynamo deploy --mode agg --engine vllm <model-name>
 
 # explicit config file
-dynamo deploy --mode disagg --engine trtllm -f ./my_custom_config.yaml <model-name>
+dynamo deploy -f ./my_custom_config.yaml
 ```
 
 4. Deprecate `dynamo build`, `depnednds` and `link`
