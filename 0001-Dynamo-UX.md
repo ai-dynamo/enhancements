@@ -1,4 +1,4 @@
-# Dynamo SDK v2 and IR design
+# Dynamo UX v2
 
 **Status**: Draft
 
@@ -6,24 +6,19 @@
 
 **Category**: Architecture
 
-**Replaces**: 
-
-**Replaced By**: 
-
-**Sponsor**: 
-
-**Required Reviewers**: Neelay, Ishan, Alec, Mohammed, Maksim
+**Required Reviewers**: Itay, Neelay, Ishan, Alec, Mohammed, Maksim
 
 **Review Date**: [TBD]
 
 **Related Docs**:
 -  [Dynamo SDK Abstractions design and Multi-Target Deployment](https://docs.google.com/document/d/1UNSD_MUOYa1cbGwHp0Wn53wdO0Ir55KR7rfDUZYvNto/edit?tab=t.0)
+- 
 
 # Summary
 
-1. current `dynamo-run` will converge into `dynamo serve`
+1. current `dynamo-run` converges into `dynamo serve`
 
-2. separate responsibilities
+2. separate responsibilities but similar UX
 - `dynamo serve` will launch a single component only
 - `dynamo deploy` will launch multiple components (graph)
 
@@ -45,26 +40,28 @@ Both dont't need handholding and full control.
 class PrefillWorker:
 ```
 
-## 2: Too many levels of configuration 
+## Too many levels of configuration 
 Configurations are managead in SDK decorators, CLI args, env variables and config files. 
 - Dynamo components authors are confused how to config and launch components
 - K8s savvy end-users are confused where and how to configure a dynamo graph in k8s
 
-## 3: Implicit resource allocation
+## Implicit resource allocation
 Users are unable to specify gpu resources explicitly
 
 ## Design Principles
 
 ### SOC: Separation of concerns
-1. Decouple component author API from k8s deployment related concerns
+1. Decouple component author API from k8s deployment
 2. Separate component and graph launch verbs (dynamo serve and dynamo deploy)
 
 
-### Dev-Ex: Simple is better than complex.
-1. Enable dynamo developers to completely control how to spin up a component   
+### UX: Simple is better than complex.
+- Consistent UX across `dynamo serve` and `dynamo deploy` commands
+- Enable dynamo developers to completely control how to spin up a component 
 
 ### Explicit is better than implicit
-Allow users to fully and explicitly specify all configurations (gpu resources, parameters etc.)
+- No handholding needed, customers/users are domain experts
+- Allow users to fully and explicitly specify all configurations (gpu resources, parameters etc.)
 
 
 ## Requirements
@@ -98,21 +95,24 @@ dynamo serve in=dyn out=vllm -f config.yam
 ## Launching a graph
 
 
-```bash
-# creates deploymenet manifests for the target (default=k8s) 
-dynmao deploy --target k8s -f ./my-graph-deployment-config.yaml -c ./config.yaml --out_dir=k8s_deployment
+### Alternative 1: Separate deployment and component configs
 
-dynmao deploy --target slurm -f ./my-graph-deployment-config.yam -c ./config.yaml --out_dir=slum_deployment
+```bash
+# creates deploymenet manifests for the target (default =k8s) 
+dynmao deploy -c ./config.yaml -f ./deployment.yaml --out_dir=k8s_deployment
+
+dynmao deploy --target slurm -c ./config.yaml -f ./deployment.yaml --out_dir=slum_deployment
 ```
 
-### Alternative 1: separate deployment and component configs
+1. config.yaml
+
+This will map to [current config yaml](https://github.com/ai-dynamo/dynamo/blob/main/examples/vllm_v1/configs/disagg.yaml)
+`dynamo serve -c ./config.yaml` to run a service
 
 
+### Alternative 2: Single config file with embedded component configs
 
-### Alternative 2: Single config file with embedded component parameters
-Config is where user can specify deployment spec in a deployment target agnostic 
-
-`my-graph-deployment-config.yaml`
+`deployment-config.yaml`
 ```yaml
 version: 1.0
 name: dynamo-graph
@@ -123,7 +123,7 @@ components:
     run_config:
       input: http
       output: dyn
-      parameters:
+      parameters:               # these parameters are passed to component
         port: 8080
     replicas: 5
     resources:
@@ -147,51 +147,7 @@ components:
       memory: 24Gi
     environment:
       CUDA_VISIBLE_DEVICES: "0,1"
-      HF_TOKEN: "${{ secrets.HF_TOKEN }}"
+      HF_TOKEN: "${{ my_secret_name.HF_TOKEN }}"
     secrets:
       - my_secret_name
-  - name: sglang_worker
-    image: ...
-    cmd: ["dynamo", "serve"]
-    run_config:
-      input: "dyn://qwen3-32b.backend.generate" 
-      output: sglang
-      model_path: "/data/models/Qwen/Qwen3-32B"
-      tensor_parallel_size: 4
-      router_mode: "kv"
-      num_nodes: 2
-      node_rank: 0
-      leader_addr: "127.0.0.1:9876"
-    replicas: 1
-    resources:
-      gpu: 4
-      memory: 64Gi
-  - name: batch_processor
-    cmd: ["dynamo", "serve"]
-    run_config:
-      input: "batch:/data/prompts.jsonl"
-      output: mistralrs
-      model_path: "Qwen/Qwen3-4B"
-      verbosity: 2  # -vv flag
-    replicas: 1
-    resources:
-      memory: 16Gi
-  # Multi-node distributed example
-  - name: trtllm_leader
-    cmd: ["dynamo", "serve"]
-    run_config:
-      input: "dyn://deepseek-70b.backend.generate"
-      output: trtllm
-      model_path: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B"
-      tensor_parallel_size: 16
-      num_nodes: 2
-      node_rank: 0
-      leader_addr: "10.217.98.122:5000"
-      extra_engine_args: "trtllm_config.yaml"
-    replicas: 1
-    resources:
-      gpu: 8
-      memory: 80Gi
-    node_selector:
-      role: leader
 ```
