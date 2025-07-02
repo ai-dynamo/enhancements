@@ -2,7 +2,7 @@
 
 **Status:** Draft  
 
-**Authors:** Neelay Shah US, Keiven Chang NVIDIA US, J Wyman US  
+**Authors:** nnshah1, keivenchang, whoisj
 
 **Category:** Architecture  
 
