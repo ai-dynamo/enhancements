@@ -42,6 +42,8 @@ dynamo deploy --mode agg --engine vllm <model-name>
 dynamo deploy --mode disagg --engine trtllm -f ./my_custom_config.yaml <model-name>
 ```
 
+4. Deprecate `dynamo build`, `depnednds` and `link`
+
 # Motivation
 
 ## Tight coupling between component's implementation and deployment
