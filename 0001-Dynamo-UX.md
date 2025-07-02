@@ -230,8 +230,7 @@ deployments:
       args:                     # command arguments 
         - input=http
         - output=dyn
-      options:   # options are rendered in the format --key value
-        port: 8000
+      # options are auto injected 
     replicas: 5
     resources:
       cpu: 500m
