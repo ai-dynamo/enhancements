@@ -198,6 +198,7 @@ components:
 ### Alternative 2: Single config file
 
 ```bash
+dynamo serve http_ingress -f ./config.yaml
 dynamo deploy -f ./config.yaml --out_dir=k8s_deployment
 ```
 
@@ -209,9 +210,18 @@ name: dynamo-graph
 
 components:
   - name: http_ingress
+    run_config:
+      # raw argv style positional args
+      args:                     # command arguments 
+        - input=http
+        - output=dyndynamo deploy -f ./config.yaml --out_dir=k8s_deployment
     options:
       port: http
   - name: vllm_worker
+      run_config:
+      args:
+        input: "dyn://llama3-8b.backend.generate"
+        output: vllm
     options:
       model_path: "meta-llama/Meta-Llama-3-8B-Instruct"
       tensor_parallel_size: 2
@@ -223,16 +233,6 @@ deployments:
   - name: http_ingress
     image: "<pre-built-image>"
     cmd: ["dynamo", "serve"]    
-    # default command is `dynamo serve`
-    # Alternatively, user can specify any command -
-    # cmd: ["python3", "-m", "a.b.MyComponent"]
-    # cmd: ["rust-binary"]
-    run_config:
-      # raw argv style positional args
-      args:                     # command arguments 
-        - input=http
-        - output=dyn
-      # options are auto injected 
     replicas: 5
     resources:
       cpu: 500m
@@ -240,11 +240,6 @@ deployments:
   - name: vllm_worker
     cmd: ["dynamo", "serve"]
     image: "<pre-built-image>"
-    run_config:
-      args:
-        input: "dyn://llama3-8b.backend.generate"
-        output: vllm
-
     replicas: 2
     resources:
       gpu: 2
