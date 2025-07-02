@@ -139,35 +139,34 @@ name: dynamo-graph
 components:
   - name: http_ingress
     image: "<pre-built-image>"
-    cmd: ["dynamo", "serve"]    # default cmd, current dynamo-run
+    cmd: ["dynamo", "serve"]    # default command is `dynamo serve`
     run_config:
-      input: http
-      output: dyn
-      parameters:               # these parameters are passed to component
-        port: 8080
+      args:                     # command arguments 
+        - input=http
+        - output=dyn
     replicas: 5
     resources:
       cpu: 500m
       memory: 2Gi
   - name: vllm_worker
     cmd: ["dynamo", "serve"]
-    image: ...
+    image: "<pre-built-image>"
     run_config:
-      input: "dyn://llama3-8b.backend.generate"
-      output: vllm
-      parameters:
+      args:
+        input: "dyn://llama3-8b.backend.generate"
+        output: vllm
+      options:   # options are rendered in the format --a b
+        a: b
         model_path: "meta-llama/Meta-Llama-3-8B-Instruct"
         tensor_parallel_size: 2
         context_length: 8192
         base_gpu_id: 0
-        extra_engine_args: "vllm_config.json"
     replicas: 2
     resources:
       gpu: 2
       memory: 24Gi
     environment:
-      CUDA_VISIBLE_DEVICES: "0,1"
-      HF_TOKEN: "${{ my_secret_name.HF_TOKEN }}"
-    secrets:
-      - my_secret_name
+      DISABLE_FOO: 1
+    secret_env:
+      - my_k8s_secret_name
 ```
