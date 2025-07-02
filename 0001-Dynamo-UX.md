@@ -25,15 +25,21 @@
 3. Consistent UX
 
 ```bash
-# serve 
-dynamo serve <model-name>
-dynamo serve --mode disagg --engine=vllm <model-name>
-dynamo serve --mode disagg --engine=vllm -f ./config.yaml <model-name>
+# serve frontend
+dynamo serve in=http out=dyn
+# serve a backend
+dynamo serve --engine vllm <model-name>
+dynamo serve --task prefill --engine=trtllm <model-name>
+dynamo serve --engine=vllm -f ./config.yaml <model-name>
 
 # deploy golden path
 dynamo deploy <model-name>
-dynamo deploy --mode disagg --engine=vllm <model-name>
-dynamo deploy --mode disagg --engine=vllm -f ./my_custom_config.yaml <model-name>
+
+# deploy a model in aggregated mode
+dynamo deploy --mode agg --engine vllm <model-name>
+
+# explicit config file
+dynamo deploy --mode disagg --engine trtllm -f ./my_custom_config.yaml <model-name>
 ```
 
 # Motivation
@@ -80,13 +86,17 @@ Users are unable to specify gpu resources explicitly
 ## Requirements
 
 ### REQ 1: Dynamo serve SHOULD not interleave deployment logic
-### REQ 2: Dynamo users MUST be able to explicitly specify exact configuration
-### REQ 3: Dynamo users MUST be able to deploy a dynamo graph using a simplified config
+### REQ 2: Dynamo users MUST be able to deploy a dynamo graph using a simplified explicitly specified config
 
 ## Scenarios
 
-Persona: Entrprise customer (K8s  Savvy)
+Persona: Entrprise customer
+- experts in managing K8s 
+- need full control over customizing a graph deployment
+
 Persona: Compoent Developer
+- need full control over launching a component
+- need consistent deployment in k8s through ci/cd  
 
 # Proposal
 
@@ -94,17 +104,29 @@ Persona: Compoent Developer
 
 `dyanmo serve` command will launch individual component (single process) 
 
-Example:
+Dedidcated DEP [merge dynamo serve and run](https://github.com/ai-dynamo/enhancements/blob/grahamk/serve-run-merge/deps/NNNN-serve-run-merge.md) to address the same.
+
+### Alt 1: Preserve current dynamo run experience
 
 Launch Frontend (+Processor+Router)
 ```bash
-dynamo serve in=http out=dyn -f config.yaml
+dynamo serve in=http out=dyn
 ```
 Launch vllm worker
 ```bash
-dynamo serve in=dyn out=vllm -f config.yam
+dynamo serve in=dyn out=vllm -f config.yaml
 ```
 
+### Alt 2: similar experience across serve and deploy
+
+```bash
+dynamo serve --engine vllm <model-name>
+dynamo serve --task prefill --engine=trtllm <model-name>
+dynamo serve --engine=vllm -f ./config.yaml <model-name>
+```
+
+
+### Note
 Current UX
 ```bash
 dynamo serve --system-app-port 5000 --enable-system-app --use-default-health-checks \
@@ -114,6 +136,9 @@ dynamo serve --system-app-port 5000 --enable-system-app --use-default-health-che
 
 ## Launching a graph
 
+Dynamo deploy command will generate target specific manifests. 
+- input: config.yaml (component run config), deployment.yaml (deployment spec)
+- output: target specific manifests
 
 ### Alternative 1: Separate deployment and component configs
 
@@ -124,23 +149,23 @@ dynmao deploy -c ./config.yaml -f ./deployment.yaml --out_dir=k8s_deployment
 dynmao deploy --target slurm -c ./config.yaml -f ./deployment.yaml --out_dir=slum_deployment
 ```
 
-1. config.yaml
-
-This will map to [current config yaml](https://github.com/ai-dynamo/dynamo/blob/main/examples/vllm_v1/configs/disagg.yaml)
-`dynamo serve -c ./config.yaml` to run a service
-
-
-### Alternative 2: Single config file with embedded component configs
+### `config.yaml` 
+maps to [current config yaml](https://github.com/ai-dynamo/dynamo/blob/main/examples/vllm_v1/configs/disagg.yaml) and used with `dynamo serve ...  -c ./config.yaml` to run a service.
 
 `deployment-config.yaml`
 ```yaml
-version: 1.0
+version: 0.1
 name: dynamo-graph
 components:
-  - name: http_ingress
+  - name: http_ingress        # component name matches with name in config.yaml
     image: "<pre-built-image>"
-    cmd: ["dynamo", "serve"]    # default command is `dynamo serve`
+    cmd: ["dynamo", "serve"]    
+    # default command is `dynamo serve`
+    # Alternatively, user can specify any command -
+    # cmd: ["python3", "-m", "a.b.MyComponent"]
+    # cmd: ["rust-binary"]
     run_config:
+      # raw argv style positional args
       args:                     # command arguments 
         - input=http
         - output=dyn
@@ -155,8 +180,52 @@ components:
       args:
         input: "dyn://llama3-8b.backend.generate"
         output: vllm
-      options:   # options are rendered in the format --a b
-        a: b
+    replicas: 2
+    resources:
+      gpu: 2
+      cpu: 10
+      memory: 24Gi
+    environment:
+      DISABLE_FOO: 1
+    # these secrets will be injected as env variables
+    # in k8s, these are secret refs
+    secret_env:
+      - my_k8s_secret_name
+```
+
+### Alternative 2: Single config file with embedded component configs
+
+`deployment-config.yaml`
+```yaml
+version: 0.1
+name: dynamo-graph
+components:
+  - name: http_ingress
+    image: "<pre-built-image>"
+    cmd: ["dynamo", "serve"]    
+    # default command is `dynamo serve`
+    # Alternatively, user can specify any command -
+    # cmd: ["python3", "-m", "a.b.MyComponent"]
+    # cmd: ["rust-binary"]
+    run_config:
+      # raw argv style positional args
+      args:                     # command arguments 
+        - input=http
+        - output=dyn
+      options:   # options are rendered in the format --key value
+        port: 8000
+    replicas: 5
+    resources:
+      cpu: 500m
+      memory: 2Gi
+  - name: vllm_worker
+    cmd: ["dynamo", "serve"]
+    image: "<pre-built-image>"
+    run_config:
+      args:
+        input: "dyn://llama3-8b.backend.generate"
+        output: vllm
+      options:
         model_path: "meta-llama/Meta-Llama-3-8B-Instruct"
         tensor_parallel_size: 2
         context_length: 8192
@@ -164,9 +233,12 @@ components:
     replicas: 2
     resources:
       gpu: 2
+      cpu: 10
       memory: 24Gi
     environment:
       DISABLE_FOO: 1
+    # these secrets will be injected as env variables
+    # in k8s, these are secret refs
     secret_env:
       - my_k8s_secret_name
 ```
