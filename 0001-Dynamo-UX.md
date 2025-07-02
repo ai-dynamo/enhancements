@@ -8,20 +8,33 @@
 
 **Required Reviewers**: Itay, Neelay, Ishan, Alec, Mohammed, Maksim
 
-**Review Date**: [TBD]
+**Review Date**: 07/02/2025
 
 **Related Docs**:
 -  [Dynamo SDK Abstractions design and Multi-Target Deployment](https://docs.google.com/document/d/1UNSD_MUOYa1cbGwHp0Wn53wdO0Ir55KR7rfDUZYvNto/edit?tab=t.0)
-- 
+- [merge dynamo serve and run](https://github.com/ai-dynamo/enhancements/blob/grahamk/serve-run-merge/deps/NNNN-serve-run-merge.md)
 
 # Summary
 
-1. current `dynamo-run` converges into `dynamo serve`
+1. current `dynamo-run` converges into `dynamo serve` [related DEP](https://github.com/ai-dynamo/enhancements/blob/grahamk/serve-run-merge/deps/NNNN-serve-run-merge.md)
 
-2. separate responsibilities but similar UX
+2. separate responsibilities
 - `dynamo serve` will launch a single component only
 - `dynamo deploy` will launch multiple components (graph)
 
+3. Consistent UX
+
+```bash
+# serve 
+dynamo serve <model-name>
+dynamo serve --mode disagg --engine=vllm <model-name>
+dynamo serve --mode disagg --engine=vllm -f ./config.yaml <model-name>
+
+# deploy golden path
+dynamo deploy <model-name>
+dynamo deploy --mode disagg --engine=vllm <model-name>
+dynamo deploy --mode disagg --engine=vllm -f ./my_custom_config.yaml <model-name>
+```
 
 # Motivation
 
@@ -90,6 +103,13 @@ dynamo serve in=http out=dyn -f config.yaml
 Launch vllm worker
 ```bash
 dynamo serve in=dyn out=vllm -f config.yam
+```
+
+Current UX
+```bash
+dynamo serve --system-app-port 5000 --enable-system-app --use-default-health-checks \
+  --service-name VllmWorker graphs.agg:Frontend \
+  --VllmWorker.ServiceArgs.dynamo.namespace=dynamo
 ```
 
 ## Launching a graph
