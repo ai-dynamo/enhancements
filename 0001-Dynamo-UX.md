@@ -193,7 +193,72 @@ components:
       - my_k8s_secret_name
 ```
 
-### Alternative 2: Single config file with embedded component configs
+### Alternative 2: Single config file
+
+```bash
+dynamo deploy -f ./config.yaml --out_dir=k8s_deployment
+```
+
+
+`config.yaml`
+```yaml
+version: 0.1
+name: dynamo-graph
+
+components:
+  - name: http_ingress
+    options:
+      port: http
+  - name: vllm_worker
+    options:
+      model_path: "meta-llama/Meta-Llama-3-8B-Instruct"
+      tensor_parallel_size: 2
+      context_length: 8192
+      base_gpu_id: 0
+
+# deployment section
+deployments:
+  - name: http_ingress
+    image: "<pre-built-image>"
+    cmd: ["dynamo", "serve"]    
+    # default command is `dynamo serve`
+    # Alternatively, user can specify any command -
+    # cmd: ["python3", "-m", "a.b.MyComponent"]
+    # cmd: ["rust-binary"]
+    run_config:
+      # raw argv style positional args
+      args:                     # command arguments 
+        - input=http
+        - output=dyn
+      options:   # options are rendered in the format --key value
+        port: 8000
+    replicas: 5
+    resources:
+      cpu: 500m
+      memory: 2Gi
+  - name: vllm_worker
+    cmd: ["dynamo", "serve"]
+    image: "<pre-built-image>"
+    run_config:
+      args:
+        input: "dyn://llama3-8b.backend.generate"
+        output: vllm
+
+    replicas: 2
+    resources:
+      gpu: 2
+      cpu: 10
+      memory: 24Gi
+    environment:
+      DISABLE_FOO: 1
+    # these secrets will be injected as env variables
+    # in k8s, these are secret refs
+    secret_env:
+      - my_k8s_secret_name
+```
+
+
+### Alternative 3: Single config file with embedded component configs
 
 `deployment.yaml`
 ```yaml
@@ -242,3 +307,8 @@ components:
     secret_env:
       - my_k8s_secret_name
 ```
+
+
+### Building base image
+
+Publish engine specific image with pre-built components for example current form of `examples/vllm/*` is available for python import. 
