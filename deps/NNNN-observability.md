@@ -1,20 +1,20 @@
-# Dynamo Observability Framework
+# Common Observability Framework
 
-**Status:** Draft  
+**Status:** Draft
 
 **Authors:** nnshah1, keivenchang, whoisj
 
-**Category:** Architecture  
+**Category:** Architecture
 
-**Replaces:** N/A  
+**Replaces:** N/A
 
-**Replaced By:** N/A  
+**Replaced By:** N/A
 
-**Sponsor:** keivenchang  
+**Sponsor:** keivenchang
 
 **Required Reviewers:** TBD  
 
-**Review Date:** [Date for review]  
+**Review Date:** [Date for review]
 
 **Pull Request:** [Link to Pull Request of the Proposal itself]  
 
@@ -22,19 +22,19 @@
 
 # Summary
 
-This document outlines and defines the Dynamo Observability Framework, detailing its goals and test cases. The DOF allows Dynamo programmers to add and expose observability throughout the system in a common, consistent, and performant manner, avoiding the use of disparate raw libraries that could compromise safety, performance, and consistency.
+This document outlines and defines the Common Observability Framework, detailing its goals and test cases. The DOF allows Dynamo programmers to add and expose observability throughout the system in a common, consistent, and performant manner, avoiding the use of disparate raw libraries that could compromise safety, performance, consistency, and maintainability.
 
 # Motivation
 
 ## Goals
-The common observability framework in Dynamo is designed to improve system visibility and support greater fault tolerance. Relying on disparate, low-level libraries often results in inconsistencies and sometimes performance and safety issues, which can impact service reliability. By providing a standardized framework, we simplify implementation, reduce development time, and promote best practices in observability.
 
-* Consistent metrics endpoint for each component/process
-* Consistent API for programmers to add metrics and tracing
-* Consistent formats (e.g., structs and Prometheus outputs)
-* Performant
-* Flexibility – allow different implementations using the same interface
-* Improved Safety: use tested and known APIs instead of disparate raw libraries
+The Common Observability Framework in Dynamo is designed to improve system visibility and support greater fault tolerance. Relying on various different libraries often results in compatibility issues as well as performance and safety issues, which can impact service reliability. By providing a common framework, we simplify implementation, reduce development time, and promote best practices in observability.
+
+* Provide a common metrics endpoint for each component/process
+* Provide common APIs for programmers to add metrics and tracing
+* Provide a way to create a common data formats (e.g., structs and metric types)
+* Provide flexibility – allow different implementations using the same APIs
+* Improve safety: use tested and well-known APIs instead of disparate libraries
 
 ## Non-Goals
 
@@ -52,38 +52,38 @@ The common observability framework in Dynamo is designed to improve system visib
 
 ### REQ 2: Statistics Declaration
 
-* **Description:** Each component MUST declare a struct of statistics that it will track and report.  
+* **Description:** Each component MUST declare a struct of statistics that it will track and report.
 * **Rationale:** Standardizing the statistics structure ensures consistency in the data reported across different components.  
 * **Measurability:** Confirm that each component has a defined statistics struct and that it is used for reporting metrics.
 
 ### REQ 3: Common Metrics Interface
 
-* **Description:** Each component MUST use the common interface to implement metrics counting, gauging, histogram, and tracing functionalities.  
+* **Description:** Each component MUST use the common interface for counting, modifying gauges, adding to histograms, and tracing.  
 * **Rationale:** A common interface ensures that metrics collection is consistent and reliable across all components.  
 * **Measurability:** Check that all components use the common interface for metrics operations and that the metrics collected are consistent.
 
 ### REQ 4: Pluggable Backend Interface
 
-* **Description:** The metrics interface (API) MUST support pluggable backends, such as Prometheus library, OpenTelemetry (OTel), custom C++ implementations, etc.  
-* **Rationale:** Pluggable backends provide flexibility in how metrics are collected and reported, enabling integration with various monitoring tools.  
+* **Description:** The metrics interface (API) MUST support pluggable backends, such as Prometheus library, OpenTelemetry (OTel), and/or custom C++ implementations, etc.
+* **Rationale:** Pluggable backends provide flexibility in how metrics are collected and reported, enabling integration with various monitoring tools.
 * **Measurability:** Validate that the API can switch between different backend implementations without requiring changes to the components.
 
 ### REQ 5: Python Bindings
 
-* **Description:** The common metrics interface MUST provide Python bindings to ensure compatibility with Python components in Dynamo.  
-* **Rationale:** Python bindings ensure that components written in Python can also utilize structs (with well-defined metric types) and interfaces, maintaining consistency across the system.  
+* **Description:** The common API MUST provide Python bindings to ensure compatibility with Python components in Dynamo.
+* **Rationale:** Python bindings ensure that components written in Python can also utilize Rust structs (with well-defined metric types) and interfaces, maintaining consistency across different layers.
 * **Measurability:** Verify the existence and functionality of Python bindings for the metrics interface, and ensure that Python components can use these bindings to report metrics.
 
 ### REQ 6: Callback API
 
-* **Description:** The metrics interface (API) MUST include a callback mechanism for components that require immediate feedback instead of relying on periodic polling updates (such as those provided by the Prometheus server).  
-* **Rationale:** Immediate feedback allows components to react to critical metrics changes in real-time, enhancing the system's responsiveness and fault tolerance capabilities.  
+* **Description:** The metrics interface (API) MUST include a callback mechanism for components that require immediate feedback instead of relying on periodic polling updates (such as those provided by the Prometheus server).
+* **Rationale:** Immediate feedback allows components to react to critical metrics changes in real-time, enhancing the system's responsiveness and fault tolerance capabilities.
 * **Measurability:** Verify that the API includes a callback mechanism and that components can register for immediate feedback. Test that the callback mechanism provides timely updates whenever relevant metrics change.
 
 ### REQ 7: Composite Metrics Support
 
-* **Description:** The metrics interface (API) MUST support composite metrics, such as average, minimum, and maximum values, for certain clients (e.g., Planner) that require these metrics quickly without waiting for Prometheus to poll periodically.  
-* **Rationale:** Providing immediate access to composite metrics enables components to make timely decisions based on real-time data, improving overall system performance and responsiveness.  
+* **Description:** The metrics interface (API) MUST support composite metrics, such as average, minimum, and maximum values, for certain clients (e.g., Planner) that require these metrics quickly without waiting for Prometheus to poll periodically.
+* **Rationale:** Providing immediate access to composite metrics enables components to make timely decisions based on real-time data, improving overall system performance and responsiveness.
 * **Measurability:** Confirm that the API can calculate and provide composite metrics (avg, min, max) on-demand. Test that clients, such as the Planner, can access these metrics directly through the API without relying on periodic polling.
 
 These requirements ensure that the observability framework in Dynamo is consistent, flexible, and easy to implement across all components, supporting the overall goal of enhanced fault tolerance and system reliability.
@@ -92,6 +92,7 @@ These requirements ensure that the observability framework in Dynamo is consiste
 # Proposal
 
 The proposal is to create a common library that allows each component/process to:
+
 * Expose metrics and/or health statistics on an HTTP endpoint.
 * Create an observability struct containing statistics (e.g., incr counter, gauge, and histogram).
 * Call a common API that mutates the observability struct.
