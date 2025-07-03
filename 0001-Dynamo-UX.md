@@ -20,7 +20,7 @@
 
 2. separate responsibilities
 - `dynamo serve` will launch a single component only
-- `dynamo deploy` will launch multiple components (graph)
+-  K8s DynamoGraphDeployment CR will launch multiple components (graph) in k8s environment
 
 3. deprecate 
 - `dynamo build` in favor of builderless deployments
