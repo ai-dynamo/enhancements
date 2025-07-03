@@ -25,9 +25,28 @@
 3. deprecate 
 - `dynamo build` in favor of builderless deployments
 - `depends` and `link`
+- older version of examples
 
 4. simple deployment with K8s DynamoGraphDeployment CR 
 
+directory strucutre:
+```yaml
+examples/llm
+- vllm_v1
+   - launch
+      - k8s             #  this folder contains DynamoGraphDeployment CRs
+        - agg.yaml
+        - disagg.yaml
+        - disagg.yaml
+        - deepseek_r1
+          - agg_dp.yaml
+      - local             #  this folder contains DynamoGraphDeployment CRs
+   - components
+- tensorrt_llm
+- sglang
+- vllm_v0
+- multimodal
+```
 
 # Motivation
 
