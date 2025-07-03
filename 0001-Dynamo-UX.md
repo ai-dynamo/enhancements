@@ -40,7 +40,7 @@ examples/llm
         - disagg.yaml
         - deepseek_r1
           - agg_dp.yaml
-      - local             #  this folder contains DynamoGraphDeployment CRs
+      - local             #  this folder contains scripts/README for local serving
    - components
 - tensorrt_llm
 - sglang
