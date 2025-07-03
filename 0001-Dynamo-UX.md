@@ -24,7 +24,8 @@
 
 3. deprecate 
 - `dynamo build` in favor of builderless deployments
-- `depends` and `link`
+- `dynamo deploy` in favor of simpler K8s DynamoGraphDeployment CR  (next point below)
+- `depends` and `link`: these are not used anymore 
 - older version of examples
 
 4. simple deployment with K8s DynamoGraphDeployment CR 
