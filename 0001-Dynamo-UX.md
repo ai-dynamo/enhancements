@@ -22,30 +22,11 @@
 - `dynamo serve` will launch a single component only
 - `dynamo deploy` will launch multiple components (graph)
 
-3. deprecate `dynamo build` in favor of builderless deployments
+3. deprecate 
+- `dynamo build` in favor of builderless deployments
+- `depends` and `link`
 
-4. deprecate `depends` and `link`
-
-5. consistent serve/deploy UX
-
-```bash
-# serve frontend
-dynamo serve in=http out=dyn
-
-# serve backend
-dynamo serve in=dyn out=vllm -f ./config.yaml
-```
-
-TODO: move to seperate DEP
-6. golden path for deployment
-```
-# deploy a model with sane default parameters
-dynamo deploy <model-name>
-dynamo deploy --mode agg --engine vllm <model-name>
-
-# explicit config file
-dynamo deploy -f ./my_custom_config.yaml
-```
+4. simple deployment with K8s DynamoGraphDeployment CR 
 
 
 # Motivation
@@ -141,6 +122,83 @@ dynamo serve --system-app-port 5000 --enable-system-app --use-default-health-che
 ```
 
 ## Launching a graph
+
+**Local**: Consensus is to provide individual `dyanmo serve` commands to launch each component in isolation in bare metal local env.
+
+We are not opinionated on how to locally serve the graph and left it to end-user.
+
+Alternatives are:
+- bash/python script to launch component in a single node
+- docker compose for launching the components locally with pre-built images
+- README with `dynamo serve` commands to launch each component
+- gstreamer/nextflow like DSL
+
+
+**K8s**: There are 2 approaches to launch a graph in K8s environment
+1. K8s DynamoGraphDeployment CR to launch examples [Preferred]
+
++ Simple
++ Explicit
+- Duplicated config for local serving
+
+Example:
+```bash
+kubectl apply -f vllm-disagg-graph.yaml
+```
+
+2. `dynamo deploy` cli to generate K8s DynamoGraphDeployment CR
++ Extensible to docker compose/slurm
++ DRY: reuse same config between local/k8s
++ CI/CD friendly
+- multiple steps
+
+### Use K8s DynamoGraphDeployment CR to launch examples [Preferred]
+
+Each Dyanmo graph example will accompany a corresponding k8s DynamoGraphDeployment CR for deployment in K8s.
+
+`agg-vllm.yaml`
+```yaml
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+ name: example-graph
+spec:
+ services:
+  # component 
+   Frontend:
+     dynamoNamespace: inference
+     componentType: main
+     replicas: 4
+     extraPodSpec:
+       mainContainer:
+         image: <PRE_BUILT_IMAGE>
+         command: 
+         - dynamo run
+         args:
+         - in=http
+         - out=dyn
+    envs:
+    - name: DYN_DEPLOYMENT_CONFIG
+      value: <Component Config Yaml/Json>
+  # component 
+   VllmWorker:
+     dynamoNamespace: inference
+     replicas: 2
+     extraPodSpec:
+       mainContainer:
+         image: <PRE_BUILT_IMAGE>
+         command: 
+         - dynamo run
+         args:
+         - in=dyn
+         - out=vllm
+    envs:
+    - name: DYN_DEPLOYMENT_CONFIG
+      value: <Component Config Yaml/Json>
+```
+
+
+**NOTE**: Below alternatives use `dynamo deploy` command to generate k8s manifests
 
 Dynamo deploy command will generate target specific manifests. 
 - input: config.yaml (component run config), deployment.yaml (deployment spec)
@@ -312,3 +370,28 @@ components:
 ### Building base image
 
 Publish engine specific image with pre-built components for example current form of `examples/vllm/*` is available for python import. 
+
+
+**Note**  
+moved to seperate DEP
+
+golden path for deployment
+```
+# deploy a model with sane default parameters
+dynamo deploy <model-name>
+dynamo deploy --mode agg --engine vllm <model-name>
+
+# explicit config file
+dynamo deploy -f ./my_custom_config.yaml
+```
+
+A: consistent deploy UX
+
+```bash
+# serve frontend
+dynamo serve in=http out=dyn
+dynamo serve in=dyn out=vllm -f ./config.yaml
+
+# serve backend
+dynamo deploy -f ./config.yaml -c ./deployment.yaml
+```
