@@ -20,7 +20,9 @@
 
 2. separate responsibilities
 - `dynamo serve` will launch a single component only
--  K8s DynamoGraphDeployment CR will launch multiple components (graph) in k8s environment
+- graph launch
+  - local: unopinionated, users have full control over how to orchestrate multiple components
+  - k8s : K8s DynamoGraphDeployment CR will launch multiple components (graph) in k8s environment
 
 3. deprecate 
 - `dynamo build` in favor of builderless deployments
@@ -28,7 +30,7 @@
 - `depends` and `link`: these are not used anymore 
 - older version of examples (examples/llm)
 
-4. simple deployment with K8s DynamoGraphDeployment CR 
+4. simple k8s graph deployment with [K8s DynamoGraphDeployment CR](#use-k8s-dynamographdeployment-cr-to-launch-examples-preferred)
 
 directory strucutre:
 ```yaml
