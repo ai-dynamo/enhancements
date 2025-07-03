@@ -101,7 +101,58 @@ The proposal is to create a common library that allows each component/process to
 
 Below is an ASCII diagram, showing 1) An observability struct containing pre-defined metric and tracing types, 2) common Observability APIs that take in the structs as parameters to mutate the struct (e.g., incr, gauge), and 3) A common HTTP library that also takes in the struct to expose an endpoint.
 
-{% include ./NNNN-metric-class-diagram.md %}
+```mermaid
+classDiagram
+    %% Core Traits
+    class MetricContainer {
+        <<trait>>
+        +create_counter()
+        +create_gauge()
+        +get_metrics()
+    }
+    
+    class MetricCounter {
+        <<trait>>
+        +inc()
+        +get_value()
+    }
+    
+    class MetricGauge {
+        <<trait>>
+        +set()
+        +get_value()
+    }
+    
+    %% Implementations
+    class PrometheusContainer {
+        +new(prefix)
+    }
+    
+    class OpenTelemetryContainer {
+        +new(service_name, prefix)
+    }
+    
+    class PrometheusCounter
+    class PrometheusGauge
+    class OpenTelemetryCounter
+    class OpenTelemetryGauge
+    
+    %% Relationships
+    MetricContainer <|.. PrometheusContainer
+    MetricContainer <|.. OpenTelemetryContainer
+    
+    MetricCounter <|.. PrometheusCounter
+    MetricCounter <|.. OpenTelemetryCounter
+    
+    MetricGauge <|.. PrometheusGauge
+    MetricGauge <|.. OpenTelemetryGauge
+    
+    PrometheusContainer --> PrometheusCounter
+    PrometheusContainer --> PrometheusGauge
+    
+    OpenTelemetryContainer --> OpenTelemetryCounter
+    OpenTelemetryContainer --> OpenTelemetryGauge
+``` 
 
 ```Rust
     // Example usage:
