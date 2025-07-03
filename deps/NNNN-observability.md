@@ -99,7 +99,7 @@ The proposal is to create a common library that allows each component/process to
 * Call a common API that mutates the observability struct.
 * Automatically export the observability struct to a Prometheus key-val format.
 
-Below is an ASCII diagram, showing 1) An observability struct containing pre-defined metric and tracing types, 2) common Observability APIs that take in the structs as parameters to mutate the struct (e.g., incr, gauge), and 3) A common HTTP library that also takes in the struct to expose an endpoint.
+Below is a diagram showing the architecture of the observability framework. The design uses trait-based abstractions to support pluggable backends: 1) Core traits (`MetricContainer`, `MetricCounter`, `MetricGauge`) define the common interface for metric operations, 2) Backend-specific implementations (Prometheus and OpenTelemetry) provide concrete implementations of these traits, and 3) The container pattern allows components to create and manage metrics through a unified API regardless of the underlying backend.
 
 ```mermaid
 classDiagram
