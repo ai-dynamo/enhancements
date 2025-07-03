@@ -26,7 +26,7 @@
 - `dynamo build` in favor of builderless deployments
 - `dynamo deploy` in favor of simpler K8s DynamoGraphDeployment CR  (next point below)
 - `depends` and `link`: these are not used anymore 
-- older version of examples
+- older version of examples (examples/llm)
 
 4. simple deployment with K8s DynamoGraphDeployment CR 
 
@@ -392,8 +392,7 @@ components:
 Publish engine specific image with pre-built components for example current form of `examples/vllm/*` is available for python import. 
 
 
-**Note**  
-moved to seperate DEP
+### Note: Ignore below - moved to a separate dep
 
 golden path for deployment
 ```
