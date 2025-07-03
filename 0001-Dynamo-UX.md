@@ -6,7 +6,7 @@
 
 **Category**: Architecture
 
-**Required Reviewers**: Itay, Neelay, Ishan, Alec, Mohammed, Maksim
+**Required Reviewers**: Itay, Neelay, Graham, Ishan, Alec, Mohammed, Maksim, Neal
 
 **Review Date**: 07/02/2025
 
@@ -22,27 +22,31 @@
 - `dynamo serve` will launch a single component only
 - `dynamo deploy` will launch multiple components (graph)
 
-3. Consistent UX
+3. deprecate `dynamo build` in favor of builderless deployments
+
+4. deprecate `depends` and `link`
+
+5. consistent serve/deploy UX
 
 ```bash
 # serve frontend
 dynamo serve in=http out=dyn
-# serve a backend
-dynamo serve --engine vllm <model-name>
-dynamo serve --task prefill --engine=trtllm <model-name>
-dynamo serve --engine=vllm -f ./config.yaml <model-name>
 
-# deploy golden path
+# serve backend
+dynamo serve in=dyn out=vllm -f ./config.yaml
+```
+
+TODO: move to seperate DEP
+6. golden path for deployment
+```
+# deploy a model with sane default parameters
 dynamo deploy <model-name>
-
-# deploy a model in aggregated mode
 dynamo deploy --mode agg --engine vllm <model-name>
 
 # explicit config file
 dynamo deploy -f ./my_custom_config.yaml
 ```
 
-4. Deprecate `dynamo build`, `depnednds` and `link`
 
 # Motivation
 
