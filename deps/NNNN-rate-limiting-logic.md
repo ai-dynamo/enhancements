@@ -439,7 +439,7 @@ The dynamic rate limiting system consists of four core components that integrate
 
 We provide a very high level overview of the system's architecture, and the implementation details of the core components.
 
-WARNING: The Rust code snippets below are not complete and are not guaranteed to be compatible with the current Dynamo codebase. They are provided for illustrative purposes only.
+**WARNING:** The Rust code snippets below are not complete and are not guaranteed to be compatible with the current Dynamo codebase. They are provided for illustrative purposes only.
 
 ## Component 1: Enhanced Metrics Collection Service
 
