@@ -54,7 +54,7 @@ The Component Metrics framework addresses these challenges by providing a unifie
 
 ### REQ 3: Common Profiling Interface
 
-* **Description:** Each component MUST use the common interface for counts,  gauges, histograms, and tracing.
+* **Description:** Each component MUST use the common interface for counts, gauges, and histograms.
 * **Rationale:** A common interface ensures that profiling data collection is consistent and reliable across all components.
 * **Measurability:** Check that all components use the common interface for profiling operations and that the profiling data collected are consistent.
 
