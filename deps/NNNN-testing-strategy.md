@@ -368,3 +368,20 @@ List out solutions that were considered but ultimately rejected. Consider free f
 
 \<optional: additional comments about this solution\>
 
+### CI Test Trigger Matrix
+
+| Trigger Variable                        | pre-merge | vllm_1-gpu | vllm_multi_gpu | trtllm_1-gpu | trtllm_multi_gpu | vllm_benchmark | trtllm_benchmark | jet | compoundai |
+|-----------------------------------------|:---------:|:----------:|:--------------:|:------------:|:----------------:|:--------------:|:----------------:|:---:|:----------:|
+| `RUN_PRE_MERGE_TESTS=true`              | Yes       | _          | -              | _            | -                | -              | -                | -   | -          |
+| `RUN_VLLM=true`                         | Yes       | Yes        | Manual         | -            | -                | -              | -                | -   | -          |
+| `RUN_END_TO_END_TESTS=true`             | -         | Yes        | Yes            | Yes          | Yes              | -              | -                | -   | -          |
+| `RUN_TENSORRTLLM=true`                  | -         | -          | -              | Yes          | Manual           | -              | -                | -   | -          |
+| `RUN_INTEGRATION_TESTS_ON_JET=true`     | -         | -          | -              | -            | -                | -              | -                | Yes | -          |
+| `RUN_SDK_CI=true`                       | -         | -          | -              | -            | -                | -              | -                | -   | Yes        |
+| `RUN_TRTLLM_BENCHMARKS_ON_JET=true`     | -         | -          | -              | -            | -                | -              | Yes              | - | -          |
+| `RUN_VLLM_BENCHMARKS_ON_JET=true`       | -         | -          | -              | -            | -                | Yes            | -                | - | -          |
+| `NIGHTLY_BUILD=true`                    | Yes       | Yes        | Yes            | Yes          | Yes              | Yes            | Yes              | Yes | Yes        |
+
+- **Yes**: Test runs automatically with this trigger.
+- **Manual**: Test can be triggered manually from the pipeline.
+- **-**: Test is not run with this trigger.
