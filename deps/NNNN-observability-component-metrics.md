@@ -1,4 +1,42 @@
-# Component Metrics
+# Observability - Component Metrics
+
+**Status:** Draft
+
+**Authors:** nnshah1, keivenchang, whoisj
+
+**Category:** Architecture
+
+**Replaces:** N/A
+
+**Replaced By:** N/A
+
+**Sponsor:** keivenchang
+
+**Required Reviewers:** TBD
+
+**Review Date:** [Date for review]
+
+**Pull Request:** [Link to Pull Request of the Proposal itself]
+
+**Implementation PR / Tracking Issue:** TBD
+
+# Summary
+
+This document outlines and defines the Component Metrics framework for Dynamo, providing a unified approach to collecting, exposing, and managing component performance metrics.
+
+# Motivation
+
+The Dynamo system currently lacks a unified approach to component metrics collection, with different components implementing their own monitoring solutions using disparate libraries. This fragmentation results in compatibility issues, performance and safety concerns, and inconsistent data formats that impact service reliability and system visibility.
+
+Relying on various different libraries often results in interoperability problems between components, making it difficult to correlate metrics data across the system and maintain consistent monitoring practices. This approach also increases maintenance costs due to varying coding styles and introduces potential performance and safety risks.
+
+## Goals
+
+The Component Metrics framework addresses these challenges by providing a unified approach that:
+
+* Improves consistent component metrics visibility across the system
+* Promotes best practices in metrics collection and exposure across all components
+* Avoids the use of disparate raw libraries that could compromise safety, performance, consistency, and maintainability
 
 ## Requirements
 
@@ -189,7 +227,9 @@ classDiagram
      }
 ```
 
-## Alternative Implementation 1
+# Alternate Solutions
+
+## Alt 1: Separate HTTP metrics endpoints into another process
 
 An alternative implementation could involve separating the HTTP metrics endpoints into a dedicated process. This could leverage an existing Dynamo monitor sidecar that already handles component restarts and lifecycle management. In this scenario, the sidecar process would be responsible for exposing the metrics endpoint while the main components would communicate their metrics data through the established interface.
 
@@ -204,3 +244,33 @@ This approach would still require the same interface and instrumentation library
 * Introduces additional communication overhead (e.g. NATS)
 * Increased latency, reliability concerns, and additional failure points in the metrics pipeline
 * More complex debugging and troubleshooting if/when metrics collection fails
+
+
+## Alt 2: Use Third Party Libraries Directly
+**Pros:**
+* Utilizes well-tested, existing libraries.
+* Potentially quicker initial setup.
+
+**Cons:**
+* Profiling data may not be interoperable between components (e.g., different types and semantics).
+* Changing the library would require significant refactoring.
+* Increased maintenance costs due to varying coding styles among developers.
+* Higher flexibility can introduce performance and safety risks.
+
+**Reason Rejected:**
+* Inconsistent profiling data and potential interoperability issues.
+* High refactoring effort if a library change is needed.
+* Increased maintenance complexity and potential performance/safety concerns.
+
+## Alt 3: Custom Library
+**Pros:**
+* Tailored to specific needs.
+* Full control over implementation.
+
+**Cons:**
+* Requires more time and resources to develop and test.
+* Not suitable for immediate needs.
+
+**Reason Rejected:**
+* Immediate solution needed.
+* Feasible in the long term, and which we may consider later.

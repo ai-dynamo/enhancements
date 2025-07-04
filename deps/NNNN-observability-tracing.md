@@ -1,4 +1,43 @@
-# Tracing
+# Observability - Tracing
+
+**Status:** Draft
+
+**Authors:** nnshah1, keivenchang, whoisj
+
+**Category:** Architecture
+
+**Replaces:** N/A
+
+**Replaced By:** N/A
+
+**Sponsor:** keivenchang
+
+**Required Reviewers:** TBD
+
+**Review Date:** [Date for review]
+
+**Pull Request:** [Link to Pull Request of the Proposal itself]
+
+**Implementation PR / Tracking Issue:** TBD
+
+# Summary
+
+This document outlines and defines the Tracing framework for Dynamo, providing a unified approach to distributed tracing, span management, and request correlation across components.
+
+# Motivation
+
+The Dynamo system currently lacks a unified approach to distributed tracing, with different components implementing their own tracing solutions using disparate libraries. This fragmentation results in compatibility issues, performance and safety concerns, and inconsistent trace formats that impact service reliability and system observability.
+
+Relying on various different libraries often results in interoperability problems between components, making it difficult to correlate traces across the system and maintain consistent tracing practices. This approach also increases maintenance costs due to varying coding styles and introduces potential performance and safety risks.
+
+## Goals
+
+The Tracing framework addresses these challenges by providing a unified approach that:
+
+* Improves consistent distributed tracing visibility across the system
+* Promotes best practices in trace collection and span management across all components
+* Avoids the use of disparate raw libraries that could compromise safety, performance, consistency, and maintainability
+
 
 ## Requirements
 

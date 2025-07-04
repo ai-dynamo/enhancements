@@ -50,35 +50,3 @@ The Common Observability Framework addresses these challenges by providing a uni
 
 * Legacy support (e.g., Triton)
 * Malicious actor resistance (DDOS protection) on /metrics endpoints
-
-
-# Alternate Solutions
-
-## Alt 1: Use Third Party Libraries
-**Pros:**
-* Utilizes well-tested, existing libraries.
-* Potentially quicker initial setup.
-
-**Cons:**
-* Profiling data may not be interoperable between components (e.g., different types and semantics).
-* Changing the library would require significant refactoring.
-* Increased maintenance costs due to varying coding styles among developers.
-* Higher flexibility can introduce performance and safety risks.
-
-**Reason Rejected:**
-* Inconsistent profiling data and potential interoperability issues.
-* High refactoring effort if a library change is needed.
-* Increased maintenance complexity and potential performance/safety concerns.
-
-## Alt 2: Custom Library
-**Pros:**
-* Tailored to specific needs.
-* Full control over implementation.
-
-**Cons:**
-* Requires more time and resources to develop and test.
-* Not suitable for immediate needs.
-
-**Reason Rejected:**
-* Immediate solution needed.
-* Feasible in the long term, and which we may consider later.
