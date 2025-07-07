@@ -36,7 +36,8 @@ The Logging framework addresses these challenges by providing a unified approach
 
 * Improves consistent logging visibility across the system
 * Promotes best practices in structured logging and log management across all components
-* Avoids the use of direct raw logging libraries that could compromise consistency and maintainability
+* Augments the common tracing interface with more information
+* Avoids the use of disparate raw logging libraries that could compromise consistency and maintainability
 
 ## Goals
 
@@ -81,10 +82,9 @@ Logging requirements and implementation details are still evolving. Below are cu
 
 Logging captures discrete events; tracing tracks request flows. Use together for comprehensive observability.
 
-**Log in traces for:** errors, business events, external interactions, performance anomalies
-**Avoid logging:** high-volume debug info, redundant data, hot paths, sensitive data
+When logging in traces, the focus is on capturing errors, business events, external interactions, and performance anomalies. On the other hand, the followings are to be avoided in logging: high-volume information, redundant data, operations in hot paths, and sensitive data.
 
-**Guidelines:** Always log errors, sample debug logs (1-5%), use async logging, buffer within spans.
+**Guidelines:** Always log errors, sample debug logs (1-5%), and use async logging.
 
 
 # Proposals
