@@ -2,7 +2,7 @@
 
 **Status**: Draft
 
-**Authors**: nnshah1, saturley-hall
+**Authors**: nnshah1, harrison, pavitra, biswa
 
 **Category**: Architecture 
 
@@ -14,9 +14,9 @@
 
 **Sponsor**: nnshah1
 
-**Required Reviewers**: meenakshi, pavitra, anant
+**Required Reviewers**: meenakshi, pavitra, anant, biswa
 
-**Review Date**: 2025-05-05 
+**Review Date**: 2025-05-30 
 
 **Pull Request**: TBD
 
@@ -44,12 +44,13 @@ Currently the Dynamo project has a number of different test strategies and imple
 
 ### Non Goals
 
-* To enumerate all tests and test cases (test plan)
+* To enumerate all tests and test cases (test plan) in this document.
 
 ## Requirements
 
-1. Tests MUST be deterministic. Tests deemed "flaky" will be removed.
-1. Tests SHOULD be written before beginning development of a new feature.
+1. Tests MUST be able to run locally as well as in CI. This is subject to appropriate hardware being available in the environment
+2. Tests MUST be deterministic. Tests deemed "flaky" will be removed.
+3. Tests SHOULD be written before beginning development of a new feature.
 
 ## Dynamo Testing Strategy (Intro)
 
@@ -69,10 +70,9 @@ These tests are validation against established style standards for the code base
 This is managed by the [pre-commit framework](https://pre-commit.com/). This allows both one-off execution and integration with git pre-commit hooks to ensure compliance at the development time.
 
 #### Execution
-Running this type of test is done though the following command
+Running this type of test is done though the following command: `pre-commit run -a`
 
 ### Unit Tests
-
 Unit tests evaluate the functionality of a unit of code independent of the rest of the code base or dependencies. The definition of a unit of Where possible this means that any functional dependencies, e.g. service references, should be mocked to limit the scope of errors to the unit under test.
 
 #### Structure
@@ -146,6 +146,7 @@ Integration tests use the `@pytest.mark.integration` mark, which is required for
     - `@pytest.mark.slow` - Tests that take a long time to run
     - `@pytest.mark.skip(reason="Example: KV Manager is under development")` - Skip these tests
     - `@pytest.mark.xfail(reason="Expected to fail because...")` - Tests expected to fail
+
 
 Usage of these marks can be chained together for example to select tests that run post-merge to `main` for the vLLM worker backend with 1 or 2 GPUs required: `pytest -m "integration and postmerge and vllm and (gpus_needed_1 or gpus_needed_2)`
 
@@ -281,6 +282,12 @@ Tests that are part of `pre-merge` include:
 1. [Integration tests](#integration-tests) with the `premerge` mark. Depending on the execution environment additional marks will be added by the [CI Infrastructure](#usage-in-continuous-integration-environments)
 1. [End-to-end test](#end-to-end-tests) with the `premerge` mark. Depending on the execution environment additional marks will be added by the [CI Infrastructure](#usage-in-continuous-integration-environments)
 
+#### Dynamic Discovery
+
+A subset of pre-merge tests will be dynamically added to the the pre-merge gate based on the files changed. 
+
+Todo: Determine how to specify this mapping and enable it for local testing.
+
 #### Actions for failure
 
 This class of test will be run against every pull request issued against `main` and there will be rule infrastructure which prevents merging if any of these tests fail. As such it falls to the developer(s) of the PR to fix any errors identified by the tests.
@@ -410,3 +417,21 @@ This information is largely proprietary to NVIDIA but broadly this environment p
 In contrast to the public infrastructure, the internal infrastructure provides single or dual GPU testing environments for test.
 
 Additionally there are kubernetes and slurm testbeds of multiple nodes to more thoroughly evaluate the code for production-like deployments.
+
+#### CI Test Trigger Matrix
+
+| Trigger Variable                        | pre-merge | vllm_1-gpu | vllm_multi_gpu | trtllm_1-gpu | trtllm_multi_gpu | vllm_benchmark | trtllm_benchmark | jet | compoundai |
+|-----------------------------------------|:---------:|:----------:|:--------------:|:------------:|:----------------:|:--------------:|:----------------:|:---:|:----------:|
+| `RUN_PRE_MERGE_TESTS=true`              | Yes       | _          | -              | _            | -                | -              | -                | -   | -          |
+| `RUN_VLLM=true`                         | Yes       | Yes        | Manual         | -            | -                | -              | -                | -   | -          |
+| `RUN_END_TO_END_TESTS=true`             | -         | Yes        | Yes            | Yes          | Yes              | -              | -                | -   | -          |
+| `RUN_TENSORRTLLM=true`                  | -         | -          | -              | Yes          | Manual           | -              | -                | -   | -          |
+| `RUN_INTEGRATION_TESTS_ON_JET=true`     | -         | -          | -              | -            | -                | -              | -                | Yes | -          |
+| `RUN_SDK_CI=true`                       | -         | -          | -              | -            | -                | -              | -                | -   | Yes        |
+| `RUN_TRTLLM_BENCHMARKS_ON_JET=true`     | -         | -          | -              | -            | -                | -              | Yes              | - | -          |
+| `RUN_VLLM_BENCHMARKS_ON_JET=true`       | -         | -          | -              | -            | -                | Yes            | -                | - | -          |
+| `NIGHTLY_BUILD=true`                    | Yes       | Yes        | Yes            | Yes          | Yes              | Yes            | Yes              | Yes | Yes        |
+
+- **Yes**: Test runs automatically with this trigger.
+- **Manual**: Test can be triggered manually from the pipeline.
+- **-**: Test is not run with this trigger.
