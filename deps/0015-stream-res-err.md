@@ -10,9 +10,9 @@
 
 **Replaced By**: N/A
 
-**Sponsor**: [@ryanolson](https://github.com/ryanolson) [@grahamking](https://github.com/grahamking) [@oandreeva-nv](https://github.com/oandreeva-nv)
+**Sponsor**: [@ryanolson](https://github.com/ryanolson) [@grahamking](https://github.com/grahamking)
 
-**Required Reviewers**: [@ryanolson](https://github.com/ryanolson) [@grahamking](https://github.com/grahamking) [@oandreeva-nv](https://github.com/oandreeva-nv)
+**Required Reviewers**: [@ryanolson](https://github.com/ryanolson) [@grahamking](https://github.com/grahamking)
 
 **Review Date**: Jun 24 2025
 
@@ -31,7 +31,7 @@ The client response stream listener currently does not know why a stream is clos
 stream is closed because the server has finished producing all the responses, but it can also be due
 to failure of the server or the network connecting the client to the server.
 
-Knowing why the stream is closed is vital to the ability of detecting faults while the server is
+Knowing why the stream is closed is vital to the ability to detect faults while the server is
 streaming responses back to the client.
 
 For instance, in the current
@@ -42,19 +42,17 @@ that failed to restore.
 
 ## Goals
 
-N/A
+* Update the Response Streaming Interface to Support Propagating Network/Router Level Errors.
 
 ### Non Goals
 
-N/A
+* Mechanism for Detecting Network/Router Level Errors - i.e. Incomplete Stream Detection.
 
 ## Requirements
 
 N/A
 
 # Proposal
-
-## Part 1: Add a New Generate Method for Propagating Error from Network/Router Layer
 
 The client starts its RPCs from
 [this `generate` method](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/egress/addressed_router.rs#L85),
@@ -67,70 +65,64 @@ This case is handled by the existing `Result<...>` wrapper around the `ManyOut<U
 **Case 2**: The server is disconnected while responses are being returned
 
 The `ManyOut<U>` stream yields responses in the `U` type, defined by the client, that is opaque to
-the network/router layer, so currently there is no way for the network/router layer to propagate any
-error back to the client while streaming responses.
+the network/router layer, so currently there is no way for the network/router layer to
+1. Propagate errors detected at its level back to the client while streaming responses; and
+2. Know if the `U` type is passing an error from the server back to the client.
 
-The proposal is to wrap the `U` type in a `Result<...>` wrapper, similar to how the stream is
-currently wrapped, so error detected at the network/router level can be propagated to the client.
-
-To avoid disrupting existing behaviors, a new
+The proposal will introduce a required `MaybeError` trait that the `U` type must implement, which
+brings in methods for the network/router layer to accomplish the above two points:
 ```rust
-async fn generate_with_error_detection(&self, request: SingleIn<AddressedRequest<T>>) -> Result<ManyOut<Result<U, Error>>, Error>
-```
-method is to be added alongside the existing `generate` method as a part of the
-[`AddressedPushRouter` struct](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/egress/addressed_router.rs#L59).
-The change can be progressively applied to existing implementations, by switching over from the
-existing `generate` method to the new `generate_with_error_detection` method.
+pub trait MaybeError {
+    /// Construct an instance from an error.
+    fn from_err(err: Box<dyn std::error::Error>) -> Self;
 
-## Part 2: Implement End of Stream Detection into Network/Router Layer
-
-The server handles RPCs with the
-[`PushWorkHandler` trait](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/ingress/push_handler.rs#L20C24-L20C39),
-specifically each response over the stream goes through
-[here](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/ingress/push_handler.rs#L100-L109).
-This part of the code can reliably capture the end of stream signal, which will be made available to
-the client over the RPC.
-
-Instead of sending each response from the worker `generate` method directly back to the client, each
-response is contained in a new
-```rust
-#[derive(Serialize, Deserialize, Debug)]
-pub struct StreamItemWrapper<U> {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<U>,
-    pub complete_final: bool
+    /// Construct into an error instance.
+    fn err(&self) -> Option<Box<dyn std::error::Error>>;
 }
 ```
-where `data` holds the response and `complete_final` indicates if this is the last response.
 
-While the worker's `generate` method is producing new responses, each response is sent with the
-`complete_final = false`. After the last response is produced by the worker's `generate` method, an
-extra response with no data and `complete_final = true` is sent to the client, before ending the
-RPC.
+When the network/router detects there is an error, a new error response
+```rust
+let error_response = U::from_err(...);
+```
+is constructed and returned to the response stream for propagating it back to the client.
 
-The client receives and processes responses at the
-[end of its `generate` method](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/egress/addressed_router.rs#L163-L174).
-The response is first reconstructed into the `StreamItemWrapper<U>`, and then the `data` is
-extracted and yielded back to the client.
+For detecting if the server sent an error response at the network/router level
+```rust
+let response = response_stream.next();
+if let Some(err) = response.err() {
+    ...
+}
+```
+The network/router can act on the error if needed and also propagate the error back to the client.
 
-There are two cases of connection stream error detectable by the client's `generate` method at the
-network/router layer:
+## Example: End-of-Stream Detection
 
-**Case 1**: Connection stream ended before `complete_final`
+End-of-Stream can be detected by wrapping each response type `U` in a new
+```rust
+#[derive(Serialize, Deserialize, Debug)]
+pub struct NetworkStreamWrapper<U> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<U>,
+    pub complete_final: bool,
+}
+```
+such that each response is sent in the `data` field with `complete_final` set to `false` from the
+server. Once the generate engine is done with producing responses, the server must send an extra
+`NetworkStreamWrapper` response with no `data` and `complete_final` set to `true`.
 
-An `Err(...)` response, as discussed in
-[Part 1](#part-1-add-a-new-generate-method-for-propagating-error-from-networkrouter-layer), is
-yielded and then the response stream is closed.
+At the client, the `NetworkStreamWrapper` is torn down and its `data` is yielded back to the stream
+consumer. If the network stream ended before a response with `complete_final = true` is received, an
+extra error response is yielded back to the stream consumer propagating the error back as described
+by the [proposal](#proposal).
 
-**Case 2**: `complete_final` is received and then more responses arrived
-
-An `Err(...)` response, as discussed in
-[Part 1](#part-1-add-a-new-generate-method-for-propagating-error-from-networkrouter-layer), is
-yielded upon arrival of the first response after the response with `complete_final`. After the
-`Err(...)` response is yielded, the response stream is closed.
-
-The `Err(...)`s will be constructed using
-[`anyhow::Error::msg`](https://docs.rs/anyhow/1.0.98/anyhow/struct.Error.html#method.msg).
+**Note**
+* The `NetworkStreamWrapper` is only used while transmitting bytes over the network. It is wrapped
+immediately before serializing responses into bytes and unwrapped immediately after deserializing
+bytes into responses.
+* The end-of-stream event can be detected via other methods, such as Server-Sent Events (SSE), and
+the actual implementation is free to use any other detection methods as long as the interface
+remains the same as described by the [proposal](#proposal).
 
 # Alternate Solutions
 
@@ -302,3 +294,83 @@ Python binding    |    runtime
        owns an instance of
 ```
 when creating a client.
+
+## Alt 3 Wrap Each Response in Result<U, anyhow::Error>
+
+### Part 1: Add a New Generate Method for Propagating Error from Network/Router Layer
+
+The client starts its RPCs from
+[this `generate` method](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/egress/addressed_router.rs#L85),
+which returns a stream in `Result<ManyOut<U>, Error>` type.
+
+**Case 1**: The server is unreachable when the request is made
+
+This case is handled by the existing `Result<...>` wrapper around the `ManyOut<U>` stream type.
+
+**Case 2**: The server is disconnected while responses are being returned
+
+The `ManyOut<U>` stream yields responses in the `U` type, defined by the client, that is opaque to
+the network/router layer, so currently there is no way for the network/router layer to propagate any
+error back to the client while streaming responses.
+
+The proposal is to wrap the `U` type in a `Result<...>` wrapper, similar to how the stream is
+currently wrapped, so errors detected at the network/router level can be propagated to the client.
+
+To avoid disrupting existing behaviors, a new
+```rust
+async fn generate_with_error_detection(&self, request: SingleIn<AddressedRequest<T>>) -> Result<ManyOut<Result<U, Error>>, Error>
+```
+method is to be added alongside the existing `generate` method as a part of the
+[`AddressedPushRouter` struct](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/egress/addressed_router.rs#L59).
+The change can be progressively applied to existing implementations, by switching over from the
+existing `generate` method to the new `generate_with_error_detection` method.
+
+### Part 2: Implement End of Stream Detection into Network/Router Layer
+
+The server handles RPCs with the
+[`PushWorkHandler` trait](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/ingress/push_handler.rs#L20C24-L20C39),
+specifically each response over the stream goes through
+[here](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/ingress/push_handler.rs#L100-L109).
+This part of the code can reliably capture the end of stream signal, which will be made available to
+the client over the RPC.
+
+Instead of sending each response from the worker `generate` method directly back to the client, each
+response is contained in a new
+```rust
+#[derive(Serialize, Deserialize, Debug)]
+pub struct StreamItemWrapper<U> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<U>,
+    pub complete_final: bool
+}
+```
+where `data` holds the response and `complete_final` indicates if this is the last response.
+
+While the worker's `generate` method is producing new responses, each response is sent with the
+`complete_final = false`. After the last response is produced by the worker's `generate` method, an
+extra response with no data and `complete_final = true` is sent to the client, before ending the
+RPC.
+
+The client receives and processes responses at the
+[end of its `generate` method](https://github.com/ai-dynamo/dynamo/blob/fcfc21f20e53908cedc41a91bbd594283ecf45db/lib/runtime/src/pipeline/network/egress/addressed_router.rs#L163-L174).
+The response is first reconstructed into the `StreamItemWrapper<U>`, and then the `data` is
+extracted and yielded back to the client.
+
+There are two cases of connection stream error detectable by the client's `generate` method at the
+network/router layer:
+
+**Case 1**: Connection stream ended before `complete_final`
+
+An `Err(...)` response, as discussed in
+[Part 1](#part-1-add-a-new-generate-method-for-propagating-error-from-networkrouter-layer), is
+yielded and then the response stream is closed.
+
+**Case 2**: `complete_final` is received and then more responses arrive
+
+An `Err(...)` response, as discussed in
+[Part 1](#part-1-add-a-new-generate-method-for-propagating-error-from-networkrouter-layer), is
+yielded upon arrival of the first response after the response with `complete_final`. After the
+`Err(...)` response is yielded, the response stream is closed.
+
+The `Err(...)`s will be constructed using
+[`anyhow::Error::msg`](https://docs.rs/anyhow/1.0.98/anyhow/struct.Error.html#method.msg).
