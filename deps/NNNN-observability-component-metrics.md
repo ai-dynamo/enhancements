@@ -70,20 +70,6 @@ The Component Metrics framework addresses these challenges by providing a unifie
 * **Rationale:** Python bindings ensure that components written in Python can also utilize Rust structs (with well-defined profiling types) and interfaces, maintaining consistency across different layers.
 * **Measurability:** Verify the existence and functionality of Python bindings for the profiling interface, and ensure that Python components can use these bindings to report profiling data.
 
-### REQ 6: Support for Callback API
-
-* **Description:** The profiling interface (API) MUST include a callback mechanism to support components that require immediate feedback instead of relying on periodic polling updates (such as those provided by the Prometheus server). The callback mechanism can also publish to NATS if desired for distributed event notification.
-* **Rationale:** Immediate feedback allows components to react to critical profiling data changes in real-time, enhancing system responsiveness and fault tolerance. While callbacks for same-process updates may not be necessary since components can directly access shared metric structures, they are used in loosely coupled architectures (e.g. different processes, machines, or pods). Additionally, explicit callback definitions clarify component relationships rather than inferring them through scattered call graphs in the code.
-* **Measurability:** Verify that the API includes a callback mechanism and that components can register for immediate feedback. Test that callbacks provide timely updates when profiling data changes, especially across process or network boundaries.
-
-### REQ 7: Support for Composite Profiling
-
-* **Description:** The profiling interface (API) MUST support composite profiling data, such as average, minimum, and maximum values, for certain clients that need to react to changes quickly, without having to wait for Prometheus to poll periodically.
-* **Rationale:** Providing immediate access to composite profiling data enables components to make timely decisions based on real-time data, improving overall system performance and responsiveness.
-* **Measurability:** Confirm that the API can calculate and provide composite profiling data (avg, min, max) on-demand. Test that clients, such as the Planner, can access these profiling data directly through the API without relying on periodic polling.
-
-These requirements ensure that the observability framework in Dynamo is consistent, flexible, and easy to implement across all components, supporting the overall goal of enhanced fault tolerance and system reliability.
-
 
 # Proposal
 
@@ -96,68 +82,100 @@ Create a common library that allows each component/process to:
 
 ## System Diagram
 
-Below is a diagram showing the architecture of the observability framework. The design uses trait-based abstractions to support pluggable backends: 1) Core traits (`MetricContainer`, `MetricCounter`, `MetricGauge`) define the common interface for metric operations, 2) Backend-specific implementations (Prometheus and OpenTelemetry) provide concrete implementations of these traits, and 3) The container pattern allows components to create and manage metrics through a unified API regardless of the underlying backend.
+The architecture defines a trait-based observability framework centered around the MetricContainer trait. This trait serves both as an output interface and a factory for generating metric instruments. It includes methods to create counters, gauges, and histograms, and takes a BackendType parameter at instantiation to determine which concrete backend implementation to use.
+
+The MetricCounter, MetricGauge, and MetricHistogram traits define the abstract interfaces for metric operations, such as incrementing, setting values, and observing measurements. These traits inherit from MetricContainer, ensuring all metric types share a common output interface.
+
+Concrete implementations—PrometheusCounter, PrometheusGauge, and PrometheusHistogram, as well as LibnvCounter, LibnvGauge, and LibnvHistogram—inherit from the respective abstract traits. This design enables switching between different metric backends through a unified API, while keeping the logic extensible and backend-agnostic.
 
 Note that libnv is an NVIDIA implementation in libnv.so that can gather metrics in C++ layers (e.g. NIXL).
 
 ```mermaid
 classDiagram
-    %% Core Traits
+    direction TB
+
     class MetricContainer {
-        <<trait>>
-        +create_counter()
-        +create_gauge()
-        +get_metrics()
+        +output_metrics()
+        +make_counter(name: String): MetricCounter
+        +make_gauge(name: String): MetricGauge
+        +make_histogram(name: String): MetricHistogram
+        +new(backend: BackendType)
     }
-    
+
     class MetricCounter {
-        <<trait>>
-        +inc()
-        +get_value()
+        +increment()
+        +add(value)
     }
-    
+
     class MetricGauge {
-        <<trait>>
-        +set()
-        +get_value()
+        +set(value)
+        +increment()
+        +decrement()
     }
-    
-    %% Implementations
-    class PrometheusContainer {
-        +new(prefix)
+
+    class MetricHistogram {
+        +observe(value: f64)
     }
-    
-    class libnv_Container {
-        +new(service_name, prefix)
+
+    class PrometheusCounter {
+        +output_metrics()
+        +increment()
+        +add(value)
     }
-    
-    class PrometheusCounter
-    class PrometheusGauge
-    class libnv_Counter
-    class libnv_Gauge
-    
-    %% Relationships
-    MetricContainer <|.. PrometheusContainer
-    MetricContainer <|.. libnv_Container
-    
-    MetricCounter <|.. PrometheusCounter
-    MetricCounter <|.. libnv_Counter
-    
-    MetricGauge <|.. PrometheusGauge
-    MetricGauge <|.. libnv_Gauge
-    
-    PrometheusContainer --> PrometheusCounter
-    PrometheusContainer --> PrometheusGauge
-    
-    libnv_Container --> libnv_Counter
-    libnv_Container --> libnv_Gauge
+
+    class PrometheusGauge {
+        +output_metrics()
+        +set(value)
+        +increment()
+        +decrement()
+    }
+
+    class PrometheusHistogram {
+        +output_metrics()
+        +observe(value: f64)
+    }
+
+    class LibnvCounter {
+        +output_metrics()
+        +increment()
+        +add(value)
+    }
+
+    class LibnvGauge {
+        +output_metrics()
+        +set(value)
+        +increment()
+        +decrement()
+    }
+
+    class LibnvHistogram {
+        +output_metrics()
+        +observe(value: f64)
+    }
+
+    class BackendType {
+        <<enum>>
+        +Prometheus
+        +Libnv
+    }
+
+    MetricContainer <|-- MetricCounter
+    MetricContainer <|-- MetricGauge
+    MetricContainer <|-- MetricHistogram
+
+    MetricCounter <|-- PrometheusCounter
+    MetricGauge <|-- PrometheusGauge
+    MetricHistogram <|-- PrometheusHistogram
+
+    MetricCounter <|-- LibnvCounter
+    MetricGauge <|-- LibnvGauge
+    MetricHistogram <|-- LibnvHistogram
 ``` 
 
 ```Rust
     // Example usage:
     pub struct DynamoHTTPMetrics {
-        // BaseComponentMetrics, MetricCounter, MetricGauge are part of the framework
-        pub base: BaseComponentMetrics,
+        // MetricCounter, MetricGauge are part of the framework
         pub http_requests_count: Box<dyn MetricCounter>,
         pub http_requests_ms: Box<dyn MetricGauge>,
     }
@@ -165,7 +183,6 @@ classDiagram
     impl DynamoHTTPMetrics {
         /// Create a new DynamoHTTPMetrics instance using the parent's new_prometheus
         pub fn new(prefix: &str) -> Self {
-            let base = BaseComponentMetrics::new_prometheus(prefix);
             let request_counter = base.container.create_counter(
                 "requests_total",
                 "Total number of requests",
@@ -179,7 +196,6 @@ classDiagram
             );
             
             DynamoHTTPMetrics {
-                base,
                 http_requests_count: request_counter,
                 http_requests_ms: response_time_gauge,
             }
@@ -191,7 +207,7 @@ classDiagram
         println!("=== Testing ServiceMetrics Struct with Prometheus Backend ===");
         
         // Create a new ServiceMetrics instance
-        let metrics = DynamoHTTPMetrics::new("MyHTTP");
+        let metrics = MetricContainer::new("MyHTTP", enum::Prometheus);
         
         println!("Created ServiceMetrics with Prometheus backend");
         println!("Initial metrics:");
