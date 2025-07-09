@@ -174,33 +174,16 @@ classDiagram
 ``` 
 
 ```Rust
-    sync fn backend(runtime: DistributedRuntime) -> Result<()> {
-        // attach an ingress to an engine
-        let ingress = Ingress::for_engine(RequestHandler::new())?;
+/*
+    THIS IS WORK IN PROGRESS -- DO NOT REVIEW
 
-        // make the ingress discoverable via a component service
-        // we must first create a service, then we can attach one more more endpoints
+    TODO (maybe):
+    1) Define Metrics struct/traits/etc
+    2) Add a Metrics struct in lib/runtime/src/config.rs (or equivalent)
+    3) Initialize/register Metrics struct in lib/runtime/src/{lib.rs, distributed.rs} (or equivalent)
+    4) HTTP service to register the Metrics struct (perhaps in stats_handler/handler?)
+*/
 
-        runtime
-            .namespace(DEFAULT_NAMESPACE)?
-            .component("backend")?
-            .service_builder()
-            .create()
-            .await?
-            .endpoint("generate")
-            .endpoint_builder()
-            .stats_handler(|stats| {
-                println!("stats: {:?}", stats);
-                let stats = MyStats { val: 10 };
-                serde_json::to_value(stats).unwrap()
-            })
-            .metrics_handler()
-            .handler(ingress)
-            .start()
-            .await
-    }
-
-    // Example usage:
     pub struct DynamoHTTPMetrics {
         // MetricCounter, MetricGauge are traits from the Metrics API
         pub http_requests_count: Box<dyn MetricCounter>,
