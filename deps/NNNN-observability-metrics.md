@@ -26,7 +26,7 @@ This document outlines and defines the Metrics API for Dynamo.
 
 # Motivation
 
-Dynamo's current metrics collection is fragmented, using various libraries across components. This leads to compatibility issues, inconsistent data formats, and increased maintenance costs, affecting system reliability and visibility.
+Dynamo's current metrics collection is fragmented, using various libraries across components. This leads to compatibility issues, inconsistent data formats, and increased maintenance costs.
 
 ## Goals
 
@@ -37,7 +37,7 @@ The Metrics API achieves this by:
 * Ensuring consistent metrics visibility
 * Encouraging best practices in metrics handling
 * Avoiding unsafe and inconsistent raw libraries
-* Providing a flexible abstraction layer for any metrics implementation
+* Providing a flexible abstraction layer for current and future implementations
 
 ## Requirements
 
@@ -49,27 +49,27 @@ The Metrics API achieves this by:
 
 ### REQ 2: Profiling Declaration and Registration
 
-* **Description:** Each component MUST declare a struct that contains profiling types and register what metrics they are profiling with the observability API.
+* **Description:** Each component MUST declare a struct that contains profiling types and register what metrics they are profiling with the Metrics API.
 * **Rationale:** Standardizing how components declare and register their profiling structure ensures consistency in the data reported across different components and enables the API to properly manage and expose these metrics.
-* **Measurability:** Confirm that each component has a defined profiling struct, registers its metrics with the observability API, and that the registered metrics are used for reporting profiling data.
+* **Measurability:** Confirm that each component has a defined profiling struct, registers its metrics with the Metrics API, and that the registered metrics are used for reporting profiling data.
 
 ### REQ 3: Common Profiling Interface
 
-* **Description:** Each component MUST use the common trait interface for counts, gauges, and histograms.
-* **Rationale:** A common trait interface ensures that profiling data collection is consistent and reliable across all components.
-* **Measurability:** Check that all components use the common trait interface for profiling operations and that the profiling data collected are consistent.
+* **Description:** Each component MUST use the common Rust trait for counts, gauges, and histograms.
+* **Rationale:** A common Rust trait ensures that profiling data collection is consistent and reliable across all components.
+* **Measurability:** Check that all components use the common Rust trait for profiling operations and that the profiling data collected are consistent.
 
 ### REQ 4: Pluggable Backend Interface
 
-* **Description:** The profiling trait interface (API) MUST support pluggable backends, such as Prometheus library, OpenTelemetry (OTel), and/or custom C++ implementations, etc. The Metrics API provides an abstraction layer that can work with any of these backend implementations. The common profiling libraries will be exposed through the Dynamo Rust runtime via PyO3 to ensure consistent access across both Rust and Python components.
-* **Rationale:** Pluggable backends provide flexibility in how profiling data are collected and reported, enabling integration with various monitoring tools. Exposing these through the Dynamo Rust runtime ensures a unified trait interface regardless of the underlying implementation language.
-* **Measurability:** Validate that the API can switch between different backend implementations without requiring changes to the components, and verify that both Rust and Python components can access the profiling libraries through the Dynamo runtime trait interface.
+* **Description:** The profiling Rust trait (API) MUST support pluggable backends, such as Prometheus library, OpenTelemetry (OTel), and/or custom C++ implementations, etc. The Metrics API provides an abstraction layer that can work with any of these backend implementations. The common profiling libraries will be exposed through the Dynamo Rust runtime via PyO3 to ensure consistent access across both Rust and Python components.
+* **Rationale:** Pluggable backends provide flexibility in how profiling data are collected and reported, enabling integration with various monitoring tools. Exposing these through the Dynamo Rust runtime ensures a unified Rust trait regardless of the underlying implementation language.
+* **Measurability:** Validate that the API can switch between different backend implementations without requiring changes to the components, and verify that both Rust and Python components can access the profiling libraries through the Dynamo runtime Rust trait.
 
 ### REQ 5: Python Bindings
 
 * **Description:** The common API MUST provide Python bindings to ensure compatibility with Python components in Dynamo.
-* **Rationale:** Python bindings ensure that components written in Python can also utilize Rust structs (with well-defined profiling types) and trait interfaces, maintaining consistency across different layers.
-* **Measurability:** Verify the existence and functionality of Python bindings for the profiling trait interface, and ensure that Python components can use these bindings to report profiling data.
+* **Rationale:** Python bindings ensure that components written in Python can also utilize Rust structs (with well-defined profiling types) and Rust traits, maintaining consistency across different layers.
+* **Measurability:** Verify the existence and functionality of Python bindings for the profiling Rust trait, and ensure that Python components can use these bindings to report profiling data.
 
 
 # Proposal
@@ -77,15 +77,15 @@ The Metrics API achieves this by:
 Create a common Metrics API that allows each component/process to:
 
 * Expose component metrics and/or health profiling data on an HTTP endpoint.
-* Create an observability struct containing profiling data (e.g., incr counter, gauge, and histogram).
-* Call a common API that mutates the observability struct.
-* Automatically export the observability struct to a Prometheus key-val format.
+* Create a metrics struct containing profiling data (e.g., incr counter, gauge, and histogram).
+* Call a common API that mutates the metrics struct.
+* Automatically export the metrics struct to a Prometheus key-val format.
 
 ## System Diagram
 
-The architecture defines a trait-based observability API centered around the MetricContainer trait. This trait serves both as an output interface and a factory for generating metric instruments. It includes methods to create counters, gauges, and histograms, and takes a BackendType parameter at instantiation to determine which concrete backend implementation to use.
+The architecture defines a trait-based Metrics API centered around the MetricType trait. This trait serves both as an output interface and a factory for generating metric instruments. It includes methods to create counters, gauges, and histograms, and takes a BackendType parameter at instantiation to determine which concrete backend implementation to use.
 
-The MetricCounter, MetricGauge, and MetricHistogram traits define the trait interfaces for metric operations, such as incrementing, setting values, and observing measurements. These traits inherit from MetricContainer, ensuring all metric types share a common output interface.
+The MetricCounter, MetricGauge, and MetricHistogram traits define the Rust traits for metric operations, such as incrementing, setting values, and observing measurements. These traits inherit from MetricType, ensuring all metric types share a common output interface.
 
 Concrete struct implementations—PrometheusCounter, PrometheusGauge, and PrometheusHistogram, as well as LibnvCounter, LibnvGauge, and LibnvHistogram—implement the respective traits. This design enables switching between different metric backends through a unified API abstraction, while keeping the logic extensible and backend-agnostic.
 
@@ -95,7 +95,7 @@ Note that libnv is an NVIDIA implementation in libnv.so that can gather metrics 
 classDiagram
     direction TB
 
-    class MetricContainer {
+    class MetricType {
         +output_metrics()
         +make_counter(name: String): MetricCounter
         +make_gauge(name: String): MetricGauge
@@ -160,9 +160,9 @@ classDiagram
         +Libnv
     }
 
-    MetricContainer <|-- MetricCounter
-    MetricContainer <|-- MetricGauge
-    MetricContainer <|-- MetricHistogram
+    MetricType <|-- MetricCounter
+    MetricType <|-- MetricGauge
+    MetricType <|-- MetricHistogram
 
     MetricCounter <|-- PrometheusCounter
     MetricGauge <|-- PrometheusGauge
@@ -217,7 +217,7 @@ classDiagram
         println!("=== Testing ServiceMetrics Struct with Prometheus Backend ===");
         
         // Create a new ServiceMetrics instance
-        let metrics = MetricContainer::new("MyHTTP", enum::Prometheus);
+        let metrics = MetricType::new("MyHTTP", enum::Prometheus);
         
         println!("Created ServiceMetrics with Prometheus backend");
         println!("Initial metrics:");
