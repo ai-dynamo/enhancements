@@ -41,17 +41,17 @@ The Metrics API achieves this by:
 
 ## Requirements
 
-### REQ 1: Consistent Profiling Endpoint with Prometheus Support
+### REQ 1: Prometheus Server
 
-* **Description:** Each component/process in Dynamo MUST expose an HTTP endpoint in Prometheus format to support the Prometheus server, and to support components that query the Prometheus server (e.g. Grafana and even other Dynamo components).
-* **Rationale:** This ensures that all components can be monitored uniformly and profiling data can be collected without discrepancies. Prometheus output format is a widely adopted standard that enables seamless integration with existing monitoring ecosystems, including Grafana dashboards, alerting systems, and other visualization tools. This approach leverages established tooling for historical analysis, trend identification, and operational monitoring without requiring custom dashboard implementation within the framework itself.
-* **Measurability:** Verify that each component has a /metrics endpoint accessible via HTTP, and that it follows a standardized format. Verify that the API can export profiling data in Prometheus format with proper metric naming conventions and labels. Test that external dashboard tools (such as Grafana) can successfully consume the Prometheus output and display meaningful visualizations. Ensure that the Prometheus endpoint responds efficiently to scraping requests.
+* **Description:** A Prometheus server MUST be running and actively polling each component/process in Dynamo to aggregate metrics data for a global view of the system.
+* **Rationale:** Ensuring that a Prometheus server is operational and polling components guarantees that metrics data is consistently aggregated and available for analysis. This setup facilitates seamless integration with existing monitoring ecosystems, such as Grafana dashboards and alerting systems.
+* **Measurability:** Confirm that the Prometheus server is configured to poll each component's /metrics endpoint and that it successfully collects and stores the metrics data. Verify that the collected data can be accessed and visualized through external tools like Grafana.
 
-### REQ 2: Profiling Declaration and Registration
+### REQ 2: HTTP Endpoint Exposure for Metrics
 
-* **Description:** Each component MUST declare a struct that contains profiling types and register what metrics they are profiling with the Metrics API.
-* **Rationale:** Standardizing how components declare and register their profiling structure ensures consistency in the data reported across different components and enables the API to properly manage and expose these metrics.
-* **Measurability:** Confirm that each component has a defined profiling struct, registers its metrics with the Metrics API, and that the registered metrics are used for reporting profiling data.
+* **Description:** Each component/process in Dynamo MUST expose an HTTP endpoint in Prometheus format to support the Prometheus server and other components that query the Prometheus server (e.g., Grafana and even other Dynamo components).
+* **Rationale:** Exposing an HTTP endpoint in Prometheus format ensures that all components can be monitored uniformly, and profiling data can be collected without discrepancies. This approach leverages established tooling for historical analysis, trend identification, and operational monitoring.
+* **Measurability:** Verify that each component has a /metrics endpoint accessible via HTTP, and that it follows a standardized format. Ensure that the API can export profiling data in Prometheus format with proper metric naming conventions and labels. Test that external dashboard tools (such as Grafana) can successfully consume the Prometheus output and display meaningful visualizations. Ensure that the Prometheus endpoint responds efficiently to scraping requests.
 
 ### REQ 3: Common Profiling Interface
 
@@ -59,13 +59,19 @@ The Metrics API achieves this by:
 * **Rationale:** A common Rust trait ensures that profiling data collection is consistent and reliable across all components.
 * **Measurability:** Check that all components use the common Rust trait for profiling operations and that the profiling data collected are consistent.
 
-### REQ 4: Pluggable Backend Interface
+### REQ 4: Profiling Declaration and Registration
+
+* **Description:** Each component MUST declare a struct that contains profiling types and register what metrics they are profiling with the Metrics API.
+* **Rationale:** Standardizing how components declare and register their profiling structure ensures consistency in the data reported across different components and enables the API to properly manage and expose these metrics.
+* **Measurability:** Confirm that each component has a defined profiling struct, registers its metrics with the Metrics API, and that the registered metrics are used for reporting profiling data.
+
+### REQ 5: Pluggable Backend Interface
 
 * **Description:** The profiling Rust trait (API) MUST support pluggable backends, such as Prometheus library, OpenTelemetry (OTel), and/or custom C++ implementations, etc. The Metrics API provides an abstraction layer that can work with any of these backend implementations. The common profiling libraries will be exposed through the Dynamo Rust runtime via PyO3 to ensure consistent access across both Rust and Python components.
 * **Rationale:** Pluggable backends provide flexibility in how profiling data are collected and reported, enabling integration with various monitoring tools. Exposing these through the Dynamo Rust runtime ensures a unified Rust trait regardless of the underlying implementation language.
 * **Measurability:** Validate that the API can switch between different backend implementations without requiring changes to the components, and verify that both Rust and Python components can access the profiling libraries through the Dynamo runtime Rust trait.
 
-### REQ 5: Python Bindings
+### REQ 6: Python Bindings
 
 * **Description:** The common API MUST provide Python bindings to ensure compatibility with Python components in Dynamo.
 * **Rationale:** Python bindings ensure that components written in Python can also utilize Rust structs (with well-defined profiling types) and Rust traits, maintaining consistency across different layers.
