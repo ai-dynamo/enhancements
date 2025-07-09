@@ -6,7 +6,7 @@ This document outlines and defines the Common Observability Framework for Dynamo
 
 ## Requirements
 
-### [Component Metrics](./NNNN-observability-component-metrics.md)
+### [Metrics](./NNNN-observability-metrics.md)
 
 ### [Tracing](./NNNN-observability-tracing.md)
 

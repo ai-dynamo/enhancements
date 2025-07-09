@@ -1,4 +1,4 @@
-# Observability - Component Metrics
+# Observability - Metrics
 
 **Status:** Draft
 
@@ -22,21 +22,22 @@
 
 # Summary
 
-This document outlines and defines the Component Metrics framework for Dynamo, providing a unified approach to collecting, exposing, and managing component performance metrics.
+This document outlines and defines the Metrics API for Dynamo.
 
 # Motivation
 
-The Dynamo system currently lacks a unified approach to component metrics collection, with different components implementing their own monitoring solutions using disparate libraries. This fragmentation results in compatibility issues, performance and safety concerns, and inconsistent data formats that impact service reliability and system visibility.
-
-Relying on various different libraries often results in interoperability problems between components, making it difficult to correlate metrics data across the system and maintain consistent monitoring practices. This approach also increases maintenance costs due to varying coding styles and introduces potential performance and safety risks.
+Dynamo's current metrics collection is fragmented, using various libraries across components. This leads to compatibility issues, inconsistent data formats, and increased maintenance costs, affecting system reliability and visibility.
 
 ## Goals
 
-The Component Metrics framework addresses these challenges by providing a unified approach that:
+This proposal offers a unified way to collect, expose, and manage performance metrics across various backends.
 
-* Improves consistent component metrics visibility across the system
-* Promotes best practices in metrics collection and exposure across all components
-* Avoids the use of disparate raw libraries that could compromise safety, performance, consistency, and maintainability
+The Metrics API achieves this by:
+
+* Ensuring consistent metrics visibility
+* Encouraging best practices in metrics handling
+* Avoiding unsafe and inconsistent raw libraries
+* Providing a flexible abstraction layer for any metrics implementation
 
 ## Requirements
 
@@ -48,32 +49,32 @@ The Component Metrics framework addresses these challenges by providing a unifie
 
 ### REQ 2: Profiling Declaration and Registration
 
-* **Description:** Each component MUST declare a struct that contains profiling types and register what metrics they are profiling with the observability framework.
-* **Rationale:** Standardizing how components declare and register their profiling structure ensures consistency in the data reported across different components and enables the framework to properly manage and expose these metrics.
-* **Measurability:** Confirm that each component has a defined profiling struct, registers its metrics with the observability framework, and that the registered metrics are used for reporting profiling data.
+* **Description:** Each component MUST declare a struct that contains profiling types and register what metrics they are profiling with the observability API.
+* **Rationale:** Standardizing how components declare and register their profiling structure ensures consistency in the data reported across different components and enables the API to properly manage and expose these metrics.
+* **Measurability:** Confirm that each component has a defined profiling struct, registers its metrics with the observability API, and that the registered metrics are used for reporting profiling data.
 
 ### REQ 3: Common Profiling Interface
 
-* **Description:** Each component MUST use the common interface for counts, gauges, and histograms.
-* **Rationale:** A common interface ensures that profiling data collection is consistent and reliable across all components.
-* **Measurability:** Check that all components use the common interface for profiling operations and that the profiling data collected are consistent.
+* **Description:** Each component MUST use the common trait interface for counts, gauges, and histograms.
+* **Rationale:** A common trait interface ensures that profiling data collection is consistent and reliable across all components.
+* **Measurability:** Check that all components use the common trait interface for profiling operations and that the profiling data collected are consistent.
 
 ### REQ 4: Pluggable Backend Interface
 
-* **Description:** The profiling interface (API) MUST support pluggable backends, such as Prometheus library, OpenTelemetry (OTel), and/or custom C++ implementations, etc. The common profiling libraries will be exposed through the Dynamo Rust runtime via PyO3 to ensure consistent access across both Rust and Python components.
-* **Rationale:** Pluggable backends provide flexibility in how profiling data are collected and reported, enabling integration with various monitoring tools. Exposing these through the Dynamo Rust runtime ensures a unified interface regardless of the underlying implementation language.
-* **Measurability:** Validate that the API can switch between different backend implementations without requiring changes to the components, and verify that both Rust and Python components can access the profiling libraries through the Dynamo runtime interface.
+* **Description:** The profiling trait interface (API) MUST support pluggable backends, such as Prometheus library, OpenTelemetry (OTel), and/or custom C++ implementations, etc. The Metrics API provides an abstraction layer that can work with any of these backend implementations. The common profiling libraries will be exposed through the Dynamo Rust runtime via PyO3 to ensure consistent access across both Rust and Python components.
+* **Rationale:** Pluggable backends provide flexibility in how profiling data are collected and reported, enabling integration with various monitoring tools. Exposing these through the Dynamo Rust runtime ensures a unified trait interface regardless of the underlying implementation language.
+* **Measurability:** Validate that the API can switch between different backend implementations without requiring changes to the components, and verify that both Rust and Python components can access the profiling libraries through the Dynamo runtime trait interface.
 
 ### REQ 5: Python Bindings
 
 * **Description:** The common API MUST provide Python bindings to ensure compatibility with Python components in Dynamo.
-* **Rationale:** Python bindings ensure that components written in Python can also utilize Rust structs (with well-defined profiling types) and interfaces, maintaining consistency across different layers.
-* **Measurability:** Verify the existence and functionality of Python bindings for the profiling interface, and ensure that Python components can use these bindings to report profiling data.
+* **Rationale:** Python bindings ensure that components written in Python can also utilize Rust structs (with well-defined profiling types) and trait interfaces, maintaining consistency across different layers.
+* **Measurability:** Verify the existence and functionality of Python bindings for the profiling trait interface, and ensure that Python components can use these bindings to report profiling data.
 
 
 # Proposal
 
-Create a common library that allows each component/process to:
+Create a common Metrics API that allows each component/process to:
 
 * Expose component metrics and/or health profiling data on an HTTP endpoint.
 * Create an observability struct containing profiling data (e.g., incr counter, gauge, and histogram).
@@ -82,11 +83,11 @@ Create a common library that allows each component/process to:
 
 ## System Diagram
 
-The architecture defines a trait-based observability framework centered around the MetricContainer trait. This trait serves both as an output interface and a factory for generating metric instruments. It includes methods to create counters, gauges, and histograms, and takes a BackendType parameter at instantiation to determine which concrete backend implementation to use.
+The architecture defines a trait-based observability API centered around the MetricContainer trait. This trait serves both as an output interface and a factory for generating metric instruments. It includes methods to create counters, gauges, and histograms, and takes a BackendType parameter at instantiation to determine which concrete backend implementation to use.
 
-The MetricCounter, MetricGauge, and MetricHistogram traits define the abstract interfaces for metric operations, such as incrementing, setting values, and observing measurements. These traits inherit from MetricContainer, ensuring all metric types share a common output interface.
+The MetricCounter, MetricGauge, and MetricHistogram traits define the trait interfaces for metric operations, such as incrementing, setting values, and observing measurements. These traits inherit from MetricContainer, ensuring all metric types share a common output interface.
 
-Concrete implementations—PrometheusCounter, PrometheusGauge, and PrometheusHistogram, as well as LibnvCounter, LibnvGauge, and LibnvHistogram—inherit from the respective abstract traits. This design enables switching between different metric backends through a unified API, while keeping the logic extensible and backend-agnostic.
+Concrete struct implementations—PrometheusCounter, PrometheusGauge, and PrometheusHistogram, as well as LibnvCounter, LibnvGauge, and LibnvHistogram—implement the respective traits. This design enables switching between different metric backends through a unified API abstraction, while keeping the logic extensible and backend-agnostic.
 
 Note that libnv is an NVIDIA implementation in libnv.so that can gather metrics in C++ layers (e.g. NIXL).
 
@@ -173,9 +174,35 @@ classDiagram
 ``` 
 
 ```Rust
+    sync fn backend(runtime: DistributedRuntime) -> Result<()> {
+        // attach an ingress to an engine
+        let ingress = Ingress::for_engine(RequestHandler::new())?;
+
+        // make the ingress discoverable via a component service
+        // we must first create a service, then we can attach one more more endpoints
+
+        runtime
+            .namespace(DEFAULT_NAMESPACE)?
+            .component("backend")?
+            .service_builder()
+            .create()
+            .await?
+            .endpoint("generate")
+            .endpoint_builder()
+            .stats_handler(|stats| {
+                println!("stats: {:?}", stats);
+                let stats = MyStats { val: 10 };
+                serde_json::to_value(stats).unwrap()
+            })
+            .metrics_handler()
+            .handler(ingress)
+            .start()
+            .await
+    }
+
     // Example usage:
     pub struct DynamoHTTPMetrics {
-        // MetricCounter, MetricGauge are part of the framework
+        // MetricCounter, MetricGauge are traits from the Metrics API
         pub http_requests_count: Box<dyn MetricCounter>,
         pub http_requests_ms: Box<dyn MetricGauge>,
     }
@@ -249,7 +276,7 @@ classDiagram
 
 An alternative implementation could involve separating the HTTP metrics endpoints into a dedicated process. This could leverage an existing Dynamo monitor sidecar that already handles component restarts and lifecycle management. In this scenario, the sidecar process would be responsible for exposing the metrics endpoint while the main components would communicate their metrics data through the established interface.
 
-This approach would still require the same interface and instrumentation library as proposed, but the metrics exposure mechanism would be delegated to the sidecar process, potentially through a NATS-based communication channel. However, this introduces additional complexity by routing metrics data through an intermediate messaging layer rather than direct HTTP exposure.
+This approach would still require the same trait interface and instrumentation library as proposed, but the metrics exposure mechanism would be delegated to the sidecar process, potentially through a NATS-based communication channel. However, this introduces additional complexity by routing metrics data through an intermediate messaging layer rather than direct HTTP exposure.
 
 **Pros:**
 * Separation of concerns - main components focus on business logic while sidecar handles metrics exposure
