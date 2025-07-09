@@ -24,34 +24,23 @@
 
 # Summary
 
-Proposes a set of development and release life-cycle test stages, test
-types, coverage areas, test environments and test runners for
-dynamo. These will be used to form actual test plans.
+This document proposes a taxonomy of tests, a categorization tests into life-cycle stages, a description of test environments, and a continuous integration strategy for running these tests. These will be used to form actual test plans.
 
 # Motivation
 
-Currently the dynamo project has a number of different test strategies
-and implementations which can be confusing in particular with respect
-to what tests run, when, and where. There is not a guide for
-developers, QA or operations teams as to the general theory and basic
-set of tools, tests, or when and how they should be run. We need a set
-of guidelines and overarching structure to help form the basis for
-test plans.
+Currently the Dynamo project has a number of different test strategies and implementations which can be confusing in particular with respect to what tests run, when, and where. There is not a guide for developers, QA or operations teams as to the general theory and basic set of tools, tests, or when and how they should be run. We need a set of guidelines and overarching structure to help form the basis for test plans.
 
-## Goals
+# Goals
 
-* Provide a common set of terms to ease communication about test plans and results
+* Provide a common set of terms to ease communication about test plans, test results, and 
 
 * Tests should be easy to write and run both locally and for CI
 
-* Tests should cover the entire development and release life-cycle 
-
-* Test should be automated 
+* Describe how tests cover the entire development and release life-cycle
 
 * Tests should cover code, features, and documentation and have a report of coverage.
 
-* Strategy must fit with the polyglot nature of dynamo (support for
-  multiple programming languages and deployment targets)
+* Strategy must fit with the polyglot nature of dynamo (support for multiple programming languages and deployment targets)
 
 ### Non Goals
 
@@ -59,316 +48,377 @@ test plans.
 
 ## Requirements
 
-### REQ 1 Tests can be run locally as well as in CI
-
-
-# Proposal
-
-The testing strategy will be a living document stored in the
-repository detailing the decisions and definitions outlined here. This
-proposal will serve as a starting point and enumerate the sections of
-the living testing strategy.
-
+1. Tests MUST be able to run locally as well as in CI. This is subject to appropriate hardware being available in the environment
+2. Tests MUST be deterministic. Tests deemed "flaky" will be removed.
+3. Tests SHOULD be written before beginning development of a new feature.
 
 ## Dynamo Testing Strategy (Intro)
 
-Dynamo is a distributed inference serving framework designed for
-generative AI use cases. Like any project it has a development and
-release life-cycle with different testing requirements, test types that
-have a different goal and modules and functionality that require test
-coverage.
-
-## Development and Release Life-Cycle Test Stages
-
-At each stage of development and release there are a different set of
-tests that are required. To help organize this we will group tests
-into categories and label them to clearly indicate where and when they
-run and what part of the life-cycle they "gate". Tests can be in more
-than one category.
-
-### Pre-Commit
-
-Pre-commit tests and gates are controlled and exercised using the [pre-commit framework](https://pre-commit.com/).
-
-Configuration for dynamo is at the top level [pre-commit-config.yaml](https://github.com/ai-dynamo/dynamo/blob/main/.pre-commit-config.yaml).
-
-Tests that are part of pre-commit are:
-
-1. Code formatting
-2. Spelling
-3. Basic Code linting. Linting that is fast and doesn't depend on
-   project dependencies.
-
-These must include sections for all languages used in dynamo including rust and python.
-
-Coverage: all files
-
-Exception: 
-
-* auto generated files
-
-* foreign files (files from other projects used without modification)
-
-> Consider a way to audit exceptions 
-
-### Pre-Merge
-
-Pre-merge tests are required to pass before code can be merged to
-main. These tests are designed to be a set of sanity and core
-functionality tests that have broad coverage and give confidence that
-a change hasn't broken core functionality.
-
-Tests that are part of `pre-merge` include:
-1. [Unit tests](###Unit)
-2. [Integration tests](###Integration)
-
-#### Dynamic Discovery
-
-A subset of pre-merge tests will be dynamically added to the the
-pre-merge gate based on the files changed. 
-
-Todo: Determine how to specify this mapping and enable it for local
-testing.
-
-### Post-Merge
-
-Post-merge tests are a full set of unit and integration tests that do
-not depend on the files that have changed. This is an immediate subset
-of nightly tests. 
-
-### Nightly
-Nightly tests are run against ToT of the `main` branch.
-
-Tests that are part of `nightly` include:
-1. [Unit tests](###Unit)
-2. [Integration tests](###Integration)
-
-### Weekly
-
-### QA
-
-### Pre-Release
+Dynamo is a distributed inference serving framework designed for generative AI use cases. Like any project it has a development and release life-cycle with different testing requirements, test types that have a different goal and modules and functionality that require test coverage.
 
 ## Test Types
+We define 6 categories of tests: linting, unit, integration, end-to-end, benchmark, and stress.
 
-### Unit
+### Linting Tests
 
+These tests are validation against established style standards for the code base to maintain legibility. They cover the following:
+- Code formatting
+- Spelling
+- Basic Code linting. Linting that is fast and doesn't evaluate on project dependencies.
+
+#### Structure 
+This is managed by the [pre-commit framework](https://pre-commit.com/). This allows both one-off execution and integration with git pre-commit hooks to ensure compliance at the development time.
+
+#### Execution
+Running this type of test is done though the following command: `pre-commit run -a`
+
+### Unit Tests
 Unit tests evaluate the functionality of a unit of code independent of the rest of the code base or dependencies. The definition of a unit of Where possible this means that any functional dependencies, e.g. service references, should be mocked to limit the scope of errors to the unit under test.
 
-Structurally unit tests should live adjacent to the code that they test and should be written in the language of the unit of code that they are testing. Our codebase has standardized on tools based on the language used:
+#### Structure
+
+Unit tests should live adjacent to the code that they test in a `tests/` directory and should be written in the language of the unit of code that they are testing. Our codebase has standardized on tools based on the language used:
 
 | Language | Unit Test Framework|
 |----------|--------------------|
 | Rust     | [cargo test](https://doc.rust-lang.org/cargo/commands/cargo-test.html) |
 | Python   | [pytest](https://docs.pytest.org/en/stable/) |
 
-From a performance perspective, each test suite of a functional code unit should take less than a second to run. In the event that the setup or execution exceeds this threshold it is an indication that either the functional unit is too large, the dependencies are not mocked appropriately, or your code is inefficient. In any of these cases an evaluation of the design is warranted. In the event that your test case is (perhaps intentionally) long running pla
+Rust tests should follow the naming convention that the unit under test should appear in the test name along with any additional grouping that segments a large portion of the test, e.g. the if a test evaluated model loading specific to vSGLang in the LLM module the test name should could be `llm_model_load_sglang`. This allows selection of sglang-specific tests using `cargo test sglang`.
 
-### Integration
+Python-based tests use a similar structure using [PyTest Marks](https://docs.pytest.org/en/stable/how-to/mark.html). Use of the mark `@pytest.mark.unit` is **required** on any unit test.
 
-Integration tests test the functionality of a set of code with external services or on hardware but are testable from one node from within the development container.
+#### Performance Expectations
 
-Structurally these tests exist within a folder at the top-level and are defined in the [pytest](https://docs.pytest.org/en/stable/) framework. Necessary services should be started within test fixtures and then [subprocess](https://docs.python.org/3/library/subprocess.html) or similar is used to interact the artifacts.
+Each test suite of a functional code unit should take fewer than 15 seconds to run, excluding time required to build. In the event that the setup or execution exceeds this threshold it is an indication that either the functional unit is too large, the dependencies are not mocked appropriately, or your code is inefficient. In any of these cases an evaluation of the design is warranted.
 
-#### Development cycle 
-This class of testing serves as the first level proving rudimentary function of Dyanmo's features and should function as the first step when planning a new feature for a release.
+To meet this performance criteria tests should be thread safe and written with the expectation of being executed in parallel.
 
-When planning for a release integration tests for new features should be marked as follows:
-```python
-# In conftest.py
-def pytest_addoption(parser):
-    parser.addoption(
-        "--dynamo-version",
-        action="store",
-        default="0.1.0",
-        help="Current release version of dynamo, used to gate tests which are expected to fail before a particular release"
-    )
-def pytest_configure(config):
-    dynamo_version = Version(config.getoption('--dynamo-version'))
-    pytest.dynamo_version = dynamo_version
+### Integration Tests
 
-# In the test file
-from packaging.version import Version
+Integration tests validate the functionality of a framework module with respect to interactions with external services or between modules. This covers both testing interactions between the Dynamo framework components and a framework component and a third-party dependency, such as NATS. An example of an integration test would be validating runtime framework module initialization which requires [NATS](https://nats.io/) and [etcd](https://etcd.io/) for functionality.
 
-@pytest.marks.xfail(
-    pytest.dynamo_version < Version("1.0.0rc0"),
-    reason="Feature expected in 1.0.0 release.")
-def test_new_feature_for_1_0_0():
-    assert False
+The primary differentiation of integration tests from [unit tests](#unit-tests) is the use of real components and the absence of mocking of response values. Simplistic models are acceptable, e.g. toy LLM models, but they should always operate within fully-functional components of the Dynamo. The primary difference with [end-to-end](#end-to-end-tests) is integration tests are driven through APIs while end-to-end tests describe end-user flows using the the command line such as `dynamo serve`.
+
+#### Structure
+
+Integration tests are defined in the [pytest](https://docs.pytest.org/en/stable/) framework and exist in within the top-level`tests` directory in subdirectories corresponding to the framework element tested. Use of the [pytest mark](https://docs.pytest.org/en/stable/how-to/mark.html#mark) `@pytest.mark.integration` is required.
+
+Naming of the test files is normalized for categorization and clarity in the event of test failures. We use the standard of `test_<component>_<flow>.py`. `component` should be specific to either the framework element being tested or the CLI command which is being invoked. `flow` is left to the discretion of the developer for grouping similar functionality together, e.g. initialization of the component with different parameters. Additionally if there are utilities that are not test fixtures should go in a `<component>_utils.py` file
+
+An example of the proposed folder and file structure for integration tests is shown below.
+
+``` shell
+# Dynamo top-level folder
+tests/
+└── conftest.py
+
+└── runtime/
+    └── conftest.py
+    └── test_runtime_initialization.py
+    └── runtime_utils.py
+    ...
+└── llm/
+    └── conftest.py
+    └── test_llm_initialization.py
+        ...
+    ...
 ```
-When all tests for a particular release version are in the state [XPASS](https://docs.pytest.org/en/stable/how-to/skipping.html#xfail-mark-test-functions-as-expected-to-fail) a `<major>.<minor>.<micro>rc0` tag can be placed and the release branch cut (this assumes dynamic version calculation based on Git tags). If when you want to cut a release branch if any of the tests for features in that release version are in the `FAILED` state then it becomes a product decision to delay those features to a future release, and updating the test along with it. 
+#### Test segmentation
 
-### End-to-End
+Integration tests use the `@pytest.mark.integration` mark, which is required for all integration tests, as well as further classification within the integration test class. The four most prominent use cases are: hardware requirements for operation, classification of the test to a test lifecycle, worker framework type, and execution related. 
 
-End-to-end tests run simulate user-like flows using build artifacts as the units under test in deployment scenarios. Practically this means all the steps from installation of a build artifact into an container, initializing an execution environment with programattically hardware setup within that environment, and any datasets that are necessary.
+- System configuration marks
+    - `@pytest.mark.gpus_needed_0`
+    - `@pytest.mark.gpus_needed_1`
+    - `@pytest.mark.gpus_needed_2`
+- Life-cycle marks
+    - `@pytest.mark.premerge`
+    - `@pytest.mark.postmerge`
+    - `@pytest.mark.nightly`
+    - `@pytest.mark.release`
+- Worker Framework marks
+    - `@pytest.mark.vllm`
+    - `@pytest.mark.tensorrt_llm`
+    - `@pytest.mark.sglang`
+- Execution specific marks
+    - `@pytest.mark.fast` - Tests that execute quickly, typically using small models
+    - `@pytest.mark.slow` - Tests that take a long time to run
+    - `@pytest.mark.skip(reason="Example: KV Manager is under development")` - Skip these tests
+    - `@pytest.mark.xfail(reason="Expected to fail because...")` - Tests expected to fail
 
-Structurally these tests exist within a folder at the top-level and are defined in the [pytest](https://docs.pytest.org/en/stable/) framework.
 
-The execution environments, where ephemeral, will be defined in [Terraform](https://developer.hashicorp.com/terraform) and created specifically for each run of the test suite to minimize environmental factors that could impact behavior.
+Usage of these marks can be chained together for example to select tests that run post-merge to `main` for the vLLM worker backend with 1 or 2 GPUs required: `pytest -m "integration and postmerge and vllm and (gpus_needed_1 or gpus_needed_2)`
 
-**Note** Need to work with engineering team to define environments
+#### Performance Expectations
 
-### Performance
+Integration tests should provide extensive coverage of the API surface of the codebase but as they interact across API boundaries and may not be highly prallelizable wall-clock execution standards are defined according to the life-cycle mark:
 
-Performance tests can be viewed as an extension of [End-to-End tests](#End-to-End) with the focus being on performance of the system as measured by an external service such as the [NVIDIA PerfAnalyzer](https://github.com/triton-inference-server/perf_analyzer). This secondary tool generates a report on metrics of interest and they are evaluated against the historical performance record to judge conformance to the test standard.
+| Life-cycle mark | Maximum execution time|
+|-----------------|-----------------------|
+|   premerge      |         5 minutes     |
+|   postmerge     |         15 minutes    |
+|   Nightly       |         2 hour        |
+|   Release       |         4 hours       |
 
-For this the data to have validity the deployment environment must be well defined, stable, and cataloged for each run. Where possible these environments will be defined in [Terraform](https://developer.hashicorp.com/terraform) and created specifically for each run of the test suite to minimize environmental factors that could impact behavior.
+### End-to-End Tests
 
-Structurally these tests exist within a folder at the top-level and are defined in the [pytest](https://docs.pytest.org/en/stable/) framework. ** No idea how to run PerfAnalyzer.
+End-to-end tests are test user flows that are centered on command-line calls using the Dynamo command constructions, e.g. `dynamo serve ...` or `dynamo deploy ...`. 
 
-**Note** Need to work with engineering teams to define customer deployments
-**Note** Internal deployments
+#### Structure
 
-### Continuous Operation Tests
+End-to-end tests are defined using the [pytest](https://docs.pytest.org/en/stable/) framework and exist in within the top-level`tests` directory in subdirectories mimicking their usage, e.g. tests of `dynamo serve` should exist at `tests/dynamo_serve`.
 
-## Test Coverage
+#### Test segmentation
 
-### Feature Coverage
+End-to-end tests use the `@pytest.mark.e2e` mark, which is required for all end-to-end tests, as well as further classification within the end-to-end test class. Mirroring integration tests, the four most prominent use cases are: hardware requirements for operation, classification of the test to a test lifecycle, worker framework type, execution related.
 
-* dynamo run
-  * Serving model with Open AI compat endpoints locally
-* dynamo build
-    * ??
-* dynamo serve
-  * Serving model with kvrouting
-  * Serving model with planner
-  * Serving model with disagg
-  * Serving model with disagg + planner + kvrouting
-  * hello world graph
-  * mock model
-* dynamo deploy
-  
-### Code Coverage
+- System configuration marks
+    - `@pytest.mark.gpus_needed_0`
+    - `@pytest.mark.gpus_needed_1`
+    - `@pytest.mark.gpus_needed_2`
+- Life-cycle marks
+    - `@pytest.mark.premerge`
+    - `@pytest.mark.postmerge`
+    - `@pytest.mark.nightly`
+    - `@pytest.mark.release`
+- Worker Framework marks
+    - `@pytest.mark.vllm`
+    - `@pytest.mark.tensorrt_llm`
+    - `@pytest.mark.sglang`
+- Execution specific marks
+    - `@pytest.mark.fast` - Tests that execute quickly, typically using small models
+    - `@pytest.mark.slow` - Tests that take a long time to run
+    - `@pytest.mark.skip(reason="Example: KV Manager is under development")` - Skip these tests
+    - `@pytest.mark.xfail(reason="Expected to fail because...")` - Tests expected to fail
+- Deployment target
+    - `@pytest.mark.k8s` - Tests of `dynamo deploy` that deploy to a Kubernetes instance
+    - `@pytest.mark.slurm` - Tests of `dynamo deploy` that deploy to a Slurm instance
 
-|Language| Tool |
-|--------|------|
-| Rust   | [Tarpaulin](https://github.com/xd009642/tarpaulin) |
-| Python | [coverage.py](https://coverage.readthedocs.io/en/7.8.0/) |
+#### Performance Expectations
 
+End-to-End tests should provide extensive coverage of the user flows but as they evaluate full workflows and may not be highly prallelizable, wall-clock execution standards are defined according to the life-cycle mark:
 
-### Tutorials / Examples
+| Life-cycle mark | Maximum execution time|
+|-----------------|-----------------------|
+|   premerge      |         5 minutes     |
+|   postmerge     |         15 minutes    |
+|   Nightly       |         2 hour        |
+|   Release       |         4 hours       |
 
-* use pytest codeblocks / mynist
+### Benchmark Tests
 
-## Test Runners
+Benchmark tests provide a mechanism to quantify an established set of canonical deployments of Dynamo against a defined load scenarios. However unlike both unit and integration tests the definition of a passing test cannot be defined a priori and is a configuration parameter left to the user.
 
-## Test Environments
+While the performance testing framework can provide a rudimentary success or failure response according to whether the test completes execution without errors, the gathered metrics are only valid in comparison to previous testing under the same environmental conditions. This level of control goes beyond the purview of the testing framework as the performance of a distributed system is highly dependent on the underlying hardware, network infrastructure, and existing load on the system.
 
-* CPU Only with Mock Model -> support all graphs
+This establishes these tests as acceptance tests for use of a new version in a production environment. As of writing the reports will not be published but internal standards will be established and used to determine when an unacceptable performance regression has occurred.
 
-* GPU single node - 8 gpus
+#### Structure
 
-* GPU multi-node
+Structurally these tests are defined in the [pytest](https://docs.pytest.org/en/stable/) framework and exist in within top-level `benchmark` directory.
 
-* GPU cluster 
+This makes use of performance analysis tools such as [GenAI Perf](https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/perf_analyzer/genai-perf/README.html) to define the load conditions and 
 
-* GPU perf cluster
+Configuration parameters are needed here in order to direct the system to the deployment environment that you are targeting. While the structure of these files is not defined in this document there will be a new pytest argument `-perf-test-deployment-config` added that specifies the location and access credentials of the deployment environment.
 
-* K8s Cluster
+**TODO Define the file structure for connecting with a deployment environment**
 
-# Implementation Details
+#### Segmentation
 
-| Life-cycle | Test Runner | Local Environment | Local Command | CI Environment | CI Command |
-| --- | --- | --- | --- | --- | --- |
-| pre-commit | [pre-commit framework](https://pre-commit.com/) | Host | `pre-commit run --all` | GitHub Action | [pre-merge.yml](https://github.com/ai-dynamo/dynamo/blob/main/.github/workflows/pre-merge.yml) | 
-| pre-merge  |
+Since these tests are meant to target specific deployment use cases the following classes of marks: worker framework, deployment target:
 
-## Test Directory Structure
+- Worker Framework marks
+    - `@pytest.mark.vllm`
+    - `@pytest.mark.tensorrt_llm`
+    - `@pytest.mark.sglang`
+- Deployment target:
+    - `@pytest.mark.k8s`
+    - `@pytest.mark.slurm`
 
-### Unit Tests
+These will be used in conjunction the `-perf-test-deployment-config` pytest argument to specify which tests should be executed in the environment. 
 
-<TODO>
+#### Execution Time
 
-```
-/workspace/lib/
-```
+Performance tests are snapshots of short-lived deployments to limit the exposure of the system to underlying failures which may skew the results. Thus a single test instance should run, at the upper limit, on the order of minutes excluding deployment.
 
-### Integration / End to End Tests
+However, as benchmark tests are for deployment scenarios, the setup time of different classes will be highly variable making wall-clock execution time standards challenging to enforce.
 
-```
-/workspace/tests/<functional_group>/test_x.py
-```
+### Stress Tests
 
-Example
+Dynamo is meant for large-scale deployments which means that stability and performance of the system needs to be maintained across various operational states and load conditions. To characterize these we define stress tests as chaos engineering-like practice to introduce randomized failures and unexpected loads.
 
-```
-/workspace/tests/utils
-/workspace/tests/conftest.py
-/workspace/tests/run/conftest.py
-/workspace/tests/run/test_dynamo_run.py
-/workspace/tests/serve/test_dynamo_serve.py
-/workspace/tests/planner/test_planner.py
-/workspace/tests/deploy/test_dynamo_deploy.py
-```
+While these could be considered an extension of [Performance Tests](#Performance-Tests) where system behavior is characterized over long durations in conditions of time-varying loading and in the presence of infrastructure failures, these are intended primarily to identify problems that arise in real-world deployments. While it is beyond the scope of this document, and Dynamo in general, to specify a multi-tiered deployment architecture to meet every use case this test type will run a typical, bare Dynamo deployment to understand its behavior which could then be supplemented for a production deployment.
 
-## PyTest Marks
+We consider this class of test as informative rather than gating. It is up to the engineering team to determine if any issues uncovered in this class of testing is prohibitive for a product release. 
 
-<TODO> (pavithra)
+#### Structure
 
-## Cargo Test Naming Convention
+The duration and style of these tests do not lend themselves to the normal test execution frameworks that we have mentioned so far. It is left as an exercise to the engineering team to determine the best tools to deploy, manipulate, and characterize the .
 
+Some tools that are suggested in this effort are [Chaos Monkey](https://netflix.github.io/chaosmonkey/), [GenAI Perf](https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/perf_analyzer/genai-perf/README.html), and [NVIDIA Resiliency Extension](https://github.com/NVIDIA/nvidia-resiliency-ext). We also anticipate that there will be significant use of centralized logging infrastructure and metrics dashboards to understand system behavior when established baselines of performance or stability are violated for root-cause analysis.
 
-## Deferred to Implementation
+## Testing Life cycles
 
-# Implementation Phases
+Tests are grouped according to when in the development and product lifecycle they are executed.
 
+### Pre-commit
+Pre-commit tests are meant to evaluate compliance with coding standards. These are not evaluating functionality but are defined as a lifecycle as they are vital to maintaining a coherent codebase across multiple developers.
 
-## Phase 1 Baseline
+Tests that are part of `pre-commit` include:
+1. [Linting Tests](#linting-tests)
 
-**Release Target**: Date
+#### Actions for failure
 
-**Effort Estimate**: \<estimate of time and number of engineers to complete the phase\>
+Pre-commit tests are intended to be run during git's pre-commit hook execution. As such this is the most developer-facing failure as it will block checking any code. In the event of a failure the developer of the code must alter the source to meet the guidelines. 
 
-**Work Item(s):** \<one or more links to work items, usually to JIRA tasks or user stories\>
+### Pre-merge
 
-**Supported API / Behavior:**
+Pre-merge tests are required to pass before code can be merged to the `main` branch of the repository. These tests are designed to be a set of sanity and core functionality tests that have broad coverage and give confidence that a change hasn't broken core functionality.
 
-* Ensure formatting and linting is in pre-commit for all languages
+Tests that are part of `pre-merge` include:
+1. [Linting Tests](#linting-tests)
+1. [Unit tests](#unit-tests)
+1. [Integration tests](#integration-tests) with the `premerge` mark. Depending on the execution environment additional marks will be added by the [CI Infrastructure](#usage-in-continuous-integration-environments)
+1. [End-to-end test](#end-to-end-tests) with the `premerge` mark. Depending on the execution environment additional marks will be added by the [CI Infrastructure](#usage-in-continuous-integration-environments)
 
+#### Dynamic Discovery
 
-**Not Supported:**
+A subset of pre-merge tests will be dynamically added to the the pre-merge gate based on the files changed. 
 
-* \<name and concise description of the API / behavior\>
+Todo: Determine how to specify this mapping and enable it for local testing.
 
-# Related Proposals
+#### Actions for failure
 
-**\[Optional \- if not applicable omit\]**
+This class of test will be run against every pull request issued against `main` and there will be rule infrastructure which prevents merging if any of these tests fail. As such it falls to the developer(s) of the PR to fix any errors identified by the tests.
 
-* File
+Pull request reviewers are also empowered to block merging and suggest additional testing needs if they determine the current testing is insufficient.
 
-* File
+### Post-merge
 
-* File
+Post-merge tests are evaluated after code is merged to `main` and are more expansive set of tests than `pre-merge` intended to catch regressions that may not be practical from a performance perspective to run on every commit.
 
-* File
+Tests that are part of `post-merge` include:
+1. [Linting Tests](#linting-tests)
+1. [Unit tests](#unit-tests)
+1. [Integration tests](#integration-tests) with the `premerge` and `postmerge` marks. Depending on the execution environment additional marks will be added by the [CI Infrastructure](#usage-in-continuous-integration-environments)
+1. [End-to-end tests](#end-to-end-tests) with the `premerge` and `postmerge` marks. Depending on the execution environment additional marks will be added by the [CI Infrastructure](#usage-in-continuous-integration-environments)
 
-* File
+#### Actions for failure
 
-# Alternate Solutions
+In the event that a pull request passes the [pre-merge](#pre-merge) lifecycle but fails in the post-merge level the Operations team or a designate, such as a bot, will inform the developer to of the offending pull request that they must issue a revert commit. This will block all other development in the repo and should be treated with the highest priority.
 
-**\[Required, if not applicable write N/A\]**
+In the event that a developer cannot be reached a member of the Dynamo Operations team will revert the merge.
 
-List out solutions that were considered but ultimately rejected. Consider free form \- but a possible format shown below.
+### Nightly
 
-## Alt \<\#\> \<Title\>
+Nightly tests are evaluated after close of business Pacific time and provide a daily regression test with a longer performance window.
 
-**Pros:**
+Tests that are part of `nightly` include:
+1. [Linting Tests](#linting-tests)
+1. [Unit tests](#unit-tests)
+1. [Integration tests](#integration-tests) with the `premerge`, `postmerge`, `nightly` marks.
+1. [End-to-end tests](#end-to-end-tests) with the `premerge`, `postmerge`, `nightly` marks.
+1. [Benchmark tests](#benchmark-tests) with the `nightly` mark.
 
-\<bulleted list or pros describing the positive aspects of this solution\>
+#### Actions for failure
 
-**Cons:**
+In the event of a regression in the nightly level it is probable that multiple pull requests will be in the changeset since the last success. A failure here is not, generally, considered as blocking all development in the repository so a revert will not be immediately required.
 
-\<bulleted list or pros describing the negative aspects of this solution\>
+Instead the operations team or a delegate, e.g. a bot, will message all of the pull requests authors in the changeset since the previous successful with a summary of the error encountered. They may, at their discretion, also provide a cursory analysis to more-closely target the source of the issue.
 
-**Reason Rejected:**
+### Release
 
-\<bulleted list or pros describing why this option was not used\>
+Release testing is run against every commit on a release branch of the form `release/<major>.<minor>.<micro>`. It is the highest 
 
-**Notes:**
+Tests that are part of `release` include:
+1. [Linting Tests](#linting-tests)
+1. [Unit tests](#unit-tests)
+1. [Integration tests](#integration-tests) with the `premerge`, `postmerge`, `nightly`, `release` marks.
+1. [End-to-end tests](#end-to-end-tests) with the `premerge`, `postmerge`, `nightly` `release` marks.
+1. [Benchmark tests](#benchmark-tests) with the `nightly` and `release` marks.
+1. [Stress tests](#stress-tests) are deployed to the testbed(s) once [Linting Tests](#linting-tests),[Unit tests](#unit-tests), [Integration tests](#integration-tests), and [End-to-end tests](#end-to-end-tests) have concluded
 
-\<optional: additional comments about this solution\>
+#### Actions for failure
 
-### CI Test Trigger Matrix
+The release manager will be responsible for messaging the appropriate distribution channels for failures of this class. In addition to NVIDIA internal communication channels, if an external contributor has contributed code which is may be contributing to failures they will be messaged directly using GitHub.
+
+With the bi-weekly release cadence of Dynamo failures in this class need are considered showstopping and developer who have contributed to the areas of the code under suspicion should turn their attention to diagnosis and repair as soon as practicable.
+
+As this is the only lifecycle which includes the [stress tests](#stress-tests) and they are informative, rather than automatically gating, it is up to the Operations team to surface concerns to the broader engineering team based on standards established with the engineering team.
+
+## Usage in Continuous Integration Environments
+
+The nature of Dynamo as an open source project that is homed at NVIDIA adds complexity to the CI structure as there is both public facing environment and an internal environment with proprietary hardware and environments whose access is limited to NVIDIA employees.
+
+Here we describe both the configuration of machines in different environments and how the life-cycles  will execute in these environments. While there is some redundancy in the tests that are executed.
+
+### Public GitHub
+
+This environment administered through [GitHub Actions](https://github.com/ai-dynamo/dynamo/actions) and the pipelines are publicly available in the [Dynamo repository](https://github.com/ai-dynamo/dynamo/tree/main/.github/workflows).
+
+| Life-Cycle | Type | Commands |
+|------------|------|-----------|
+| `pre-commit` | Linting | `pre-commit run --all-files` |
+| `pre-merge` | Linting | `pre-commit run --all-files` |
+| `pre-merge` | Unit | `cargo test` & `pytest -m "unit and gpus_needed_0"` |
+| `pre-merge` | Integration | `pytest -m "integration and premerge and gpus_needed_0 and not slow"`|
+| `pre-merge` | End-to-end | `pytest -m "e2e and premerge and gpus_needed_0 and not slow"` |
+| `post-merge` | Linting | `pre-commit run --all-files` |
+| `post-merge` | Unit | `cargo test` & `pytest -m unit and gpus_needed_0` |
+| `post-merge` | Integration | `pytest -m "integration and (premerge or postmerge) and gpus_needed_0"` |
+| `post-merge` | End-to-end | `pytest -m "e2e and (premerge or postmerge) and gpus_needed_0"` |
+
+<!-- | `nightly` | Linting | `pre-commit run --all-files` |
+| `nightly` | Unit | `cargo test` & `pytest -m unit and gpus_needed_0` |
+| `nightly` | Integration | `pytest -m "integration and (premerge or postmerge or nightly) and gpus_needed_0"`|
+| `nightly` | End-to-end | `pytest -m "e2e and (premerge or postmerge or nightly or release) and gpus_needed_0"`|
+| `nightly` | Benchmark | `pytest -m "benchmark and (e2e or nightly or release)"`|
+| `release` | Linting | `pre-commit run --all-files` |
+| `release` | Unit | `cargo test` & `pytest -m unit and gpus_needed_0` |
+| `release` | Integration | `pytest -m "integration and (premerge or postmerge or nightly or release) and gpus_needed_0"` |
+| `release` | End-to-end | `pytest -m "e2e and (e2e or postmerge or nightly or release) and gpus_needed_0"`| -->
+
+#### Infrastructure
+
+As the public infrastructure is meant to accept external contributions and provide a cost-effective, ephemeral execution environment at present the public CI provides CPU-only build and test environment.
+
+Tests that evaluate `dynamo deploy` which require kubernetes deployments are evaluated against [Minikube](https://minikube.sigs.k8s.io/docs/)-like tooling on the test machines.
+
+### NVIDIA Internal
+
+This information is largely proprietary to NVIDIA but broadly this environment provides a broader array of hardware configurations of 
+
+| Life-Cycle | Type | Commands |
+|------------|------|-----------|
+| `pre-commit` | Linting | `pre-commit run --all-files` |
+| `pre-merge` | Linting | `pre-commit run --all-files` |
+| `pre-merge` | Unit | `cargo test` & `pytest -m "unit and (gpus_needed_0 or gpus_needed_1 or gpus_needed_2)"` |
+| `pre-merge` | Integration | `pytest -m "integration and premerge and (gpus_needed_0 or gpus_needed_1)"`|
+| `pre-merge` | End-to-end | `pytest -m "e2e and premerge and (gpus_needed_0 or gpus_needed_1 or gpus_needed_2)"` |
+| `post-merge` | Linting | `pre-commit run --all-files` |
+| `post-merge` | Unit | `cargo test` & `pytest -m unit` |
+| `post-merge` | Integration | `pytest -m "integration and (premerge or postmerge) and (gpus_needed_0 or gpus_needed_1 or gpus_needed_2)"` |
+| `post-merge` | End-to-end | `pytest -m "e2e and (premerge or postmerge) and (gpus_needed_0 or gpus_needed_1 or gpus_needed_2)"` |
+| `nightly` | Linting | `pre-commit run --all-files` |
+| `nightly` | Unit | `cargo test` & `pytest -m unit` |
+| `nightly` | Integration | `pytest -m "integration and (premerge or postmerge or nightly) and (gpus_needed_0 or gpus_needed_1 or gpus_needed_2)"`|
+| `nightly` | End-to-end | `pytest -m "e2e and (premerge or postmerge or nightly or release) and (gpus_needed_0 or gpus_needed_1 or gpus_needed_2)"`|
+| `nightly` | Benchmark | `pytest -m "benchmark and (nightly or release)"`|
+| `release` | Linting | `pre-commit run --all-files` |
+| `release` | Unit | `cargo test` & `pytest -m unit` |
+| `release` | Integration | `pytest -m "integration and (premerge or postmerge or nightly or release) and (gpus_needed_0 or gpus_needed_1 or gpus_needed_2)"` |
+| `release` | End-to-end | `pytest -m "e2e and (postmerge or nightly or release) and (gpus_needed_0 or gpus_needed_1 or gpus_needed_2)"`|
+| `release` | benchmark | `pytest -m "benchmark and (nightly or release)"`|
+| `release` | stress | **TBD** |
+
+#### Infrastructure
+
+In contrast to the public infrastructure, the internal infrastructure provides single or dual GPU testing environments for test.
+
+Additionally there are kubernetes and slurm testbeds of multiple nodes to more thoroughly evaluate the code for production-like deployments.
+
+#### CI Test Trigger Matrix
 
 | Trigger Variable                        | pre-merge | vllm_1-gpu | vllm_multi_gpu | trtllm_1-gpu | trtllm_multi_gpu | vllm_benchmark | trtllm_benchmark | jet | compoundai |
 |-----------------------------------------|:---------:|:----------:|:--------------:|:------------:|:----------------:|:--------------:|:----------------:|:---:|:----------:|
