@@ -30,7 +30,7 @@ To achieve this goal, this document proposes certain optimizations to improve th
 - Restructuring the build process to provide a base container with a pre-built version of Dynamo + NIXL available on all distributions, enabling splitting of specific backends from the dynamo build process.
 - Defining a structure/template for all Dockerfiles to follow to ensure consistent and reproducible builds across backends along with specific roles/use cases targeted for each stage.
 
-This DEP also outlines Dynamo's container release strategy. Since pre-built containers represent an important distribution method, we need to establish clear guidelines for: (1) which containers to release, (2) the requirements and processes for releasing these containers, and (3) the container registry to publish these containers to. 
+This DEP also outlines Dynamo's container release process. Since pre-built containers represent an important distribution method, we need to establish clear guidelines for: (1) which containers to release, (2) the requirements and processes for releasing these containers, and (3) the container registry to publish these containers to. 
 
 # Motivation
 
@@ -100,7 +100,7 @@ Each build stage must have a clearly defined purpose and scope:
 - CI: Testing tools and validation requirements built on runtime
 
 ### REQ \<\#4\> \<Container Release Process\>
-The container release strategy must be defined to define a process on how containers should be released as part of Dynamo releases. This should include:
+Define a process on how containers should be released as part of Dynamo releases. This should include:
 - Justification and approval process for releasing containers
 - The minimum requirements and processes required for releasing these containers
 - The container registry to publish these containers to along with location of staged container images.
@@ -198,6 +198,8 @@ This information can be provided in the Request for new asset form. If the conta
 
 ## Container Release Process
 
+The container release process follows a structured workflow that ensures quality, security, and proper governance. The process begins with a request for a new container that requires approval before proceeding. Once approved, the container undergoes a build and security process in Gitlab CI, including CVE scanning and vulnerability fixes. If vulnerabilities cannot be fixed, an exception must be filed with the required approval before proceeding with the release process. The container must also receive open source approval before being released to NGC registry for public distribution.
+
 ```mermaid
 flowchart LR
     subgraph "Initial Request & Approval"
@@ -223,7 +225,7 @@ flowchart LR
         O{Open Source Approved?}:::grey
     end
     
-    subgraph "Release Process"
+    subgraph "Publish Containers to NGC"
         Q[Push to NGC Staging Registry]:::grey
         R[Push to NGC Registry]:::green
         S[Public Release]:::green
