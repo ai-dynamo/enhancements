@@ -207,7 +207,7 @@ flowchart LR
     end
     
     subgraph "Build & Security Process"
-        D[Container Build in CI]:::grey
+        D[Container Build in Gitlab CI]:::grey
         E[CVE & Secrets Scanning]:::grey
         F[Passes Sanity Tests]:::grey
         G[Stage Container in Gitlab Registry]:::grey
@@ -242,7 +242,6 @@ flowchart LR
     I -->|No| K
     I -->|Yes| J
     J --> G
-    J -->|Yes| Q
     N --> O
     O -->|No| C
     O -->|Yes| Q
