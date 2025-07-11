@@ -183,7 +183,7 @@ This layered approach ensures consistent builds, reduces duplication, and improv
 ## Container Release Strategy
 
 Which containers to release:
-Containers need proper justification and Org3 approval from the team to be released. Approval is required for all containers to be released. The following information is required:
+Containers need proper justification and approval from the team to be released. Approval is required for all containers to be released. The following information is required:
 - Development/Operations PIC for the container
 - Functionality of the container
 - Justification for the container release
