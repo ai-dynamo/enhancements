@@ -1,6 +1,6 @@
 # Network/Router Level Error Propagation during Response Streaming
 
-**Status**: Draft | **Under Review** | Approved | Replaced | Deferred | Rejected
+**Status**: Approved 
 
 **Authors**: [@nnshah1](https://github.com/nnshah1) [@kthui](https://github.com/kthui)
 
@@ -14,7 +14,7 @@
 
 **Required Reviewers**: [@ryanolson](https://github.com/ryanolson) [@grahamking](https://github.com/grahamking)
 
-**Review Date**: Jun 24 2025
+**Review Date**: Jul 09 2025
 
 **Pull Request**: https://github.com/ai-dynamo/enhancements/pull/15
 
