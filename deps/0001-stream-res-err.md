@@ -1,4 +1,4 @@
-# Network/Router Level Error Propagation during Response Streaming
+# Error Propagation during Response Streaming
 
 **Status**: Approved 
 
