@@ -199,31 +199,28 @@ This information can be provided in the Request for new asset form. If the conta
 ## Container Release Process
 
 ```mermaid
-flowchart TD
+flowchart LR
     subgraph "Initial Request & Approval"
         A[Request for New Container]:::grey
-        B{Org3 Approval?}:::grey
+        B{Approval?}:::grey
         C[Rejected request to release container]:::red
     end
     
-    subgraph "Build Process"
+    subgraph "Build & Security Process"
         D[Container Build in CI]:::grey
         E[CVE & Secrets Scanning]:::grey
         F[Passes Sanity Tests]:::grey
         G[Stage Container in Gitlab Registry]:::grey
-    end
-    
-    subgraph "Security & Exception Handling"
         H{Scan Passed?}:::grey
         I{Can Fix CVEs?}:::grey
         J[Fix Vulnerabilities]:::grey
-        K[Exception Filed with Org3]:::grey
-        L{Org3 Exception Approved?}:::grey
+        K[Exception Filed]:::grey
+        L{Exception Approved?}:::grey
     end
     
-    subgraph "OSRB Approval"
-        N[OSRB Approval]:::grey
-        O{OSRB Approved?}:::grey
+    subgraph "Open Source Approval"
+        N[Open Source Approval]:::grey
+        O{Open Source Approved?}:::grey
     end
     
     subgraph "Release Process"
