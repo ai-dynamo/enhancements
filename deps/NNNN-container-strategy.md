@@ -191,38 +191,32 @@ flowchart TD
     F[Passes Sanity Tests]:::grey
     G[Stage Container in Gitlab Registry]:::grey
     H{Scan Passed?}:::grey
-    I[Fix Vulnerabilities]:::grey
-    J{Can Fix CVEs?}:::grey
+    I{Can Fix CVEs?}:::grey
+    J[Fix Vulnerabilities]:::grey
     K[Exception Filed with Org3]:::grey
     L{Org3 Exception Approved?}:::grey
     N[OSRB Approval]:::grey
     O{OSRB Approved?}:::grey
-    P[Exception Filed]:::red
-    Q[Push to NGC Registry]:::green
-    R[Public Release]:::green
+    Q[Push to NGC Staging Registry]:::grey
+    R[Push to NGC Registry]:::green
+    S[Public Release]:::green
 
     %% Main flow
     A --> B
     B -->|No| C
-    B -->|Yes| N
+    B -->|Yes| D
     D --> E
     E --> F
-    F --> G
     E --> H
-    H -->|No| J
-    J -->|No| K
-    J -->|Yes| I
-    H --> G
-    H -->|Yes| J
-    J -->|No| K
+    H -->|No| I
+    I -->|No| K
+    I -->|Yes| J
+    J -->|No| P
+    J -->|Yes| Q
     K --> L
-    L -->|No| C
-    L -->|Yes| N
-    J -->|Yes| N
-    N --> O
-    O -->|No| C
-    O -->|Yes| Q
+    L --> Q
     Q --> R
+
 
     %% Styling
     classDef grey fill:#f3f4f6,stroke:#6b7280,stroke-width:2px;
