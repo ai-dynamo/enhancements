@@ -23,9 +23,9 @@
 # Summary
 
 This document outlines a container strategy for Dynamo to enhance the developer experience by 
-organizing Dockerfiles to maximize coverage and reuse along with defining a strategy for releasing pre-built Dynamo containers publicly. 
+re-organizing Dockerfile along with defining a strategy for releasing pre-built Dynamo containers publicly. 
 
-One of the goals for this document is to define a clear and maintainable structure for our Dockerfiles—specifically, to determine how many Dockerfiles we need and clarify the relationships between base, runtime, development, and CI images. The aim is to ensure each environment's Dockerfile builds upon the previous (as supersets), maximizing environment consistency and coverage during daily development and testing. 
+One of the goals for this document is to define a clear and maintainable structure for our Dockerfiles. Specifically, to determine how many Dockerfiles we need and clarify the relationships between base, runtime, development, and CI images. The aim is to ensure each environment's Dockerfile builds upon the previous (as supersets), maximizing environment consistency and coverage during daily development and testing. 
 To achieve this goal, this document proposes certain optimizations to improve the current build process:
 - Restructuring the build process to provide a base container with a pre-built version of Dynamo + NIXL available on all distributions, enabling splitting of specific backends from the dynamo build process.
 - Defining a structure/template for all Dockerfiles to follow to ensure consistent and reproducible builds across backends along with specific roles/use cases targeted for each stage.
@@ -100,10 +100,11 @@ Each build stage must have a clearly defined purpose and scope:
 - CI: Testing tools and validation requirements built on runtime
 
 ### REQ \<\#4\> \<Container Release Process\>
-The container release strategy must be defined to allow the Dynamo team to release containers as part of Dynamo releases. This should include:
-- Which containers to release (backend, api-operator, api-store, etc)
+The container release strategy must be defined to define a process on how containers should be released as part of Dynamo releases. This should include:
+- Justification and approval process for releasing containers
 - The minimum requirements and processes required for releasing these containers
-- The container registry to publish these containers to (NGC, Github, etc).
+- The container registry to publish these containers to along with location of staged container images.
+- The process for releasing the containers to the container registry.
 
 # Proposal
 
@@ -178,22 +179,90 @@ The diagram above illustrates the proposed container strategy showing the relati
 
 This layered approach ensures consistent builds, reduces duplication, and improves maintainability across all backend implementations.
 
+## Container Release Process
+
+```mermaid
+flowchart TD
+    A[Request for New Container]:::grey
+    B{Org3 Approval?}:::grey
+    C[Rejected request to release container]:::red
+    D[Container Build in CI]:::grey
+    E[CVE & Secrets Scanning]:::grey
+    F[Passes Sanity Tests]:::grey
+    G[Stage Container in Gitlab Registry]:::grey
+    H{Scan Passed?}:::grey
+    I[Fix Vulnerabilities]:::grey
+    J{Can Fix CVEs?}:::grey
+    K[Exception Filed with Org3]:::grey
+    L{Org3 Exception Approved?}:::grey
+    N[OSRB Approval]:::grey
+    O{OSRB Approved?}:::grey
+    P[Exception Filed]:::red
+    Q[Push to NGC Registry]:::green
+    R[Public Release]:::green
+
+    %% Main flow
+    A --> B
+    B -->|No| C
+    B -->|Yes| N
+    D --> E
+    E --> F
+    F --> G
+    E --> H
+    H -->|No| J
+    J -->|No| K
+    J -->|Yes| I
+    H --> G
+    H -->|Yes| J
+    J -->|No| K
+    K --> L
+    L -->|No| C
+    L -->|Yes| N
+    J -->|Yes| N
+    N --> O
+    O -->|No| C
+    O -->|Yes| Q
+    Q --> R
+
+    %% Styling
+    classDef grey fill:#f3f4f6,stroke:#6b7280,stroke-width:2px;
+    classDef green fill:#dcfce7,stroke:#166534,stroke-width:2px;
+    classDef red fill:#fecaca,stroke:#dc2626,stroke-width:2px;
+```
+
+The diagram above illustrates the container release process showing:
+- Initial approval process through Org3
+- CI/CD pipeline integration
+- Security scanning requirements
+- OSRB approval process
+- Final release to NGC registry
+
+This process ensures quality, security, and proper governance for all released containers.
+
 ## Container Release Strategy
 
 Which containers to release:
-- Slim backend runtime containers (vLLM, sglang, TRT-LLM, etc) on all supported platforms (x86_64, arm64). As long as the backend is supported on the platform, the container should be released for that platform.
-- Dynamo cloud API-Operator container
-- Dynamo cloud API-Store container
-- Dynamo cloud helm charts
+Containers need proper justification and Org3 approval from the team to be released. Approval is required for all containers to be released. The following information is required:
+- Development/Operations PIC for the container
+- Functionality of the container
+- Justification for the container release
+- Expected container size
+- Name of the container
+- The container registry to publish these containers to (NGC, Github, etc) along with location of staged container images.
+- When will the container be released?
+- Why are we releasing this container?
+- OSRB request?
+
+This information can be provided in the Request for new asset form. If the container is not approved, the container will not be released.
+
 
 The minimum requirements and processes required for releasing these containers:
-- Containers image must be built in CI and built in the release pipeline. These containers can then be staged in the release pipeline before being pushed to NGC.
-- Container images must go through CVE & secrets scanning in CI to ensure no vulnerabilties exist or secrets are exposed.
+- Containers image must be built in CI and built in the release pipeline. These containers can then be staged in the Gitlab release pipeline before being pushed to NGC. Internal users can pull the containers from Gitlab container registry before these images are pushed to NGC.
+- Container images must go through CVE & secrets scanning in CI to ensure no vulnerabilties exist or secrets are exposed. If the container contains CVE's that are either past the release cutoff date or are critical but cannot be fixed, an exception must be filed with Org 3 approval to release the container. 
 - Container images must be pushed to NGC, a public container registry for customers to download NVIDIA containers. To publish to NGC, the container must meet the following requirements:
   * No high/critical vulnerabilities present in the container
   * No secrets or sensitive information exposed in the container
-  * Container must be approved for open-source release
-  Given the requirements to push to NGC include several checks (such as CVE & secrets scanning), we could temporarily use Github container registry to push the release containers.
+  * Container must be approved for open-source release (OSRB approval)
 - To ensure container freshness, The base container should be updated use the latest CUDA runtime images when available. This will reduce the vulnerability surface area for the containers. Can be a separate effort but is required for getting the containers published to NGC.
 
 
