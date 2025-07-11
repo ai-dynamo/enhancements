@@ -219,7 +219,7 @@ flowchart TD
     O -->|No| C
     O -->|Yes| Q
     K --> L
-    L --> Q
+    L --> G
     G --> Q
     Q --> R
     R --> S
