@@ -218,11 +218,11 @@ flowchart TD
     N --> O
     O -->|No| C
     O -->|Yes| Q
-    Q --> R
     K --> L
     L --> Q
+    G --> Q
     Q --> R
-
+    R --> S
 
     %% Styling
     classDef grey fill:#f3f4f6,stroke:#6b7280,stroke-width:2px;
