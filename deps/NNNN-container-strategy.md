@@ -179,29 +179,63 @@ The diagram above illustrates the proposed container strategy showing the relati
 
 This layered approach ensures consistent builds, reduces duplication, and improves maintainability across all backend implementations.
 
+
+## Container Release Strategy
+
+Which containers to release:
+Containers need proper justification and Org3 approval from the team to be released. Approval is required for all containers to be released. The following information is required:
+- Development/Operations PIC for the container
+- Functionality of the container
+- Justification for the container release
+- Expected container size
+- Name of the container
+- The container registry to publish these containers to (NGC, Github, etc) along with location of staged container images.
+- When will the container be released?
+- Why are we releasing this container?
+- OSRB request?
+
+This information can be provided in the Request for new asset form. If the container is not approved, the container will not be released.
+
 ## Container Release Process
 
+The diagram below illustrates the container release process showing:
+- Initial approval process through Org3
+- CI/CD pipeline integration
+- Security scanning requirements
+- OSRB approval process
+- Final release to NGC registry
+
+This process ensures quality, security, and proper governance for all released containers.
 ```mermaid
 flowchart TD
+    %% Column 1: Initial Request & Approval
     A[Request for New Container]:::grey
     B{Org3 Approval?}:::grey
     C[Rejected request to release container]:::red
+    
+    %% Column 2: Build Process
     D[Container Build in CI]:::grey
     E[CVE & Secrets Scanning]:::grey
     F[Passes Sanity Tests]:::grey
     G[Stage Container in Gitlab Registry]:::grey
+    
+    %% Column 3: Security & Exception Handling
     H{Scan Passed?}:::grey
     I{Can Fix CVEs?}:::grey
     J[Fix Vulnerabilities]:::grey
     K[Exception Filed with Org3]:::grey
     L{Org3 Exception Approved?}:::grey
+    
+    %% Column 4: OSRB Approval
     N[OSRB Approval]:::grey
     O{OSRB Approved?}:::grey
+    
+    %% Column 5: Release Process
     Q[Push to NGC Staging Registry]:::grey
     R[Push to NGC Registry]:::green
     S[Public Release]:::green
 
-    %% Main flow
+    %% Main flow - keeping all connections exactly the same
     A --> B
     B -->|No| C
     B -->|Yes| D
@@ -229,42 +263,6 @@ flowchart TD
     classDef green fill:#dcfce7,stroke:#166534,stroke-width:2px;
     classDef red fill:#fecaca,stroke:#dc2626,stroke-width:2px;
 ```
-
-The diagram above illustrates the container release process showing:
-- Initial approval process through Org3
-- CI/CD pipeline integration
-- Security scanning requirements
-- OSRB approval process
-- Final release to NGC registry
-
-This process ensures quality, security, and proper governance for all released containers.
-
-## Container Release Strategy
-
-Which containers to release:
-Containers need proper justification and Org3 approval from the team to be released. Approval is required for all containers to be released. The following information is required:
-- Development/Operations PIC for the container
-- Functionality of the container
-- Justification for the container release
-- Expected container size
-- Name of the container
-- The container registry to publish these containers to (NGC, Github, etc) along with location of staged container images.
-- When will the container be released?
-- Why are we releasing this container?
-- OSRB request?
-
-This information can be provided in the Request for new asset form. If the container is not approved, the container will not be released.
-
-
-The minimum requirements and processes required for releasing these containers:
-- Containers image must be built in CI and built in the release pipeline. These containers can then be staged in the Gitlab release pipeline before being pushed to NGC. Internal users can pull the containers from Gitlab container registry before these images are pushed to NGC.
-- Container images must go through CVE & secrets scanning in CI to ensure no vulnerabilties exist or secrets are exposed. If the container contains CVE's that are either past the release cutoff date or are critical but cannot be fixed, an exception must be filed with Org 3 approval to release the container. 
-- Container images must be pushed to NGC, a public container registry for customers to download NVIDIA containers. To publish to NGC, the container must meet the following requirements:
-  * No high/critical vulnerabilities present in the container
-  * No secrets or sensitive information exposed in the container
-  * Container must be approved for open-source release (OSRB approval)
-- To ensure container freshness, The base container should be updated use the latest CUDA runtime images when available. This will reduce the vulnerability surface area for the containers. Can be a separate effort but is required for getting the containers published to NGC.
-
 
 ## Deferred to Implementation
 
