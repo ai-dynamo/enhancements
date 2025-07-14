@@ -43,7 +43,7 @@ The Metrics API achieves this by:
 
 ### REQ 1: Prometheus Server
 
-* **Description:** A Prometheus server MUST be running and actively polling each component/process in Dynamo to aggregate metrics data for a global view of the system.
+* **Description:** A Prometheus server MUST be operational and continuously polling each Dynamo component/process to collect and aggregate metrics data for a comprehensive system overview.
 * **Rationale:** Ensuring that a Prometheus server is operational and polling components guarantees that metrics data is consistently aggregated and available for analysis. This setup facilitates seamless integration with existing monitoring ecosystems, such as Grafana dashboards and alerting systems.
 * **Measurability:** Confirm that the Prometheus server is configured to poll each component's /metrics endpoint and that it successfully collects and stores the metrics data. Verify that the collected data can be accessed and visualized through external tools like Grafana.
 
@@ -89,24 +89,22 @@ Create a common Metrics API that allows each component/process to:
 
 ## System Diagram
 
-The architecture defines a trait-based Metrics API centered around the MetricType trait. This trait serves both as an output interface and a factory for generating metric instruments. It includes methods to create counters, gauges, and histograms, and takes a BackendType parameter at instantiation to determine which concrete backend implementation to use.
+This diagram shows a system for handling different types of metrics, like counters, gauges, and histograms. At the core is a class called Metric, which holds basic information like the metric’s name, type, and description.
 
-The MetricCounter, MetricGauge, and MetricHistogram traits define the Rust traits for metric operations, such as incrementing, setting values, and observing measurements. These traits inherit from MetricType, ensuring all metric types share a common output interface.
+From this base, three specific metric types are created: counters that can be increased, gauges that can go up or down or be set to a value, and histograms that record values. Each of these metric types has two versions: one for Prometheus and one for Libnv. These versions add the ability to output their data in a specific format.
 
-Concrete struct implementations—PrometheusCounter, PrometheusGauge, and PrometheusHistogram, as well as LibnvCounter, LibnvGauge, and LibnvHistogram—implement the respective traits. This design enables switching between different metric backends through a unified API abstraction, while keeping the logic extensible and backend-agnostic.
+There’s also a MetricsBackend class that manages how metrics are created and formatted. It includes methods to create each type of metric and to format them for Prometheus. A specialized version of this backend, called PrometheusBackend, inherits from it and likely customizes some of its behavior.
 
 Note that libnv is an NVIDIA implementation in libnv.so that can gather metrics in C++ layers (e.g. NIXL).
 
 ```mermaid
-classDiagram
+ classDiagram
     direction TB
 
-    class MetricType {
-        +output_metrics()
-        +make_counter(name: String): MetricCounter
-        +make_gauge(name: String): MetricGauge
-        +make_histogram(name: String): MetricHistogram
-        +new(backend: BackendType)
+    class Metric {
+        +get_name()
+        +metric_type
+        +description
     }
 
     class MetricCounter {
@@ -160,15 +158,23 @@ classDiagram
         +observe(value: f64)
     }
 
-    class BackendType {
-        <<enum>>
-        +Prometheus
-        +Libnv
+    class MetricsBackend {
+        +prefix
+        +get_backend()
+        +create_counter(name)
+        +create_gauge(name)
+        +create_histogram(name)
+        +prometheus_format_str()
     }
 
-    MetricType <|-- MetricCounter
-    MetricType <|-- MetricGauge
-    MetricType <|-- MetricHistogram
+    class PrometheusBackend {
+    }
+
+    MetricsBackend <|-- PrometheusBackend
+
+    Metric <|-- MetricCounter
+    Metric <|-- MetricGauge
+    Metric <|-- MetricHistogram
 
     MetricCounter <|-- PrometheusCounter
     MetricGauge <|-- PrometheusGauge
@@ -176,7 +182,7 @@ classDiagram
 
     MetricCounter <|-- LibnvCounter
     MetricGauge <|-- LibnvGauge
-    MetricHistogram <|-- LibnvHistogram
+    MetricHistogram <|-- LibnvHistogram 
 ``` 
 
 ```Rust
