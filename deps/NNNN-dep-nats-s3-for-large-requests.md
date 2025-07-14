@@ -12,7 +12,7 @@
 
 **Sponsor**: [@ryanolson](https://github.com/ryanolson)
 
-**Required Reviewers**: [@ryanolson](https://github.com/ryanolson) [@peabrane](https://github.com/peabrane) [@ishandhananjaya](https://github.com/ishandhananjaya)
+**Required Reviewers**: [@ryanolson](https://github.com/ryanolson) [@peabrane](https://github.com/peabrane) [@ishandhanani](https://github.com/ishandhanani)
 
 **Review Date**: [Date for review]
 
