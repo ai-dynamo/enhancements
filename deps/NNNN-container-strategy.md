@@ -36,11 +36,11 @@ Dynamo's current container architecture consists of multiple Dockerfiles in the 
 
 The current approach faces several challenges:
 
-1. **Inefficient Build Process**: Components like Dynamo, NIXL, and backends are rebuilt across stages instead of using a layered approach. For example, in Dockerfile.vllm, Dynamo is installed three times - in base, ci_minimum, and runtime stages.
+1. **Inefficient Build Process**: Components like Dynamo, NIXL, and backends are installed multiple times across stages instead of using a layered approach. Stages do not build upon each other which leads to repeated steps and inefficient build times.
 
 2. **Developer Experience Issues**: The unclear organization of Dockerfiles makes it difficult for developers to choose the right build for their needs, often defaulting to the devel build regardless of use case.
 
-3. **Build Reliability**: The complex layering and repeated steps across stages lead to intermittent build failures.
+3. **Build Reliability**: The complex layering and repeated steps across stages can lead to intermittent build failures.
 
 4. **Inconsistent Standards**: Without a unified Dockerfile for building Dynamo, NIXL, and dependencies, code is duplicated or missing across backend-specific Dockerfiles, and optimizations aren't shared effectively.
 
