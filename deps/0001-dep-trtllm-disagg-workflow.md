@@ -74,12 +74,11 @@ Current request disaggregated workflow looks like:
 
 ![Current Disaggregated Workflow](0001_images/current.png)
 
-To unblock users in short-term, we are proposing a config parameter ("do_prefill") to the first stage worker to swap the role of the two workers. The two workers are:
+To unblock users in short-term, we are proposing an additional option (--disaggregation-strategy={prefill_first, decode_first}) to the worker script. The two workers are:
 - First stage worker
 - Second stage worker
 
-Based on the config parameter, the first stage worker can decide whether it wants to run prefill locally and then push the request to second stage for decode.
-Or forward the request to second stage for remote prefill and run decode locally. 
+Based on the cli option, the first stage worker can decide whether it wants to run prefill locally and then push the request to second stage for decode. Or forward the request to second stage for remote prefill and run decode locally. 
 
 ![Proposed Disaggregated Workflow](0001_images/proposed_design.png)
 
