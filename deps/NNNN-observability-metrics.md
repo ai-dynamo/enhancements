@@ -185,84 +185,121 @@ Note that libnv is an NVIDIA implementation in libnv.so that can gather metrics 
     MetricHistogram <|-- LibnvHistogram 
 ``` 
 
+Actual example from `lib/runtime/examples/system_stats_endpoint/src/bin/system_stats_server.rs`
 ```Rust
-/*
-    THIS IS WORK IN PROGRESS -- DO NOT REVIEW
+pub struct ExampleHTTPMetrics {
+    registry: Arc<dyn MetricsRegistry>,
+    pub request_counter: Box<dyn MetricCounter>,
+    pub active_requests_gauge: Box<dyn MetricGauge>,
+    pub request_duration_histogram: Box<dyn MetricHistogram>,
+}
 
-    TODO (maybe):
-    1) Define Metrics struct/traits/etc
-    2) Add a Metrics struct in lib/runtime/src/config.rs (or equivalent)
-    3) Initialize/register Metrics struct in lib/runtime/src/{lib.rs, distributed.rs} (or equivalent)
-    4) HTTP service to register the Metrics struct (perhaps in stats_handler/handler?)
-*/
+impl ExampleHTTPMetrics {
+    /// Create a new ServiceMetrics instance using the metric backend
+    pub fn new(backend: Arc<dyn MetricsRegistry>) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        // Create request counter
+        let request_counter = backend.create_counter(
+            "service_requests_total",
+            "Total number of requests processed",
+            &[("service", "backend")]
+        )?;
 
-    pub struct DynamoHTTPMetrics {
-        // MetricCounter, MetricGauge are traits from the Metrics API
-        pub http_requests_count: Box<dyn MetricCounter>,
-        pub http_requests_ms: Box<dyn MetricGauge>,
+        // Create active requests gauge
+        let active_requests_gauge = backend.create_gauge(
+            "service_active_requests",
+            "Number of requests currently being processed",
+            &[("service", "backend")]
+        )?;
+
+        // Create request duration histogram
+        let request_duration_histogram = backend.create_histogram(
+            "service_request_duration_seconds",
+            "Request duration in seconds",
+            &[("service", "backend")]
+        )?;
+
+        Ok(ExampleHTTPMetrics {
+            registry: backend,
+            request_counter,
+            active_requests_gauge,
+            request_duration_histogram,
+        })
     }
 
-    impl DynamoHTTPMetrics {
-        /// Create a new DynamoHTTPMetrics instance using the parent's new_prometheus
-        pub fn new(prefix: &str) -> Self {
-            let request_counter = base.container.create_counter(
-                "requests_total",
-                "Total number of requests",
-                &[("service", "api"), ("version", "v1")]
-            );
-            
-            let response_time_gauge = base.container.create_gauge(
-                "response_time_seconds",
-                "Response time in seconds",
-                &[("service", "api"), ("version", "v1")]
-            );
-            
-            DynamoHTTPMetrics {
-                http_requests_count: request_counter,
-                http_requests_ms: response_time_gauge,
-            }
-        }
+    /// Get a read-only reference to the backend
+    pub fn backend(&self) -> &Arc<dyn MetricsRegistry> {
+        &self.registry
     }
+}
 
-    #[test]
-    fn test_component_metrics_struct() {
-        println!("=== Testing ServiceMetrics Struct with Prometheus Backend ===");
-        
-        // Create a new ServiceMetrics instance
-        let metrics = MetricType::new("MyHTTP", enum::Prometheus);
-        
-        println!("Created ServiceMetrics with Prometheus backend");
-        println!("Initial metrics:");
-        metrics.print_metrics();
-        
-        // Simulate some API requests using direct access to public fields
-        println!("\n--- Simulating API Requests (Direct Access) ---");
-        
-        // Record individual requests directly
-        metrics.http_requests_count.inc(); // Request 1
-        
-        // Record batch of requests directly
-        metrics.http_requests_count.inc_by(5); // 5 more requests
-        
-        // Set response times directly
-        metrics.http_requests_ms.set(0.15); // 150ms
-        metrics.http_requests_ms.inc(0.05); // Add 50ms
-        
-        println!("\nFinal metrics after simulation:");
-        metrics.print_metrics();
-        
-        // Export to Prometheus format (for HTTP service)
-        println!("\n--- Prometheus Format Export ---");
-        let prometheus_output = metrics.base.container.export_prometheus();
-        println!("{}", prometheus_output);
-        // Expected output would look like:
-        // # HELP myapp_requests_total Total number of requests
-        // # TYPE myapp_requests_total counter
-        // myapp_requests_total{service="api",version="v1"} 6
-        // # HELP myapp_response_time_seconds Response time in seconds
-        // # TYPE myapp_response_time_seconds gauge
-        // myapp_response_time_seconds{service="api",version="v1"} 0.2
-     }
+struct RequestHandler {
+    metrics: Arc<ExampleHTTPMetrics>,
+}
+
+impl RequestHandler {
+    fn new(metrics: Arc<ExampleHTTPMetrics>) -> Arc<Self> {
+        Arc::new(Self { metrics })
+    }
+}
+
+#[async_trait]
+impl AsyncEngine<SingleIn<String>, ManyOut<Annotated<String>>, Error> for RequestHandler {
+    async fn generate(&self, input: SingleIn<String>) -> Result<ManyOut<Annotated<String>>> {
+        let start_time = std::time::Instant::now();
+
+        // Record request start
+        self.metrics.request_counter.inc();
+        self.metrics.active_requests_gauge.inc(1.0);
+
+        let (data, ctx) = input.into_parts();
+
+        let chars = data
+            .chars()
+            .map(|c| Annotated::from_data(c.to_string()))
+            .collect::<Vec<_>>();
+
+        let stream = stream::iter(chars);
+
+        // Calculate duration
+        let duration = start_time.elapsed().as_secs_f64();
+
+        // Record request end
+        self.metrics.active_requests_gauge.dec(1.0);
+        self.metrics.request_duration_histogram.observe(duration);
+
+        Ok(ResponseStream::new(Box::pin(stream), ctx.context()))
+    }
+}
+
+async fn backend(runtime: DistributedRuntime) -> Result<()> {
+    // Get the metrics backend from the runtime (async, lazy-initialized)
+    let backend = runtime.metrics_registry().await?;
+    // Initialize metrics using the profiling-based struct
+    let metrics = Arc::new(ExampleHTTPMetrics::new(backend.clone()).map_err(|e| Error::msg(e.to_string()))?);
+
+    // attach an ingress to an engine, with the RequestHandler using the metrics struct
+    let ingress = Ingress::for_engine(RequestHandler::new(metrics.clone()))?;
+
+    // make the ingress discoverable via a component service
+    // we must first create a service, then we can attach one more more endpoints
+    runtime.namespace(DEFAULT_NAMESPACE)?
+        .component("backend")?
+        .service_builder()
+        .create()
+        .await?
+        .endpoint("generate")
+        .endpoint_builder()
+        .stats_handler(|stats| {
+            println!("stats: {:?}", stats);
+            let stats = MyStats { val: 10 };
+            serde_json::to_value(stats).unwrap()
+        })
+        .handler(ingress)
+        .start()
+        .await?;
+
+    Ok(())
+}
 ```
 
 # Alternate Solutions
