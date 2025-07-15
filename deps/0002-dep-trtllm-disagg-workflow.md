@@ -1,24 +1,24 @@
 # Prefill->Decode Disaggregated Workflow for TensorRT-LLM 
 
-**Status**: Draft
+**Status**: 
 
 **Authors**: Tanmay Verma
 
 **Category**: Architecture
 
-**Replaces**: [Link of previous proposal if applicable] 
+**Replaces**: N/A 
 
-**Replaced By**: [Link of previous proposal if applicable] 
+**Replaced By**: N/A 
 
-**Sponsor**: [Name of code owner or maintainer to shepard process]
+**Sponsor**: @richardhuo-nv @nnshah1 @nvrohanv
 
-**Required Reviewers**: [Names of technical leads that are required for acceptance]
+**Required Reviewers**: @richardhuo-nv @nnshah1
 
-**Review Date**: [Date for review]
+**Review Date**: 07/15/2025
 
-**Pull Request**: [Link to Pull Request of the Proposal itself]
+**Pull Request**: [#22](https://github.com/ai-dynamo/enhancements/pull/22)
 
-**Implementation PR / Tracking Issue**: [Link to Pull Request or Tracking Issue for Implementation]
+**Implementation PR / Tracking Issue**: [#1884](https://github.com/ai-dynamo/dynamo/pull/1884)
 
 # Summary
 
@@ -29,6 +29,8 @@ Currently, the disaggregated workflow examples require requests to first hit the
 **\[Required\]**
 
 Dynamo users have expressed strong interest in gaining control over request flow patterns. The current TensorRT-LLM disaggregated workflow routes requests first to a TensorRT-LLM worker, which then forwards them to a Prefill worker for remote prefill execution. This design constraint stems from the current limitation where only one worker per model can interact with the KV router(call `register_llm`), allowing KV routing to either Prefill workers or Decode workers depending on which receives the request first. In the existing implementation, users are restricted to KV routing on decode workers only. Providing flexibility to choose which worker type handles the initial request routing would address critical user requirements for workflow customization.
+
+In the current implementation, the TensorRT-LLM prefill worker transfers all KV cache blocks to the decode workers, regardless of whether the decode workers already have a complete KV cache match. This means that, even with a 100% KV cache hit on the decode side, the prefill worker still sends all blocks, resulting in redundant data transfer. By routing requests to the prefill worker first when using KV routing, we can optimize efficiency and reduce unnecessary work during the prefill stage.
 
 ## Goals
 
@@ -83,7 +85,7 @@ Based on the cli option, the first stage worker can decide whether it wants to r
 ![Proposed Disaggregated Workflow](0001_images/proposed_design.png)
 
 
-This should address the requirement in short-term.
+This should address the requirement in short-term. 
 
 ## Long-Term
 
@@ -92,25 +94,4 @@ The long-term proposal is a WIP.
 
 # Alternate Solutions
 
-**\[Required, if not applicable write N/A\]**
-
-List out solutions that were considered but ultimately rejected. Consider free form \- but a possible format shown below.
-
-## Alt \<\#\> \<Title\>
-
-**Pros:**
-
-\<bulleted list or pros describing the positive aspects of this solution\>
-
-**Cons:**
-
-\<bulleted list or pros describing the negative aspects of this solution\>
-
-**Reason Rejected:**
-
-\<bulleted list or pros describing why this option was not used\>
-
-**Notes:**
-
-\<optional: additional comments about this solution\>
-
+N/A
