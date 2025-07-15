@@ -184,3 +184,4 @@ Keep the list of acronyms and abbreviations sorted alphabetically to ease lookin
 Do not include the full definition in the expanded meaning of an abbreviation or acronym. If the reader needs the definition, please include it in the [Terminology & Definitions](#terminology--definitions) section.
 
 **\<Acronym/Abbreviation\>:** \<Expanded Meaning\>
+
