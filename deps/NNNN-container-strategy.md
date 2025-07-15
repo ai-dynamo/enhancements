@@ -1,6 +1,6 @@
 # Container Build Process Optimization
 
-**Status**: Draft
+**Status**: Ready for Review
 
 **Authors**: [nv-tusharma] 
 
@@ -14,7 +14,7 @@
 
 **Required Reviewers**: nnshah1, saturley-hall, nv-anants, nvda-mesharma, mc-nv, dmitry-tokarev-nv, pvijayakrish
 
-**Review Date**: 2025-06-03
+**Review Date**: 2025-07-15
 
 **Pull Request**: TBD
 
