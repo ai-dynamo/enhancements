@@ -1,4 +1,4 @@
-# Container Strategy 
+# Container Build Process Optimization
 
 **Status**: Draft
 
@@ -22,19 +22,18 @@
 
 # Summary
 
-This document outlines a container strategy for Dynamo to enhance the developer experience by 
-re-organizing Dockerfile along with defining a strategy for releasing pre-built Dynamo containers publicly. 
+This document outlines a container build process optimization strategy for Dynamo to enhance the developer experience by re-organizing Dockerfiles along with defining a clear and maintainable structure for our Dockerfiles. 
 
 One of the goals for this document is to define a clear and maintainable structure for our Dockerfiles. Specifically, to determine how many Dockerfiles we need and clarify the relationships between base, runtime, development, and CI images. The aim is to ensure each environment's Dockerfile builds upon the previous (as supersets), maximizing environment consistency and coverage during daily development and testing. 
+
 To achieve this goal, this document proposes certain optimizations to improve the current build process:
 - Restructuring the build process to provide a base container with a pre-built version of Dynamo + NIXL available on all distributions, enabling splitting of specific backends from the dynamo build process.
 - Defining a structure/template for all Dockerfiles to follow to ensure consistent and reproducible builds across backends along with specific roles/use cases targeted for each stage.
 
-This DEP also outlines Dynamo's container release process. Since pre-built containers represent an important distribution method, we need to establish clear guidelines for: (1) which containers to release, (2) the requirements and processes for releasing these containers, and (3) the container registry to publish these containers to. 
-
 # Motivation
 
 Dynamo's current container architecture consists of multiple Dockerfiles in the `/containers` directory of the [Dynamo repository](https://github.com/NVIDIA/Dynamo). These Dockerfiles are organized by backend (vLLM, sglang, TRT-LLM) and contain multiple stages (base, devel, ci, runtime) for different use cases. Each stage includes a Dynamo build, the specific backend, and NIXL - our high-throughput, low-latency point-to-point communication library for accelerating inference. 
+
 The current approach faces several challenges:
 
 1. **Inefficient Build Process**: Components like Dynamo, NIXL, and backends are rebuilt across stages instead of using a layered approach. For example, in Dockerfile.vllm, Dynamo is installed three times - in base, ci_minimum, and runtime stages.
@@ -45,14 +44,7 @@ The current approach faces several challenges:
 
 4. **Inconsistent Standards**: Without a unified Dockerfile for building Dynamo, NIXL, and dependencies, code is duplicated or missing across backend-specific Dockerfiles, and optimizations aren't shared effectively.
 
-Additionally, as Dynamo expands its support for multiple LLM backends, we need a clear container release strategy to:
-- Provide pre-built backend containers along with Dynamo deploy containers (api-operator, api-store) to a public container registry
-- Ensure consistent quality and security across released containers
-- Simplify the deployment process for end users
-- Maintain version control and compatibility across Dynamo releases
-
-This document proposes solutions to both the build process challenges and establishes a framework for container releases, aiming to improve overall container usability and deployment experience.
-
+This document proposes solutions to the build process challenges, aiming to improve overall container build efficiency and developer experience.
 
 ## Goals
 
@@ -68,14 +60,11 @@ Pinning/Fixing dependencies will ensure a unified build environment reducing "it
 
 * Minimize effort for providing multi-arch support across various backends for Dynamo by leveraging manylinux to build for multiple distributions
 
-* Outline a container release strategy which enables Dynamo team to release containers as part of Dynamo releases
-
 ### Non Goals
 
-- Slim backend-specific runtime containers to use for performance testing. 
+- Container release strategy and processes (covered in separate DEP)
 - Unified build environment
 - Outline possible further improvements including external caching/multi-context docker builds to reduce build times. 
-
 
 ## Requirements
 
@@ -99,13 +88,6 @@ Each build stage must have a clearly defined purpose and scope:
 - Runtime: Minimal production deployment requirements
 - CI: Testing tools and validation requirements built on runtime
 
-### REQ \<\#4\> \<Container Release Process\>
-Define a process on how containers should be released as part of Dynamo releases. This should include:
-- Justification and approval process for releasing containers
-- The minimum requirements and processes required for releasing these containers
-- The container registry to publish these containers to along with location of staged container images.
-- The process for releasing the containers to the container registry.
-
 # Proposal
 
 In order to address the requirements, we propose the following changes to the Dynamo build process:
@@ -124,7 +106,7 @@ Each backend-specific Dockerfile should follow a specific format. The backend-sp
 | Runtime  | Customers/Production| Cuda base runtime image| Minimal image with only the dependencies required to deploy and run Dynamo w/backend from the backend build stage; intended for production deployments. Copies dynamo artifacts from base image and backend artifaces from backend build image. |
 | CI       | Developers/Internal CI Pipelines/Local Debugging | Runtime image          | Adds CI-specific tools, QA test scripts, internal models, and other dependencies needed for automated testing.         |
 
-Although the Dynamo base container is required to have multi-arch support, the backend builds aren't required to have immediate multi-arch support since backends often require different build logic across multiple architectures. 
+The CUDA base images will be used from the [NVIDIA CUDA Container Registry](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/cuda). Please refer to the Pros and Cons section for more details on why we chose to use the cuda runtime image instead of the Deep Learning CUDA image.
 
 # Implementation Details
 
@@ -171,7 +153,7 @@ flowchart TD
     classDef gray fill:#e5e7eb,stroke:#333,stroke-width:1px;
 ```
 
-The diagram above illustrates the proposed container strategy showing the relationships between:
+The diagram above illustrates the proposed container build strategy showing the relationships between:
 - Build Base Container with common dependencies
 - Backend-specific development containers
 - Runtime containers
@@ -179,85 +161,32 @@ The diagram above illustrates the proposed container strategy showing the relati
 
 This layered approach ensures consistent builds, reduces duplication, and improves maintainability across all backend implementations.
 
+## Dockerfile Structure Template
 
-## Container Release Strategy
+Each backend-specific Dockerfile will follow this standardized structure:
 
-Which containers to release:
-Containers need proper justification and approval from the team to be released. Approval is required for all containers to be released. The following information is required:
-- Development/Operations PIC for the container
-- Functionality of the container
-- Justification for the container release
-- Expected container size
-- Name of the container
-- The container registry to publish these containers to (NGC, Github, etc) along with location of staged container images.
-- When will the container be released?
-- Why are we releasing this container?
-- OSRB request?
+```dockerfile
+# Backend Build Stage
+FROM nvcr.io/nvidia/cuda:XX.YY-devel-ubuntuXX.XX as backend-build
+# Install backend-specific dependencies and build backend
 
-This information can be provided in the Request for new asset form. If the container is not approved, the container will not be released.
+# Runtime Stage  
+FROM nvcr.io/nvidia/cuda:XX.YY-runtime-ubuntuXX.XX as runtime
+# Copy dynamo and NIXL wheels from base container
+# Copy backend artifacts from backend-build stage
+# Install runtime dependencies only
 
-## Container Release Process
-
-The container release process follows a structured workflow that ensures quality, security, and proper governance. The process begins with a request for a new container that requires approval before proceeding. Once approved, the container undergoes a build and security process in Gitlab CI, including CVE scanning and vulnerability fixes. If vulnerabilities cannot be fixed, an exception must be filed with the required approval before proceeding with the release process. The container must also receive open source approval before being released to NGC registry for public distribution.
-
-```mermaid
-flowchart LR
-    subgraph "Initial Request & Approval"
-        A[Request for New Container]:::grey
-        B{Approval?}:::grey
-        C[Rejected request to release container]:::red
-    end
-    
-    subgraph "Build & Security Process"
-        D[Container Build in Gitlab CI]:::grey
-        E[CVE & Secrets Scanning]:::grey
-        F[Passes Sanity Tests]:::grey
-        G[Stage Container in Gitlab Registry]:::grey
-        H{Scan Passed?}:::grey
-        I{Can Fix CVEs?}:::grey
-        J[Fix Vulnerabilities]:::grey
-        K[Exception Filed]:::grey
-        L{Exception Approved?}:::grey
-    end
-    
-    subgraph "Open Source Approval"
-        N[Open Source Approval]:::grey
-        O{Open Source Approved?}:::grey
-    end
-    
-    subgraph "Publish Containers to NGC"
-        Q[Push to NGC Staging Registry]:::grey
-        R[Push to NGC Registry]:::green
-        S[Public Release]:::green
-    end
-
-    %% Main flow - keeping all connections exactly the same
-    A --> B
-    B -->|No| C
-    B -->|Yes| D
-    B -->|Yes| N
-    D --> E
-    E --> F
-    F --> G
-    E --> H
-    H -->|No| I
-    I -->|No| K
-    I -->|Yes| J
-    J --> G
-    N --> O
-    O -->|No| C
-    O -->|Yes| Q
-    K --> L
-    L --> G
-    G --> Q
-    Q --> R
-    R --> S
-
-    %% Styling
-    classDef grey fill:#f3f4f6,stroke:#6b7280,stroke-width:2px;
-    classDef green fill:#dcfce7,stroke:#166534,stroke-width:2px;
-    classDef red fill:#fecaca,stroke:#dc2626,stroke-width:2px;
+# CI Stage
+FROM runtime as ci
+# Add CI-specific tools and test dependencies
 ```
+
+## Dependency Management
+
+- **Pinned Dependencies**: All dependencies will be pinned to specific versions in the base container
+- **Multi-arch Support**: Base container will support both x86_64 and arm64 architectures
+- **Minimal Runtime**: Runtime images will only include necessary dependencies for production deployment
+- **Layered Caching**: Build layers will be optimized for Docker build cache efficiency
 
 ## Deferred to Implementation
 
@@ -277,11 +206,15 @@ TBD
 
 **Supported API / Behavior:**
 
-* \<name and concise description of the API / behavior\>
+* Pre-built Dynamo base container with multi-arch support
+* NIXL integration in base container
+* Manylinux base for broad distribution compatibility
+* Standardized environment variables and paths
+* Pinned dependencies for base container
 
 **Not Supported:**
 
-* \<name and concise description of the API / behavior\>
+* Advanced caching mechanisms (e.g. multi-context docker builds)
 
 ## Phase \<\#2\> \<Restructure backend Dockerfiles to follow proposed structure\>
 
@@ -293,25 +226,19 @@ TBD
 
 **Supported API / Behavior:**
 
-* \<name and concise description of the API / behavior\>
+* Updated vLLM, sglang, and TRT-LLM Dockerfiles following new structure
+* Clear separation between backend build, runtime, and CI stages
+* Integration with base container for Dynamo and NIXL dependencies
+* Reduced build times through improved layering
+* Backward compatibility with existing Dockerfiles
+* Pinned dependencies for backend builds
 
 **Not Supported:**
 
-* \<name and concise description of the API / behavior\>
 
 # Related Proposals
 
 **\[Optional \- if not applicable omit\]**
-
-* File
-
-* File
-
-* File
-
-* File
-
-* File
 
 # Alternate Solutions
 
@@ -319,23 +246,26 @@ TBD
 
 List out solutions that were considered but ultimately rejected. Consider free form \- but a possible format shown below.
 
-## Alt \<\#\> \<Title\>
+## Alt \<\# 1\> \<Using Deep Learning CUDA images as base image instead of cuda runtime\>
 
 **Pros:**
 
-\<bulleted list or pros describing the positive aspects of this solution\>
+- Dynamo would be in sync with the latest Deep Learning CUDA release
+- Deep Learning CUDA image can provide additional libraries such as cuDNN, NCCL, etc which can accelerate deep learning workloads.
+- TritonServer is built on top of the Deep Learning CUDA image, so would be a good reference for the use-case.
 
 **Cons:**
 
-\<bulleted list or pros describing the negative aspects of this solution\>
+- Container Size is too large for the use-case. The cuda runtime image we use is around 6 GB whereas the Deep Learning Cuda runtime is around 11 GB, uncompressed.
+- Introduces additional dependencies that are not required for Dynamo, which can increase the container size and build time.
+- Dynamo has NIXL as it's communication library, so a dependency on NCCL is not required.
 
 **Reason Rejected:**
 
-\<bulleted list or pros describing why this option was not used\>
+- Container Size is too large for the use-case. The cuda runtime image we use is around 6 GB whereas the Deep Learning cuda runtime is around 11 GB, uncompressed.
+- Introduces additional dependencies that are not required for Dynamo, which can increase the container size and build time.
 
-**Notes:**
 
-\<optional: additional comments about this solution\>
 
 # Background
 
@@ -353,25 +283,21 @@ Add additional references as needed to help reviewers and authors understand the
 
 ## Terminology & Definitions
 
-**\[Optional \- if not applicable omit\]**
-
-List out additional terms / definitions (lexicon). Try to keep definitions as concise as possible and use links to external resources when additional information would be useful to the reader.
-
-Keep the list of terms sorted alphabetically to ease looking up definitions by readers.
-
-| \<Term\> | \<Definition\> |
+| Term | Definition |
 | :---- | :---- |
-| **\<Term\>** | \<Definition\> |
+| **Base Container** | Pre-built container with Dynamo and NIXL that serves as foundation for backend-specific builds |
+| **Backend Build** | Container stage that builds backend-specific code and dependencies |
+| **CI Stage** | Container stage with testing tools and validation requirements |
+| **Manylinux** | PEP 513 standard for Linux wheel distribution compatibility |
+| **NIXL** | High-throughput, low-latency point-to-point communication library for accelerating inference |
+| **Runtime Stage** | Minimal container stage with only production deployment requirements |
 
 ## Acronyms & Abbreviations
 
-**\[Optional \- if not applicable omit\]**
+**CI:** Continuous Integration
 
-Provide a list of frequently used acronyms and abbreviations which are uncommon or unlikely to be known by the reader. Do not include acronyms or abbreviations which the reader is likely to be familiar with.
+**DEP:** Design Enhancement Proposal
 
-Keep the list of acronyms and abbreviations sorted alphabetically to ease looking up definitions by readers.
+**NIXL:** NVIDIA Inference Exchange Library
 
-Do not include the full definition in the expanded meaning of an abbreviation or acronym. If the reader needs the definition, please include it in the [Terminology & Definitions](#terminology--definitions) section.
-
-**\<Acronym/Abbreviation\>:** \<Expanded Meaning\>
 
