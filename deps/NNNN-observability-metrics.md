@@ -30,7 +30,7 @@ Dynamo's current metrics collection is fragmented, using various libraries acros
 
 ## Goals
 
-This proposal offers a unified way to collect, expose, and manage performance metrics across various backends.
+This proposal offers a unified way to collect, expose, and manage performance metrics across various registries.
 
 The Metrics API achieves this by:
 
@@ -65,11 +65,11 @@ The Metrics API achieves this by:
 * **Rationale:** Standardizing how components declare and register their profiling structure ensures consistency in the data reported across different components and enables the API to properly manage and expose these metrics.
 * **Measurability:** Confirm that each component has a defined profiling struct, registers its metrics with the Metrics API, and that the registered metrics are used for reporting profiling data.
 
-### REQ 5: Pluggable Backend Interface
+### REQ 5: Pluggable Registry Interface
 
-* **Description:** The profiling Rust trait (API) MUST support pluggable backends, such as Prometheus library, OpenTelemetry (OTel), and/or custom C++ implementations, etc. The Metrics API provides an abstraction layer that can work with any of these backend implementations. The common profiling libraries will be exposed through the Dynamo Rust runtime via PyO3 to ensure consistent access across both Rust and Python components.
-* **Rationale:** Pluggable backends provide flexibility in how profiling data are collected and reported, enabling integration with various monitoring tools. Exposing these through the Dynamo Rust runtime ensures a unified Rust trait regardless of the underlying implementation language.
-* **Measurability:** Validate that the API can switch between different backend implementations without requiring changes to the components, and verify that both Rust and Python components can access the profiling libraries through the Dynamo runtime Rust trait.
+* **Description:** The profiling Rust trait (API) MUST support pluggable registries, such as Prometheus library, OpenTelemetry (OTel), and/or custom C++ implementations, etc. The Metrics API provides an abstraction layer that can work with any of these registry implementations. The common profiling libraries will be exposed through the Dynamo Rust runtime via PyO3 to ensure consistent access across both Rust and Python components.
+* **Rationale:** Pluggable registries provide flexibility in how profiling data are collected and reported, enabling integration with various monitoring tools. Exposing these through the Dynamo Rust runtime ensures a unified Rust trait regardless of the underlying implementation language.
+* **Measurability:** Validate that the API can switch between different registry implementations without requiring changes to the components, and verify that both Rust and Python components can access the profiling libraries through the Dynamo runtime Rust trait.
 
 ### REQ 6: Python Bindings
 
@@ -93,7 +93,7 @@ This diagram shows a system for handling different types of metrics, like counte
 
 From this base, three specific metric types are created: counters that can be increased, gauges that can go up or down or be set to a value, and histograms that record values. Each of these metric types has two versions: one for Prometheus and one for Libnv. These versions add the ability to output their data in a specific format.
 
-There’s also a MetricsBackend class that manages how metrics are created and formatted. It includes methods to create each type of metric and to format them for Prometheus. A specialized version of this backend, called PrometheusBackend, inherits from it and likely customizes some of its behavior.
+There’s also a MetricsRegistry class that manages how metrics are created and formatted. It includes methods to create each type of metric and to format them for Prometheus. A specialized version of this registry, called PrometheusRegistry, inherits from it and likely customizes some of its behavior.
 
 Note that libnv is an NVIDIA implementation in libnv.so that can gather metrics in C++ layers (e.g. NIXL).
 
@@ -158,19 +158,23 @@ Note that libnv is an NVIDIA implementation in libnv.so that can gather metrics 
         +observe(value: f64)
     }
 
-    class MetricsBackend {
+    class MetricsRegistry {
         +prefix
-        +get_backend()
+        +get_registry()
         +create_counter(name)
         +create_gauge(name)
         +create_histogram(name)
         +prometheus_format_str()
     }
 
-    class PrometheusBackend {
+    class PrometheusRegistry {
     }
 
-    MetricsBackend <|-- PrometheusBackend
+    class NullRegistry {
+    }
+
+    MetricsRegistry <|-- PrometheusRegistry
+    MetricsRegistry <|-- NullRegistry
 
     Metric <|-- MetricCounter
     Metric <|-- MetricGauge
@@ -196,30 +200,30 @@ pub struct ExampleHTTPMetrics {
 
 impl ExampleHTTPMetrics {
     /// Create a new ServiceMetrics instance using the metric backend
-    pub fn new(backend: Arc<dyn MetricsRegistry>) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn new(registry: Arc<dyn MetricsRegistry>) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Create request counter
-        let request_counter = backend.create_counter(
+        let request_counter = registry.create_counter(
             "service_requests_total",
             "Total number of requests processed",
-            &[("service", "backend")]
+            &[("service", "registry")]
         )?;
 
         // Create active requests gauge
-        let active_requests_gauge = backend.create_gauge(
+        let active_requests_gauge = registry.create_gauge(
             "service_active_requests",
             "Number of requests currently being processed",
-            &[("service", "backend")]
+            &[("service", "registry")]
         )?;
 
         // Create request duration histogram
-        let request_duration_histogram = backend.create_histogram(
+        let request_duration_histogram = registry.create_histogram(
             "service_request_duration_seconds",
             "Request duration in seconds",
-            &[("service", "backend")]
+            &[("service", "registry")]
         )?;
 
         Ok(ExampleHTTPMetrics {
-            registry: backend,
+            registry: registry,
             request_counter,
             active_requests_gauge,
             request_duration_histogram,
@@ -227,7 +231,7 @@ impl ExampleHTTPMetrics {
     }
 
     /// Get a read-only reference to the backend
-    pub fn backend(&self) -> &Arc<dyn MetricsRegistry> {
+    pub fn registry(&self) -> &Arc<dyn MetricsRegistry> {
         &self.registry
     }
 }
@@ -273,9 +277,9 @@ impl AsyncEngine<SingleIn<String>, ManyOut<Annotated<String>>, Error> for Reques
 
 async fn backend(runtime: DistributedRuntime) -> Result<()> {
     // Get the metrics backend from the runtime (async, lazy-initialized)
-    let backend = runtime.metrics_registry().await?;
+    let registry = runtime.metrics_registry().await?;
     // Initialize metrics using the profiling-based struct
-    let metrics = Arc::new(ExampleHTTPMetrics::new(backend.clone()).map_err(|e| Error::msg(e.to_string()))?);
+    let metrics = Arc::new(ExampleHTTPMetrics::new(registry.clone()).map_err(|e| Error::msg(e.to_string()))?);
 
     // attach an ingress to an engine, with the RequestHandler using the metrics struct
     let ingress = Ingress::for_engine(RequestHandler::new(metrics.clone()))?;
@@ -283,7 +287,7 @@ async fn backend(runtime: DistributedRuntime) -> Result<()> {
     // make the ingress discoverable via a component service
     // we must first create a service, then we can attach one more more endpoints
     runtime.namespace(DEFAULT_NAMESPACE)?
-        .component("backend")?
+        .component("registry")?
         .service_builder()
         .create()
         .await?
