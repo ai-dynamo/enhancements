@@ -75,8 +75,11 @@ Dynamo EPP **MUST** be compatible with Inference Gateway API and concepts (Infer
 
 ## Alt 1: Entire Dynamo Graph Deployment as a blackbox
 
-Inference gateway routes requests to (any) frontend pods.
-![Dynamo Graph as a blackbox](./alt_dyn_bb2.png)
+Inference gateway routes requests to frontend pods.
+![Shared Frontend](./alt_dyn_bb3.png)
+
+- body based routing to different FE endpoints 
+![Frontend per graph deployment](./alt_dyn_bb2.png)
 
 # Alt 2: Dynamo EPP integration with Router
 
