@@ -158,6 +158,24 @@ Note that libnv is an NVIDIA implementation in libnv.so that can gather metrics 
         +observe(value: f64)
     }
 
+    class MockCounter {
+        +output_metrics()
+        +increment()
+        +add(value)
+    }
+
+    class MockGauge {
+        +output_metrics()
+        +set(value)
+        +increment()
+        +decrement()
+    }
+
+    class MockHistogram {
+        +output_metrics()
+        +observe(value: f64)
+    }
+
     class MetricsRegistry {
         +prefix
         +get_registry()
@@ -173,8 +191,12 @@ Note that libnv is an NVIDIA implementation in libnv.so that can gather metrics 
     class NullRegistry {
     }
 
+    class MockRegistry {
+    }
+
     MetricsRegistry <|-- PrometheusRegistry
     MetricsRegistry <|-- NullRegistry
+    MetricsRegistry <|-- MockRegistry
 
     Metric <|-- MetricCounter
     Metric <|-- MetricGauge
@@ -186,7 +208,11 @@ Note that libnv is an NVIDIA implementation in libnv.so that can gather metrics 
 
     MetricCounter <|-- LibnvCounter
     MetricGauge <|-- LibnvGauge
-    MetricHistogram <|-- LibnvHistogram 
+    MetricHistogram <|-- LibnvHistogram
+
+    MetricCounter <|-- MockCounter
+    MetricGauge <|-- MockGauge
+    MetricHistogram <|-- MockHistogram 
 ``` 
 
 Actual example from `lib/runtime/examples/system_stats_endpoint/src/bin/system_stats_server.rs`
