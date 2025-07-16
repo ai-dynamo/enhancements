@@ -29,11 +29,24 @@ This proposal outlines the integration of Dynamo components with the [Gateway AP
 **EPP:** Endpoint Picker Protocol
 **IGW:** Inference Gateway
 
+## Why 
+
+1. `Model Aware Routing`
+    Enables traffic management across multiple models and their replicas.  
+    Manipulate incoming traffic. 
+
+2. `Request scheduling`
+    Schdeudle requests based on prefix cache match 
+    Route requests to different dynamo graph deployments based on SLA & priority
+
+3. `Centralized control`
+    Enables entralized path and managemement of: auth, RBAC, rate limiting, usage tracking etc.
+
 ## Goals
 
-* Support Inference gataway concepts in Dynamo 
+* Map Inference gataway concepts in Dynamo 
 * Maintain backward compatibility with existing EPP functionality
-* Reuse dynamo components
+* extend IGW to use dynamo router
 * Minimize network hops
 
 ### Non Goals
@@ -60,7 +73,12 @@ Dynamo EPP **MUST** be compatible with Inference Gateway API and concepts (Infer
 
 ## Architecture Overview
 
-This architecture unifies Inference Gateway with Dynamo Graph deployment. See diagram below for detailed component interactions.
+## Alt 1: Entire Dynamo Graph Deployment as a blackbox
+
+Inference gateway routes requests to (any) frontend pods.
+![Dynamo Graph as a blackbox](./alt_dyn_bb2.png)
+
+# Alt 2: Dynamo EPP integration with Router
 
 ![Architecture Diagram](./arch.png)
 
@@ -273,11 +291,6 @@ HTTP Request
 - Fallback mechanisms for failures
 - Metrics and observability integration
 
-# Alternate Solutions
-
-## Alt 1 Entire Dynamo Graph as a blackbox
-
-![Dynamo Graph as a blackbox](./alt_dyn_black_box.png)
 
 **Pros:**
 + Simple to deploy
