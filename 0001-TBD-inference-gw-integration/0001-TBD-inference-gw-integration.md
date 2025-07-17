@@ -36,15 +36,15 @@ This proposal outlines the integration of Dynamo components with the [Gateway AP
     Manipulate incoming traffic. 
 
 2. `Request scheduling`
-    Schdeudle requests based on prefix cache match 
+    Schedule requests based on prefix cache match
     Route requests to different dynamo graph deployments based on SLA & priority
 
 3. `Centralized control`
-    Enables entralized path and managemement of: auth, RBAC, rate limiting, usage tracking etc.
+    Enables centralized path and management of: auth, RBAC, rate limiting, usage tracking etc.
 
 ## Goals
 
-* Map Inference gataway concepts in Dynamo 
+* Map Inference gateway concepts in Dynamo
 * Maintain backward compatibility with existing EPP functionality
 * extend IGW to use dynamo router
 * Minimize network hops
@@ -90,7 +90,7 @@ Inference gateway routes requests to frontend pods.
 1. The client sends an HTTP inference request to the Gateway.
 2. Gateway receives the request and extracts the model name and relevant metadata.  
    Gateway consults the InferenceModel configuration to determine the inference pool (dynamo graph) to route the request.
-3. Gateway calls EPP over grpc for worker scehduling based on envoy ext_proc protocol.
+3. Gateway calls EPP over grpc for worker scheduling based on envoy ext_proc protocol.
 4. EPP forwards the request to Frontend sidecar
 ```yaml
 Request: 
@@ -123,7 +123,7 @@ Note: This could be ideally routed to Frontend service because Frontend/Processo
 - `x-gateway-worker-id` in the request and skips call to router
 
 10. Request is sent to LLM Backend and response is streamed back through 
-- processsor: Postprocessing steps
+- processor: Postprocessing steps
 - Frontend: Change response shape from Dynamo native to OpenAI compatible response
 
 **Notes:**
@@ -155,7 +155,7 @@ Reasoning: Dynamo Graph represents a cohesive deployment unit with compute resou
                     └─────────────────────────┘
 ```
 
-2. EPP has 1:1 relation with Inference Pool and its responsible for scheduling decisions within a dynamo graph.
+2. EPP has 1:1 relation with Inference Pool and it's responsible for scheduling decisions within a dynamo graph.
 
 3. Inference Model maps user-facing model names to backend implementations.  Multiple inference models can refer to same Inference Pool (Dynamo Graph).
 
@@ -198,7 +198,7 @@ erDiagram
 #### 1. EPP integration with Dynamo: plugin vs sidecar vs external callout service
 
 ![EPP integration with Dynamo](./alt-epp-dyn.png)
-##### sidecar container (Preffered)
+##### sidecar container (Preferred)
 Needs support in EPP to deploy a sidecar container and specify the port to request at.
 
 Pro
@@ -232,21 +232,21 @@ Con
 - Tight coupling with golang based implementation
 
 ## Problems
-1. Currently EPP schedluling has tightly coupling with in-porcess preprocessing.
-  It's hard to scale/maintain it accross different models.
+1. Currently EPP scheduling has tightly coupling with in-process preprocessing.
+  It's hard to scale/maintain it across different models.
 
 2. double tokenization during scheduling and service path
 
 ## Guiding Principles
 
-1. Composibiltiy: EPP should externalize scheduling decision to dynamo router
+1. Composability: EPP should externalize scheduling decision to dynamo router
 2. DRY: Aim to reduce duplications in preprocessing steps (tokenization, prompt template application)
 3. Compatibility: Maintain full compatibility with inference gateway api
 4. Reduce network hops to minimize tail latency
 5. EPP doesn't replace Dynamo's Router but delegates scheduling decisions to it, preserving Dynamo's scheduling logic
 
 ## Design constraints
-- Dynamo componetns (processor, router) use dynamo native transport (two part json messsages over nats)
+- Dynamo components (processor, router) use dynamo native transport (two part json messages over nats)
 - Dynamo does not support co-scheduling in disaggregated mode. Currently request flow goes from decode to prefill.
 - An EPP can only be associated with a [single InferencePool](https://gateway-api-inference-extension.sigs.k8s.io/api-types/inferencepool)
 
@@ -255,7 +255,7 @@ Con
 ### Dynamo Graph deployment
 A `Dynamo Graph` contains one or more `Dynamo Component`s and this one-to-many relation is reflected in corresponding Kubernetes deployment Kubernetes CRs DynamoGraphDeployment and DynamoComponentDeployments respectively.
 
-Each dynamo component deployment creates a Kuberenetes deployment which manages component's pods.
+Each dynamo component deployment creates a Kubernetes deployment which manages component's pods.
 
 ![Dynamo Graph Deployment](./graph_deployment.png)
 
