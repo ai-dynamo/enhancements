@@ -27,10 +27,10 @@ connection between the LLM Frontend and the Generate Engine.
 
 # Motivation
 
-There are many different kinds of fault that can cause the loss of an Engine node, for instance, the
-node may be unplugged or disconnected by mistake, or some hardware failed because of prolonged use.
-Since an Engine node is rarely left at idle, when a fault happens, the node will be processing some
-requests. The loss of the Engine node will cause those requests to fail, which
+There are many different kinds of faults that can cause the loss of an Engine node, for instance,
+the node may be unplugged or disconnected by mistake, or some hardware failed because of prolonged
+use. Since an Engine node is rarely left at idle, when a fault happens, the node will be processing
+some requests. The loss of the Engine node will cause those requests to fail, which
 
 * Requires additional steps on the users to restart their requests; and
 * Wastes the compute resource that generated the response up to the failure point; and
@@ -41,7 +41,7 @@ Ultimately leading to poor user experience.
 ## Goals
 
 * A request migrated should continue the response from where it failed.
-* A migration should be seamless that the user is unlikely to notice any difference.
+* A migration should be seamless so that the user is unlikely to notice any difference.
 
 ### Non Goals
 
