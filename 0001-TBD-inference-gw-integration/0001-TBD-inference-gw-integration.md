@@ -41,7 +41,7 @@ Dynamo is a modular inference system with distinct logical components:
 Each Dynamo graph deployment creates a Kubernetes deployment which manages component's pods.
 
 * Dynamo Graph (logical view)
-![Dynamo Graph (logical)](./dynamo_graph_logical_1.png)
+![Dynamo Graph (logical)](./dynamo_graph_logical_2.png)
 
 * Dynamo Graph (deployment view)
 ![Dynamo Graph (deployment)](./dynamo_graph_deployment.png)
