@@ -26,7 +26,7 @@ This proposal outlines the integration of [Dynamo](https://docs.nvidia.com/dynam
 Dynamo is a modular inference system with distinct logical components:
 
 **Frontend** runs these 3 components in a single process. It doesn't require accelerator resources.
-1. **HTTP Fronted**: The entry point for OpenAI-compatible requests
+1. **API Service**: The entry point for OpenAI-compatible requests
 
 2. **Processor**: Handles tokenization and preprocessing
 
