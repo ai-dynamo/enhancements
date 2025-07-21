@@ -122,7 +122,7 @@ uses BBR to inject model name header
 
 # Alt 2: Dynamo EPP integration with Router
 
-![Architecture Diagram](./arch.png)
+![Architecture Diagram](./dyn_alt_2.png)
 
 ### Data flow
 
@@ -236,7 +236,7 @@ erDiagram
 
 #### 1. EPP integration with Dynamo: plugin vs sidecar vs external callout service
 
-![EPP integration with Dynamo](./alt-epp-dyn.png)
+![EPP integration with Dynamo](./sidecar_vs_ext_svc.png)
 ##### Sidecar container (Preferred)
 Needs support in EPP to deploy a sidecar container and specify the port to request at.
 
