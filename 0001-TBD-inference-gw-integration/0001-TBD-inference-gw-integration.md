@@ -48,8 +48,8 @@ Each Dynamo graph deployment creates a Kubernetes deployment which manages compo
 
 | Module | Dynamo | IGW |
 | :---- | :---- | :---- |
-| **Service/Data Plane** | Custom NATS/TCP based protocol, uses JSON serialization | Standard HTTP-based protocol |
-| **Event Plane** | Push-based KV/capacity related metric events using NATS | Scrapers populate Datastore with metrics for a pod (pull-based) |
+| **Service/Data Plane** | Custom NATS/TCP and json based protocol supports async messages based data flow  | gRPC/HTTP-based req/reply protocol |
+| **Event Plane** | KV/capacity related metric events are published over NATS | Scrapers populate Datastore with metrics for a pod (pull-based) |
 | **Control Plane** | Planner is responsible for scaling decisions, Orchestration happens via operator | todo: need information |
 
 
@@ -88,6 +88,29 @@ Dynamo uses a custom protocol for intra-component communication. It is based on 
 * Modify core Gateway API specifications
 * Change existing Dynamo worker interfaces significantly
 * LoRA support in Dynamo
+
+## Guiding Principles
+
+1. **Composability**: EPP should externalize scheduling decisions to Dynamo router
+2. **DRY**: Aim to reduce duplications in preprocessing steps (tokenization, prompt template application)
+3. **Compatibility**: Maintain full compatibility with Inference Gateway API
+4. **Reduce network hops** to minimize tail latency
+5. **EPP extends Dynamo's Router** EPP delegates scheduling decisions to dynamo router, preserving Dynamo's scheduling logic
+
+## Constraints
+- Dynamo components (Processor, Router) use Dynamo native transport (two-part JSON messages over NATS)
+- Dynamo does not support co-scheduling in disaggregated mode. Currently request flow goes from decode to prefill.
+- An EPP is associated with a [single InferencePool](https://gateway-api-inference-extension.sigs.k8s.io/api-types/inferencepool)
+
+
+## Problems
+1. Currently EPP scheduling has tight coupling with in-process preprocessing.  
+   It's hard to maintain it across different models.
+
+2. Double tokenization during scheduling and service path
+
+3. Dynamo uses a custom communication protocol for communication between frontend and workers. 
+
 
 ## Requirements
 
@@ -216,7 +239,7 @@ erDiagram
     %% IGW Relationships
     Gateway ||--o{ HTTPRoute : "routes traffic via"
     HTTPRoute ||--o{ InferenceModel : "matches model name to"
-    InferenceModel }o--|| InferencePool : "references backend"
+    InferenceModel ||--|| InferencePool : "references backend"
     InferencePool ||--|| EPP : "delegates scheduling to"
     EPP ||--o{ Worker : "selects worker instances"
     
@@ -270,26 +293,6 @@ Needs support in EPP to deploy a sidecar container and specify the port to reque
 - Hard to scale across models
 - Tight coupling with Golang-based implementation
 
-## Problems
-1. Currently EPP scheduling has tight coupling with in-process preprocessing.
-  It's hard to scale/maintain it across different models.
-
-2. Double tokenization during scheduling and service path
-
-3. Dynamo uses a custom communication protocol for communication between frontend and workers.
-
-## Guiding Principles
-
-1. **Composability**: EPP should externalize scheduling decisions to Dynamo router
-2. **DRY**: Aim to reduce duplications in preprocessing steps (tokenization, prompt template application)
-3. **Compatibility**: Maintain full compatibility with Inference Gateway API
-4. **Reduce network hops** to minimize tail latency
-5. **EPP doesn't replace Dynamo's Router** but delegates scheduling decisions to it, preserving Dynamo's scheduling logic
-
-## Design constraints
-- Dynamo components (Processor, Router) use Dynamo native transport (two-part JSON messages over NATS)
-- Dynamo does not support co-scheduling in disaggregated mode. Currently request flow goes from decode to prefill.
-- An EPP is associated with a [single InferencePool](https://gateway-api-inference-extension.sigs.k8s.io/api-types/inferencepool)
 
 ## Current state of IGW and Dynamo
 
