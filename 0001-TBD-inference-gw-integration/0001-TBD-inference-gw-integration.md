@@ -6,13 +6,9 @@
 
 **Category**: Architecture
 
-**Replaces**: [Link of previous proposal if applicable] 
-
-**Replaced By**: [Link of previous proposal if applicable] 
-
 **Sponsor**: Itay, Maksim, Neelay
 
-**Required Reviewers**: [Names of technical leads that are required for acceptance]
+**Required Reviewers**: 
 
 **Review Date**: [Date for review]
 
@@ -22,31 +18,68 @@
 
 # Summary
 
-This proposal outlines the integration of Dynamo components with the [Gateway API Inference Extension](https://gateway-api-inference-extension.sigs.k8s.io)
+This proposal outlines the integration of [Dynamo](https://docs.nvidia.com/dynamo/latest/architecture/architecture.html#high-level-architecture-and-key-benefits) with the [Gateway API Inference Extension](https://gateway-api-inference-extension.sigs.k8s.io) to enable seamless model routing, request scheduling, and centralized control of inference workloads by mapping Inference Gateway concepts to Dynamo components.
 
-## Acronyms
+## Dynamo Introduction
 
-**EPP:** Endpoint Picker Protocol
-**IGW:** Inference Gateway
+### Components and process boundary:
+Dynamo is a modular inference system with distinct logical components:
 
-## Why 
+**Frontend** runs these 3 components in a single process. It doesn't require accelerator resources.
+1. **HTTP Fronted**: The entry point for OpenAI-compatible requests
 
-1. `Model Aware Routing`
-    Enables traffic management across multiple models and their replicas.  
-    Manipulate incoming traffic. 
+2. **Processor**: Handles tokenization and preprocessing
 
-2. `Request scheduling`
-    Schedule requests based on prefix cache match
-    Route requests to different dynamo graph deployments based on SLA & priority
+3. **Router**: Makes scheduling decisions based on KV metrics
 
-3. `Centralized control`
-    Enables centralized path and management of: auth, RBAC, rate limiting, usage tracking etc.
+**Backend** Process requires accelerator resources and hosts `Worker` component.
+
+4. **Workers**: Backend components responsible for managing LLM engines running on accelerators. 
+           Workers execute inference tasks using underlying engines such as vLLM, TRT-LLM, or SGLang.
+
+
+Each Dynamo graph deployment creates a Kubernetes deployment which manages component's pods.
+
+* Dynamo Graph (logical view)
+![Dynamo Graph (logical)](./dynamo_graph_logical.png)
+
+* Dynamo Graph (deployment view)
+![Dynamo Graph (deployment)](./dynamo_graph_deployment.png)
+
+| Module | Dynamo | IGW |
+| :---- | :---- | :---- |
+| **Service/Data Plane** | Custom NATS/TCP based protocol, uses JSON serialization | Standard HTTP-based protocol |
+| **Event Plane** | Push-based KV/capacity related metric events using NATS | Scrapers populate Datastore with metrics for a pod (pull-based) |
+| **Control Plane** | Planner is responsible for scaling decisions, Orchestration happens via operator | todo: need information |
+
+
+### Disaggregated Serving
+In Dynamo's disaggregated serving, the initial request is handled by the decode stage, and if prefill is required, it is performed remotely by the Prefill worker. 
+
+Currently, Dynamo does not support co-scheduling Prefill/Decode or Prefill -> decode flow.
+
+
+### Communication
+Dynamo uses a custom protocol for intra-component communication. It is based on NATS and two-part JSON messages.
+
+
+## IGW (Inference Gateway) Introduction
+
+1. **Model Aware Routing**
+    IGW enables traffic management across multiple base and LoRA models.  
+
+2. **Request scheduling**
+    IGW schedules requests based on various policies at the `endpoint picker` extension.
+    Routes requests to the best LLM worker instance based on various data sources (runtime stats data) and input (SLO).
+
+3. **Centralized control**
+    Enables centralized management of: auth, RBAC, rate limiting, usage tracking etc. in the Gateway layer.
 
 ## Goals
 
-* Map Inference gateway concepts in Dynamo
+* Map Inference Gateway concepts to Dynamo
 * Maintain backward compatibility with existing EPP functionality
-* extend IGW to use dynamo router
+* Extend IGW to use Dynamo router
 * Minimize network hops
 
 ### Non Goals
@@ -54,20 +87,21 @@ This proposal outlines the integration of Dynamo components with the [Gateway AP
 * Replace existing EPP internal scheduling
 * Modify core Gateway API specifications
 * Change existing Dynamo worker interfaces significantly
+* LoRA support in Dynamo
 
 ## Requirements
 
 ### REQ 1 External Processing Integration
 
-Dynamo EPP (Endpoint picker) **MUST** support calling Frontend and processor for request preprocessing and scheduling while maintaining the existing ext-proc interface.
+Dynamo EPP (Endpoint picker) **MUST** support scheduling request in dynamo while maintaining the existing ext-proc interface.
 
 ### REQ 2 Unified Dynamo deployment
 
-Dynamo EPP and components (Frontend, Processor, Router, Workers) **MUST** be deployable within Kubernetes through a unified helm chart to maintain version compatibility.
+Dynamo EPP and components (Frontend, Workers) **MUST** be deployable within Kubernetes through a unified Helm chart to maintain version compatibility.
 
 ### REQ 3 Maintain compatibility with Inference Gateway protocols
 
-Dynamo EPP **MUST** be compatible with Inference Gateway API and concepts (InferencePool, InferenceModel)
+Dynamo EPP **MUST** be compatible with Inference Gateway API and concepts (InferencePool, InferenceModel).
 
 # Proposal
 
@@ -75,10 +109,10 @@ Dynamo EPP **MUST** be compatible with Inference Gateway API and concepts (Infer
 
 ## Alt 1: Entire Dynamo Graph Deployment as a blackbox
 
-Inference gateway routes requests to frontend pods.
+Inference Gateway routes requests to Frontend pods.
 ![Shared Frontend](./alt_dyn_bb3.png)
 
-- body based routing to different FE endpoints 
+- Body-based routing to different FE endpoints 
 ![Frontend per graph deployment](./alt_dyn_bb2.png)
 
 # Alt 2: Dynamo EPP integration with Router
@@ -89,22 +123,22 @@ Inference gateway routes requests to frontend pods.
 
 1. The client sends an HTTP inference request to the Gateway.
 2. Gateway receives the request and extracts the model name and relevant metadata.  
-   Gateway consults the InferenceModel configuration to determine the inference pool (dynamo graph) to route the request.
-3. Gateway calls EPP over grpc for worker scheduling based on envoy ext_proc protocol.
+   Gateway consults the InferenceModel configuration to determine the inference pool (Dynamo graph) to route the request.
+3. Gateway calls EPP over gRPC for worker scheduling based on Envoy ext_proc protocol.
 4. EPP forwards the request to Frontend sidecar
 ```yaml
 Request: 
     - req header: set x-routing-request: true
     - req body: original request body (For example, Chat completion request)
 
-Respose:
-    worker_id: this is dynamo specific worker_id
+Response:
+    worker_id: this is Dynamo specific worker_id
     token_ids: (Optional) tokens generated from processor step
 ```
-4. Dynamo Frontend accepts OAI request and forwards request through dynamo request plane (nats)
-5. Dynamo Processor performs necessary pre-processing and generates tokens. It calls routers to decide worker_id.
-6. Dynamo Router takes tokens as input and decides worker_id based on scheduling policies and KV metrics
-7. EPP sets headers (x-gateway-destination-endpoint and x-gateway-worker-id)
+5. Dynamo Frontend accepts OAI request and forwards request through Dynamo request plane (NATS)
+6. Dynamo Processor performs necessary pre-processing and generates tokens. It calls routers to decide worker_id.
+7. Dynamo Router takes tokens as input and decides worker_id based on scheduling policies and KV metrics
+8. EPP sets headers (x-gateway-destination-endpoint and x-gateway-worker-id)
 Optional optimization: We can inject the tokens in request body to avoid recomputing tokens in service path.
 Note: `tokens` key in request body is not OpenAI compatible.
 ```
@@ -115,15 +149,15 @@ Set Req Header:
 Add to Req Body (Optional):
 - `tokens`
 ```
-8. IGW forwards the request to appropriate Dynamo frontend based on request header `x-gateway-destination-endpoint`
+9. IGW forwards the request to appropriate Dynamo frontend based on request header `x-gateway-destination-endpoint`
 Note: This could be ideally routed to Frontend service because Frontend/Processor deployment is decoupled from LLM workers.
 
-9. Processor skips pre-processing 
+10. Processor skips pre-processing 
 - `tokens` in request body and skips pre-processing step
 - `x-gateway-worker-id` in the request and skips call to router
 
-10. Request is sent to LLM Backend and response is streamed back through 
-- processor: Postprocessing steps
+11. Request is sent to LLM Backend and response is streamed back through 
+- Processor: Post-processing steps
 - Frontend: Change response shape from Dynamo native to OpenAI compatible response
 
 **Notes:**
@@ -131,8 +165,8 @@ Note: This could be ideally routed to Frontend service because Frontend/Processo
 - Deployment is unified via a single Helm chart for version compatibility.
 
 ### Mapping Inference Pool/Model with Dynamo
-1. There would be 1:1 mapping between an inference pool, a dynamo graph deployment and EPP deployment.
-Reasoning: Dynamo Graph represents a cohesive deployment unit with compute resources. Each dynamo graph deployment should correspond to one Inference Pool. 
+1. There would be a 1:1 mapping between an inference pool, a Dynamo graph deployment and EPP deployment.
+Reasoning: Dynamo Graph represents a cohesive deployment unit with compute resources. Each Dynamo graph deployment should correspond to one Inference Pool. 
 
  This is the view from IGW perspective - 
 ```
@@ -155,9 +189,9 @@ Reasoning: Dynamo Graph represents a cohesive deployment unit with compute resou
                     └─────────────────────────┘
 ```
 
-2. EPP has 1:1 relation with Inference Pool and it's responsible for scheduling decisions within a dynamo graph.
+2. EPP has a 1:1 relationship with Inference Pool and it's responsible for scheduling decisions within a Dynamo graph.
 
-3. Inference Model maps user-facing model names to backend implementations.  Multiple inference models can refer to same Inference Pool (Dynamo Graph).
+3. Inference Model maps user-facing model names to backend implementations. Multiple inference models can refer to the same Inference Pool (Dynamo Graph).
 
 
 ```mermaid
@@ -198,73 +232,59 @@ erDiagram
 #### 1. EPP integration with Dynamo: plugin vs sidecar vs external callout service
 
 ![EPP integration with Dynamo](./alt-epp-dyn.png)
-##### sidecar container (Preferred)
+##### Sidecar container (Preferred)
 Needs support in EPP to deploy a sidecar container and specify the port to request at.
 
-Pro
+**Pros**
 - Reduced network hops: Direct communication between EPP and Dynamo components within the same pod
 - Lower latency: No network overhead for inter-component communication
 - Simpler deployment and management: Deployed as a single unit, easier to manage lifecycle
 
-Con
+**Cons**
 - Tightly coupled scaling: Scaling decisions for EPP and Frontend are coupled
 - Deployment of EPP is coupled with Dynamo sidecar image. Version upgrades should be done in-sync. 
 
-##### external callout service
-Pro
-- completely isolated deployments 
+##### External callout service
+**Pros**
+- Completely isolated deployments 
 - Each component can be deployed and scaled independently
 
-Con
+**Cons**
 - Additional network hops: More latency due to network communication between services
 - Service discovery complexity: Need to manage service endpoints and load balancing
 - Additional network failure points in the request path
 
-##### plugin
-Pro
+##### Plugin
+**Pros**
 - Minimum number of network hops
 - Simpler architecture without additional layer
 - Lower latency for request processing
 
-Con
-- Dynamo runtime/component don't have native integration with golang
+**Cons**
+- Dynamo runtime/component don't have native integration with Golang
 - Hard to scale across models
-- Tight coupling with golang based implementation
+- Tight coupling with Golang-based implementation
 
 ## Problems
-1. Currently EPP scheduling has tightly coupling with in-process preprocessing.
+1. Currently EPP scheduling has tight coupling with in-process preprocessing.
   It's hard to scale/maintain it across different models.
 
-2. double tokenization during scheduling and service path
+2. Double tokenization during scheduling and service path
 
 ## Guiding Principles
 
-1. Composability: EPP should externalize scheduling decision to dynamo router
-2. DRY: Aim to reduce duplications in preprocessing steps (tokenization, prompt template application)
-3. Compatibility: Maintain full compatibility with inference gateway api
-4. Reduce network hops to minimize tail latency
-5. EPP doesn't replace Dynamo's Router but delegates scheduling decisions to it, preserving Dynamo's scheduling logic
+1. **Composability**: EPP should externalize scheduling decisions to Dynamo router
+2. **DRY**: Aim to reduce duplications in preprocessing steps (tokenization, prompt template application)
+3. **Compatibility**: Maintain full compatibility with Inference Gateway API
+4. **Reduce network hops** to minimize tail latency
+5. **EPP doesn't replace Dynamo's Router** but delegates scheduling decisions to it, preserving Dynamo's scheduling logic
 
 ## Design constraints
-- Dynamo components (processor, router) use dynamo native transport (two part json messages over nats)
+- Dynamo components (Processor, Router) use Dynamo native transport (two-part JSON messages over NATS)
 - Dynamo does not support co-scheduling in disaggregated mode. Currently request flow goes from decode to prefill.
 - An EPP can only be associated with a [single InferencePool](https://gateway-api-inference-extension.sigs.k8s.io/api-types/inferencepool)
 
 ## Current state of IGW and Dynamo
-
-### Dynamo Graph deployment
-A `Dynamo Graph` contains one or more `Dynamo Component`s and this one-to-many relation is reflected in corresponding Kubernetes deployment Kubernetes CRs DynamoGraphDeployment and DynamoComponentDeployments respectively.
-
-Each dynamo component deployment creates a Kubernetes deployment which manages component's pods.
-
-![Dynamo Graph Deployment](./graph_deployment.png)
-
-| Module | Dynamo | IGW
-| :---- | :---- |
-| **Event Plane** | Push based KV/capacity related metric events using Nats | Scrapers populate Datastore with metrics for a pod (pull based)
-| **Service/Data Plane** | Custom nats/tcp based protocol, uses json serialization | Standard HTTP based protocol
-| **Control Plane** | Planner is responsible for scaling decisions, Orchestration happens via operator | TODO
-
 
 ### Inference Gateway Request Flow:
 ```
@@ -295,30 +315,14 @@ HTTP Request
 - Metrics and observability integration
 
 
-**Pros:**
-+ Simple to deploy
-+ Gateway+EPP deployment is orthogonal to Dynamo cloud/graphs deployment
+## Follow up questions
 
-**Cons:**
-- Unable to reuse Dynamo KV router component
-- Metrics Service Protocol: Currently dynamo components are not MSP compatible
+1. Is EPP considered stateless? How do we achieve EPP HA/Fault-tolerance?
+  Dynamo Router is stateful (in-memory prefix tree).
+  Coupling Dynamo frontend as a sidecar with EPP might bring scaling challenges.
 
-# Alt 2: Tokenization Extension Chain
-Instead of embedding tokenization in EPP, create a dedicated tokenization extension that runs before EPP in the processing chain:
-
-```
-Client -> Tokenization Extension -> EPP ->  Model Server
-```
-
-Pro:
-- Follows Gateway API's extensible processing chain philosophy
-- Separates concerns
-- Can be reused across different routing strategies
-
-Con:
-- complicated deployment
-- Additional network hop
-- More complex chain management
+2. Multiple models: InferenceModel and body-based routing 
+   Can we enable body-based routing as a stage in EPP or composable at IGW level?
 
 # Related Proposals
 * [Gateway API Inference Extension Documentation](https://gateway-api-inference-extension.sigs.k8s.io/)
