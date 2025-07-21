@@ -276,6 +276,8 @@ Needs support in EPP to deploy a sidecar container and specify the port to reque
 
 2. Double tokenization during scheduling and service path
 
+3. Dynamo uses a custom communication protocol for communication between frontend and workers.
+
 ## Guiding Principles
 
 1. **Composability**: EPP should externalize scheduling decisions to Dynamo router
@@ -287,7 +289,7 @@ Needs support in EPP to deploy a sidecar container and specify the port to reque
 ## Design constraints
 - Dynamo components (Processor, Router) use Dynamo native transport (two-part JSON messages over NATS)
 - Dynamo does not support co-scheduling in disaggregated mode. Currently request flow goes from decode to prefill.
-- An EPP can only be associated with a [single InferencePool](https://gateway-api-inference-extension.sigs.k8s.io/api-types/inferencepool)
+- An EPP is associated with a [single InferencePool](https://gateway-api-inference-extension.sigs.k8s.io/api-types/inferencepool)
 
 ## Current state of IGW and Dynamo
 
