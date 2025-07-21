@@ -109,11 +109,16 @@ Dynamo EPP **MUST** be compatible with Inference Gateway API and concepts (Infer
 
 ## Alt 1: Entire Dynamo Graph Deployment as a blackbox
 
-Inference Gateway routes requests to Frontend pods.
-![Shared Frontend](./alt_dyn_bb3.png)
+EPP routes request to Frontend pod/sidecar
+- multiple models in same k8s namespace
+- shared frontend
+![Shared Frontend](./blackbox/alt_1_dyn_a.png)
 
-- Body-based routing to different FE endpoints 
-![Frontend per graph deployment](./alt_dyn_bb2.png)
+multiple models in different k8s namespace
+uses BBR to inject model name header
+- multiple models in same k8s namespace
+- Each model has it's dedicated frontend
+![Frontend per graph deployment](./blackbox/alt_1_dyn_b.png)
 
 # Alt 2: Dynamo EPP integration with Router
 
