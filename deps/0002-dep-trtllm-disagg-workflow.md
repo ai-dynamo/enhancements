@@ -76,14 +76,18 @@ This should address the requirement in short-term.
 
 ### Prefill Worker
 ```python
+    async def generate(self, request: dict):
+        # Generate the prefill response locally
+        prefill_request = copy.deepcopy(request)
+        prefill_response = None
+        response_count = 0
+        async for res in self.generate_locally(prefill_request):
+            prefill_response = res
+            response_count += 1
+            if response_count > 1:
+                raise ValueError("Prefill response should be generated only once.")
 
-	async for res in self.generate_locally(prefill_request):
-		prefill_response = res
-		response_count += 1
-		if response_count > 1:
-			raise ValueError("Prefill response should be generated only once.")
-
-    if (
+        if (
             self.disaggregation_strategy == DisaggregationStrategy.PREFILL_FIRST
             and not self.check_error(prefill_response)
         ):
@@ -98,35 +102,35 @@ This should address the requirement in short-term.
         else:
             # Return response to the decode handler.
             yield prefill_response
-
 ```
 
 ### Decode Worker
 
 ```python
-	if self.disaggregation_strategy == DisaggregationStrategy.DECODE_FIRST:
-		prefill_response = None
-        
-		 # If operating under decode_first strategy, the decode handler needs to trigger
+    async def generate(self, request: dict):
+        if self.disaggregation_strategy == DisaggregationStrategy.DECODE_FIRST:
+            prefill_response = None
+            # If operating under decode_first strategy, the decode handler needs to trigger
             # the prefill handler.
-        response_count = 0
-        async for res in self.remote_prefill(request):
-            prefill_response = res
-            response_count += 1
-            if response_count > 1:
-                raise ValueError("Prefill response should be generated only once.")
+            response_count = 0
+            async for res in self.remote_prefill(request):
+                prefill_response = res
+                response_count += 1
+                if response_count > 1:
+                    raise ValueError("Prefill response should be generated only once.")
 
-        response_data = (
-            prefill_response.data() if prefill_response is not None else None
-        )
-        if prefill_response is not None and self.check_error(response_data):
-            yield response_data
-            return
-        if prefill_response is not None and response_data is not None:
-            request["disaggregated_params"] = response_data["disaggregated_params"]
+            response_data = (
+                prefill_response.data() if prefill_response is not None else None
+            )
+            if prefill_response is not None and self.check_error(response_data):
+                yield response_data
+                return
+            if prefill_response is not None and response_data is not None:
+                request["disaggregated_params"] = response_data["disaggregated_params"]
 
-    async for res in self.generate_locally(request):
-        yield res
+        async for res in self.generate_locally(request):
+            yield res
+
 ```
 
 ## Long-Term
