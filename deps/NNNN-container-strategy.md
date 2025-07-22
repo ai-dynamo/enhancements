@@ -29,6 +29,7 @@ One of the goals for this document is to define a clear and maintainable structu
 To achieve this goal, this document proposes certain optimizations to improve the current build process:
 - Restructuring the build process to provide a base container with a pre-built version of Dynamo + NIXL available on all distributions, enabling splitting of specific backends from the dynamo build process.
 - Defining a structure/template for all Dockerfiles to follow to ensure consistent and reproducible builds across backends along with specific roles/use cases targeted for each stage.
+- Implementing remote compiler caching strategies using tools like sccache to significantly reduce rust compilation times across builds and CI/CD pipelines.
 
 # Motivation
 
@@ -50,7 +51,7 @@ This document proposes solutions to the build process challenges, aiming to impr
 
 * Remove duplicate code in current dockerfile implementations and define a single build base image which provides a pre-built container with Dynamo + NIXL.
 
-This base image should operate as a single base container which can then be used as base containers for backend-specific images. By leveraging a base container, We can reduce the redundant code across Dockerfiles and establish a single-source of truth for all Dynamo-builds.
+This base image should operate as a single base container which can then be used as base containers for backend-specific images. By leveraging a base container, We can reduce the redundant code across Dockerfiles and establish a single-source of truth for all Dynamo-builds. This would also enable us to replace the current devel container with the base container for local development/public CI for faster validation of changes.
 
 * Define the relationships between base, runtime, development, and CI images for each Dockerfile and provide a structure/template to follow for Dockerfiles. 
 
@@ -60,11 +61,14 @@ Pinning/Fixing dependencies will ensure a unified build environment reducing "it
 
 * Minimize effort for providing multi-arch support across various backends for Dynamo by leveraging manylinux to build for multiple distributions
 
+* Implement remote compiler caching to dramatically reduce build times across development and CI/CD environments
+
+By integrating tools like sccache for remote compilation caching, we can avoid redundant compilation work across builds, significantly speeding up the container build process for both developers and CI pipelines.
+
 ### Non Goals
 
 - Container release strategy and processes (covered in separate DEP)
-- Unified build environment
-- Outline possible further improvements including external caching/multi-context docker builds to reduce build times. 
+- Unified build environment 
 
 ## Requirements
 
@@ -73,6 +77,7 @@ The build-base container must be designed such that backend-specific Dockerfiles
 - Multi-arch support is a P0. The Base container should be able to support both x84_64 and arm64 builds. 
 - Clear documentation on how to use the base container
 - Standardized environment variables and paths
+- Replace the current devel container with the base container for local development/public CI for faster validation of changes.
 
 ### REQ \<\#2\> \<Layered Container Structure\>
 Dockerfiles must follow a layered, super-set structure to optimize build efficiency:
@@ -94,7 +99,7 @@ In order to address the requirements, we propose the following changes to the Dy
 
 ## Build-Base Container
 
-The base container will be a pre-built container that will be used by the backends to build the final container image. This build base container will contain a Dynamo build for all backends to use for their framework-specific build. The base image will leverage a manylinux base image to enable support for multiple distributions (U22, U24, etc). The container will also include a NIXL build since this is common across all backends. We will create a new Dockerfile in the /containers directory for this container and provide the image through our CI registry for developers to use for local development. The base container must provide multi-arch support.
+The base container will be a pre-built container that will be used by the backends to build the final container image. This build base container will contain a Dynamo build for all backends to use for their framework-specific build. The base image will leverage a manylinux base image to enable support for multiple distributions (U22, U24, etc). The container will also include a NIXL build since this is common across all backends. This will be a new Dockerfile in the /containers directory. Multi-arch support is also a P0 Also, the base container can be used as a drop-in replacement for the current devel container used in public CI. This would significantly reduce public CI build times and enable faster validation of changes. 
 
 ## Use-case of build stages along with relationship between stages (base, runtime, devel, ci_minimum)
 
@@ -102,7 +107,7 @@ Each backend-specific Dockerfile should follow a specific format. The backend-sp
 
 | Stage    | Targeted User                | Base Image           | Functionality                                                                                                         |
 |----------|---------------------|----------------------|----------------------------------------------------------------------------------------------------------------------|
-| Backend Build    | Developers          | Cuda base devel image     | Builds targeted backend along with backend-specific dependencies. 
+| Backend Build    | Developers          | Cuda base devel image     | Builds targeted backend along with backend-specific dependencies in editable mode. 
 | Runtime  | Customers/Production| Cuda base runtime image| Minimal image with only the dependencies required to deploy and run Dynamo w/backend from the backend build stage; intended for production deployments. Copies dynamo artifacts from base image and backend artifaces from backend build image. |
 | CI       | Developers/Internal CI Pipelines/Local Debugging | Runtime image          | Adds CI-specific tools, QA test scripts, internal models, and other dependencies needed for automated testing.         |
 
@@ -188,6 +193,21 @@ FROM runtime as ci
 - **Minimal Runtime**: Runtime images will only include necessary dependencies for production deployment
 - **Layered Caching**: Build layers will be optimized for Docker build cache efficiency
 
+## Build Caching Strategy (Phase 3)
+
+To further optimize build times after the initial Dockerfile restructuring, We will explore remote compiler caching (further optimizations to be added in future):
+
+### Remote Compiler Caching
+- **Compiler cache Integration**: Leverage compiler cache service like [sccache](https://github.com/mozilla/sccache) in the build-base container to cache compilation results for Dynamo, NIXL, and backend dependencies.
+- **Remote Cache Storage**: Use a remote cache storage service to store the cached compilation results in CI/CD pipelines.
+- **Cache Size Management**: Configure appropriate cache size limits and cleanup policies to balance storage usage with build performance.
+
+
+### Implementation Considerations
+- **Cache Invalidation**: Implement smart cache invalidation based on dependency changes and version updates
+- **Monitoring**: Add build time metrics to measure cache effectiveness and identify optimization opportunities
+- **CI Integration**: Configure CI/CD pipelines to properly utilize remote caching storage.
+
 ## Deferred to Implementation
 
 TBD
@@ -214,7 +234,6 @@ TBD
 
 **Not Supported:**
 
-* Advanced caching mechanisms (e.g. multi-context docker builds)
 
 ## Phase \<\#2\> \<Restructure backend Dockerfiles to follow proposed structure\>
 
@@ -235,6 +254,23 @@ TBD
 
 **Not Supported:**
 
+## Phase \<\#3\> \<Build Caching Optimization\>
+
+**Release Target**: TBD
+
+**Effort Estimate**: \<estimate of time and number of engineers to complete the phase\>
+
+**Work Item(s):** \<one or more links to github issues\>
+
+**Supported API / Behavior:**
+
+* Integration of sccache for rust compilation caching across container builds
+* Remote cache storage for CI/CD pipelines to reduce cold build times
+* Cache invalidation strategies for dependency updates and smart cache layer management
+
+**Not Supported:**
+
+* Advanced distributed caching mechanisms
 
 # Related Proposals
 
@@ -246,26 +282,24 @@ TBD
 
 List out solutions that were considered but ultimately rejected. Consider free form \- but a possible format shown below.
 
-## Alt \<\# 1\> \<Using Deep Learning CUDA images as base image instead of cuda runtime\>
+## Alt \<\# 2\> \<Provide a single container with multi-backend support instead of multiple backend-specific containers\>
 
 **Pros:**
 
-- Dynamo would be in sync with the latest Deep Learning CUDA release
-- Deep Learning CUDA image can provide additional libraries such as cuDNN, NCCL, etc which can accelerate deep learning workloads.
-- TritonServer is built on top of the Deep Learning CUDA image, so would be a good reference for the use-case.
+- Reduce overall complexity (less containers, less Dockerfiles)
+- No need foradditonal security scans and QA validation.
+- Simpler Open Source approval process.
 
 **Cons:**
 
-- Container Size is too large for the use-case. The cuda runtime image we use is around 6 GB whereas the Deep Learning Cuda runtime is around 11 GB, uncompressed.
-- Introduces additional dependencies that are not required for Dynamo, which can increase the container size and build time.
-- Dynamo has NIXL as it's communication library, so a dependency on NCCL is not required.
+- Container size, if a user is only interested in one particular backend, we should remove the dependencies associated with other backends. We would need to provide tools for users to create backend-specific containers for their deployment.
+- It is expected that Backends can differ on performance, which could be a result of backend-specific dependencies.
+- Build times are expected to be longer for a single container with multi-backend support.
+- Is it feasible for a user to want deploy multiple inference engines at once with dynamo?
 
 **Reason Rejected:**
 
-- Container Size is too large for the use-case. The cuda runtime image we use is around 6 GB whereas the Deep Learning cuda runtime is around 11 GB, uncompressed.
-- Introduces additional dependencies that are not required for Dynamo, which can increase the container size and build time.
-
-
+- There are more cons than pros for this approach. Along with the cons, the Dynamo base container is a good drop-in replacement for the multi-backend container.
 
 # Background
 
@@ -287,6 +321,7 @@ Add additional references as needed to help reviewers and authors understand the
 | :---- | :---- |
 | **Base Container** | Pre-built container with Dynamo and NIXL that serves as foundation for backend-specific builds |
 | **Backend Build** | Container stage that builds backend-specific code and dependencies |
+| **sccache** | Compiler cache tool that speeds up recompilation by caching previous compilation results |
 | **CI Stage** | Container stage with testing tools and validation requirements |
 | **Manylinux** | PEP 513 standard for Linux wheel distribution compatibility |
 | **NIXL** | High-throughput, low-latency point-to-point communication library for accelerating inference |
