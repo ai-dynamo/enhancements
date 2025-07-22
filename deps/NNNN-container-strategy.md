@@ -29,7 +29,7 @@ One of the goals for this document is to define a clear and maintainable structu
 To achieve this goal, this document proposes certain optimizations to improve the current build process:
 - Restructuring the build process to provide a base container with a pre-built version of Dynamo + NIXL available on all distributions, enabling splitting of specific backends from the dynamo build process.
 - Defining a structure/template for all Dockerfiles to follow to ensure consistent and reproducible builds across backends along with specific roles/use cases targeted for each stage.
-- Implementing remote compiler caching strategies using tools like sccache to significantly reduce rust compilation times across builds and CI/CD pipelines.
+- Implementing remote compiler caching strategies tools like sccache to significantly reduce rust compilation times across builds and CI/CD pipelines.
 
 # Motivation
 
@@ -124,7 +124,7 @@ flowchart TD
     C[Build Dependencies]
     D[Build Dynamo]
     E[Dynamo Base Container]:::gray
-    F[Build Backend-specific code]
+    F[Build Backend from source]
     G[Backend Build Image]:::gray
     J[Cuda Runtime<br/>nvcr.io/nvidia/cuda.XX.YY-runtime]:::gray
     K[Install NATS + ETCD]
