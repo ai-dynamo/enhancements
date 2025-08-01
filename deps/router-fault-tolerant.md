@@ -70,7 +70,6 @@ N/A
 
 N/A
 
-
 # Proposal
 
 **\[Required\]**
@@ -151,9 +150,7 @@ List out solutions that were considered but ultimately rejected. Consider free f
 
 # Background
 
-**\[Optional \- if not applicable omit\]**
-
-Add additional context and references as needed to help reviewers and authors understand the context of the problem and solution being proposed.
+N/A
 
 ## References
 
