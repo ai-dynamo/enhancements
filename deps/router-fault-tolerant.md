@@ -61,6 +61,7 @@ In short, a stateless Router is better for fault-tolerance, but a stateful Route
 The main motivation here is to have a design that incorporates the benefits of both, and eventually achieve a net win. 
 More details would be provided in the following sections.
 
+The overarching goals are then:
 * The Router has to be performant over generic load balancers (e.g. round robin) under general settings, as it is now.
 * The Router has to be a separate component that can be scaled (or not-scaled) independently from the frontend.
 * Multiple Router has to be launched without losing routing optimality.
