@@ -55,13 +55,11 @@ But not good because:
 - The Router holds the output SSE stream, so if the Router goes down, the stream will die along with it
 - Harder to have modular components to bind to Python, as we require the entirety of `KvPushRouter` to handle the request-response cycles
 
-## Future Design
+## Goals
 
 In short, a stateless Router is better for fault-tolerance, but a stateful Router is better for optimality of routing decisions.
 The main motivation here is to have a design that incorporates the benefits of both, and eventually achieve a net win. 
 More details would be provided in the following sections.
-
-## Goals
 
 * The Router has to be performant over generic load balancers (e.g. round robin) under general settings, as it is now.
 * The Router has to be a separate component that can be scaled (or not-scaled) independently from the frontend.
