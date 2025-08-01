@@ -36,6 +36,7 @@ As context, we have iterated over two designs of the Router that worked well in 
 First, we had a near-stateless Router listening on backend engines for KV events and load metrics. This is good because:
 - Multiple Routers can be launched and synced naturally
 - Easier Python binding for modular components, as the Router does not hold the output SSE stream, and simply needs to return the `best_worker_id`
+
 But not good because:
 - The radix tree of the `KvIndexer` is still very stateful, with no warm restart mechanism
 - Huge performance hit under highly concurrent payloads, as KV / metric events cannot respond fast enough for the Router to keep track of the updated load states.
@@ -44,6 +45,7 @@ Now, we have a stateful Router still listening on backend engines for KV events 
 but maintains the active block states locally from the request-response cycle. This is good because:
 - The performance is good under high concurrency, because the Router never sees a stale load metric state, as we forced sequential processing of requests locally.
 - It is highly general, as the Router can now interface with any backend engine, without the need for any event communication
+
 But not good because:
 - Due to its high statefulness, multiple Routers cannot be perfectly in sync, as a Router only sees a subset of requests / responses
 - The Router holds the output SSE stream, so if the Router goes down, the stream will die along with it
