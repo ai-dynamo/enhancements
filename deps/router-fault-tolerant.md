@@ -12,7 +12,7 @@
 
 **Sponsor**: @nnshah1
 
-**Required Reviewers**: @ryanolson
+**Required Reviewers**: @ryanolson @grahamking
 
 **Review Date**: [Date for review]
 
@@ -24,7 +24,7 @@
 
 The overarching goal here is to have a Router design that allows for multiple Router instances to be deployed for fault tolerance.
 That is, in case one goes down, the others will still be able to function normally.
-This requires some sort of mechanism to sync the Router states periodically (either among the Router themselves or via events from the backend engines),
+This requires some sort of mechanism to sync the Router states periodically (either among the Routers themselves or via events from the backend engines),
 and also a mechanism to "warm restart" the Router such that the Router can be brought back with up-to-date states.
 Finally, the Router should be decoupled from the (http) frontend, such that the two can be scaled independently. 
 (It is more likely that the frontend handling the pre-processing / tokenization would need to scale first before the Router does.)
@@ -33,7 +33,7 @@ Finally, the Router should be decoupled from the (http) frontend, such that the 
 
 As context, we have iterated over two designs of the Router that worked well in their own regard.
 
-First, we had a near-stateless Router listening on backend engines for KV events and load metrics. This is good because:
+First, we had a **near-stateless Router** listening on backend engines for KV events and load metrics. This is good because:
 - Multiple Routers can be launched and synced naturally
 - Easier Python binding for modular components, as the Router does not hold the output SSE stream, and simply needs to return the `best_worker_id`
 
@@ -41,7 +41,7 @@ But not good because:
 - The radix tree of the `KvIndexer` is still very stateful, with no warm restart mechanism
 - Huge performance hit under highly concurrent payloads, as KV / metric events cannot respond fast enough for the Router to keep track of the updated load states.
 
-Now, we have a stateful Router still listening on backend engines for KV events (can opt out of via `ApproxKvIndexer`), 
+Now, we have a **stateful Router** still listening on backend engines for KV events (can opt out of via `ApproxKvIndexer`), 
 but maintains the active block states locally from the request-response cycle. This is good because:
 - The performance is good under high concurrency, because the Router never sees a stale load metric state, as we forced sequential processing of requests locally.
 - It is highly general, as the Router can now interface with any backend engine, without the need for any event communication
@@ -56,37 +56,19 @@ The main motivation here is to have a design that incorporates the benefits of b
 
 ## Goals
 
-**\[Optional \- if not applicable omit\]**
-
-List out any additional goals in bullet points. Goals may be aspirational / difficult to measure but guide the proposal. 
-
-* Goal
-
-* Goal
-
-* Goal
+* The Router has to be performant over generic load balancers (e.g. round robin) under general settings, as it is now.
+* The Router has to be a separate component that can be scaled (or not-scaled) independently from the frontend.
+* Multiple Router has to be launched without losing routing optimality.
+* A Router can go down without affecting the output SSE streams.
+* A Router can come back up without losing its previous states or missing updates during the time it was down.
 
 ### Non Goals
 
-**\[Optional \- if not applicable omit\]**
-
-List out any items which are out of scope / specifically not required in bullet points. Indicates the scope of the proposal and issue being resolved.
+N/A
 
 ## Requirements
 
-**\[Optional \- if not applicable omit\]**
-
-List out any additional requirements in numbered subheadings.
-
-**\<numbered subheadings\>**
-
-### REQ \<\#\> \<Title\>
-
-Describe the requirement in as much detail as necessary for others to understand it and how it applies to the DEP. Keep in mind that requirements should be measurable and will be used to determine if a DEP has been successfully implemented or not.
-
-Requirement names should be prefixed using a monotonically increasing number such as “REQ 1 \<Title\>” followed by “REQ 2 \<Title\>” and so on. Use title casing when naming requirements. Requirement names should be as descriptive as possible while remaining as terse as possible.
-
-Use all-caps, bolded terms like **MUST** and **SHOULD** when describing each requirement. See [RFC-2119](https://datatracker.ietf.org/doc/html/rfc2119) for additional information.
+N/A
 
 
 # Proposal
@@ -175,32 +157,17 @@ Add additional context and references as needed to help reviewers and authors un
 
 ## References
 
-**\[Optional \- if not applicable omit\]**
-
-Add additional references as needed to help reviewers and authors understand the context of the problem and solution being proposed.
-
-* \<hyper-linked title of an external reference resource\>
+* [KV Routing](https://docs.nvidia.com/dynamo/latest/architecture/kv_cache_routing.html)
+* [KV Router Performance Tuning](https://docs.nvidia.com/dynamo/latest/guides/kv_router_perf_tuning.html)
+* [SGL's stateful Router](https://lmsys.org/blog/2024-12-04-sglang-v0-4/)
 
 ## Terminology & Definitions
 
-**\[Optional \- if not applicable omit\]**
-
-List out additional terms / definitions (lexicon). Try to keep definitions as concise as possible and use links to external resources when additional information would be useful to the reader.
-
-Keep the list of terms sorted alphabetically to ease looking up definitions by readers.
-
 | \<Term\> | \<Definition\> |
 | :---- | :---- |
-| **\<Term\>** | \<Definition\> |
+| **KvIndexer** | A data structure for maintaining a global view of prefix caches of all workers |
+| **Router** | A component for routing requests to backend workers that is aware of the current loads and prefix caches of each worker |
 
 ## Acronyms & Abbreviations
 
-**\[Optional \- if not applicable omit\]**
-
-Provide a list of frequently used acronyms and abbreviations which are uncommon or unlikely to be known by the reader. Do not include acronyms or abbreviations which the reader is likely to be familiar with.
-
-Keep the list of acronyms and abbreviations sorted alphabetically to ease looking up definitions by readers.
-
-Do not include the full definition in the expanded meaning of an abbreviation or acronym. If the reader needs the definition, please include it in the [Terminology & Definitions](#terminology--definitions) section.
-
-**\<Acronym/Abbreviation\>:** \<Expanded Meaning\>
+N/A
