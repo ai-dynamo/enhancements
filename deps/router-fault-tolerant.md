@@ -31,13 +31,26 @@ Finally, the Router should be decoupled from the (http) frontend, such that the 
 
 # Motivation
 
-**\[Required\]**
+As context, we have iterated over two designs of the Router that worked well in their own regard.
 
-Describe the problem that needs to be addressed with enough detail for
-someone familiar with the project to understand. Generally one to two
-short paragraphs. Additional details can be placed in the background
-section as needed. Cover **what** the issue is and **why** it needs to
-be addressed. Link to github issues if relevant.
+First, we had a near-stateless Router listening on backend engines for KV events and load metrics. This is good because:
+- Multiple Routers can be launched and synced naturally
+- Easier Python binding for modular components, as the Router does not hold the output SSE stream, and simply needs to return the `best_worker_id`
+But not good because:
+- The radix tree of the `KvIndexer` is still very stateful, with no warm restart mechanism
+- Huge performance hit under highly concurrent payloads, as KV / metric events cannot respond fast enough for the Router to keep track of the updated load states.
+
+Now, we have a stateful Router still listening on backend engines for KV events (can opt out of via `ApproxKvIndexer`), 
+but maintains the active block states locally from the request-response cycle. This is good because:
+- The performance is good under high concurrency, because the Router never sees a stale load metric state, as we forced sequential processing of requests locally.
+- It is highly general, as the Router can now interface with any backend engine, without the need for any event communication
+But not good because:
+- Due to its high statefulness, multiple Routers cannot be perfectly in sync, as a Router only sees a subset of requests / responses
+- The Router holds the output SSE stream, so if the Router goes down, the stream will die along with it
+- Harder to have modular components to bind to Python, as we require the entirety of `KvPushRouter` to handle the request-response cycles
+
+In short, a stateless Router is better for fault-tolerance, but a stateful Router is better for optimality of routing decisions.
+The main motivation here is to have a design that incorporates the benefits of both, and eventually achieve a net win.
 
 ## Goals
 
