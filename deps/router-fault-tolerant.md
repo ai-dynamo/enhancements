@@ -33,6 +33,8 @@ Finally, the Router should be decoupled from the (http) frontend, such that the 
 
 As context, we have iterated over two designs of the Router that worked well in their own regard.
 
+## Initial Design
+
 First, we had a **near-stateless Router** listening on backend engines for KV events and load metrics. This is good because:
 - Multiple Routers can be launched and synced naturally
 - Easier Python binding for modular components, as the Router does not hold the output SSE stream, and simply needs to return the `best_worker_id`
@@ -40,6 +42,8 @@ First, we had a **near-stateless Router** listening on backend engines for KV ev
 But not good because:
 - The radix tree of the `KvIndexer` is still very stateful, with no warm restart mechanism
 - Huge performance hit under highly concurrent payloads, as KV / metric events cannot respond fast enough for the Router to keep track of the updated load states.
+
+## Current Design
 
 Now, we have a **stateful Router** still listening on backend engines for KV events (can opt out of via `ApproxKvIndexer`), 
 but maintains the active block states locally from the request-response cycle. This is good because:
@@ -51,8 +55,11 @@ But not good because:
 - The Router holds the output SSE stream, so if the Router goes down, the stream will die along with it
 - Harder to have modular components to bind to Python, as we require the entirety of `KvPushRouter` to handle the request-response cycles
 
+## Future Design
+
 In short, a stateless Router is better for fault-tolerance, but a stateful Router is better for optimality of routing decisions.
-The main motivation here is to have a design that incorporates the benefits of both, and eventually achieve a net win.
+The main motivation here is to have a design that incorporates the benefits of both, and eventually achieve a net win. 
+More details would be provided in the following sections.
 
 ## Goals
 
