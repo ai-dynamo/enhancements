@@ -8,16 +8,22 @@ For example,two distinct DynamoGraphDeployment frontend pods should not serve mo
 2. Dynamo namespace is logic grouping of components but its not fully enforced across the entire system.
 a. k8s CR `dynamoNamespace` is not used to isolate the models.
 
-## What is a Dynamo namespace? Why do we need this?
+## What is a Dynamo namespace? 
 
-Dynamo namespace is a way to logically partition control, data and event plane. This is a hybrid sharing model where we share some resources (operator/etcd/nats deployments, resources, data - pvc) within a k8s namespace and not others (logical component deployments) across multiple dynamo namespaces.
+Dynamo namespace:
+- is `logical` partition of control, data and event plane 
+- is `logical` grouping of components working together
+- maps to model graph as a unit of deployment
 
-1. It helps multi-tenenacy use cases where each unit (model/user) has a dynamo namespace.
-2. A/B test models in same namespace with model weights in RWX PVC volume.
-3. Deploy 2 models in same k8s namespace and use Inference gateway to serve them. 
+## Why do we need Dynamo namespace?
+Dynamo namespace enables a hybrid sharing model where we share some resources (operator/etcd/nats deployments, resources, data - pvc) within a k8s namespace and not others (logical component deployments) across multiple dynamo namespaces.
+
+It helps multi-tenenacy use cases where each model deployment is managed in a dynamo namespace.
+1. A/B test models in same namespace with model weights in RWX PVC volume.
+2. Deploy 2 models in same k8s namespace and use Inference gateway to serve them. 
    Allow configuring granular model routing, Flow control and scheduling policies.
 
-Although K8s namespace is the strongest isolation boundary for users and dont need the additional isolation boundary.
+K8s namespace is the strongest isolation boundary in k8s. It's a shared nothing architecture where model weights and common platform is not shared as well.
 
 
 ## Requirements
@@ -133,3 +139,13 @@ Remove this argument from all backend components.
         help=f"Dynamo endpoint string in 'dyn://namespace.component.endpoint' format. Default: {DEFAULT_ENDPOINT}",
     )
 ```
+
+#### Dynamo Planner:
+TODO
+
+
+#### Common components:
+1. etcd
+2. nats
+3. operator
+5. observability stack
