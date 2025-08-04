@@ -177,7 +177,7 @@ A frontend launched with specific `DYNAMO_NAMESPACE` will be scoped to it's name
 
 2. two level heirarchy (`user/org` and `model-version`) similar to huggingface model hub or github can help group model deployments/dynamo namespaces.
 
-![alt text](./heirarchial-namespace.png)
+![alt text](./heirarchial-ns.png)
 
 for example,
 Frontend components in `org-1` dynamo namespace can be used to serve llama-8b model version-A or verion-B for all users.
