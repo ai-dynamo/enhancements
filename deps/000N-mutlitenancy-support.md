@@ -10,10 +10,13 @@ a. k8s CR `dynamoNamespace` is not used to isolate the models.
 
 ## What is a Dynamo namespace? 
 
-Dynamo namespace:
-- is `logical` partition of control, data and event plane 
-- is `logical` grouping of components working together
-- maps to model graph as a unit of deployment
+tldr; Dynamo namespace is name of a `dynamo graph deployment`. 
+
+A Dynamo graph deployment is:
+- `logical` group of workers (components) managed and working cohesively.
+- `logical` partition/boundary of distributed runtime (control, data and event plane)
+
+Dynamo namespace maps 1:1 with a k8s `DynamoGraphDeployment` CR.
 
 ## Why do we need Dynamo namespace?
 Dynamo namespace enables a hybrid sharing model where we share some resources (operator/etcd/nats deployments, resources, data - pvc) within a k8s namespace and not others (logical component deployments) across multiple dynamo namespaces.
@@ -37,7 +40,7 @@ For example, I can create two dynamo graph deployments in same k8s namespace wit
 
 ## Design principles
 
-- Dynamo namespace is a way to logically partition control, data and event plane.
+- Dynamo namespace is `dynamo graph deployment name` which is a logical grouping of components working together.
 
 - Reduce complexity and cognitive load. Reuse existing dynamo namespace as the isolation boundary.
 
