@@ -79,8 +79,9 @@ Pros:
 - Already supported by k8s.
 
 Cons:
-- 
-- 
+- Need to create k8s namespaces dynamically for each model deployment.
+- Tightly coupling operability of infra team with genai inference team.
+- Need to manage more instances of etcd, nats, operator
 
 ### Dynamo namespace as secondary isolation boundary within a k8s namespace:
 #### Isolation:
@@ -94,6 +95,9 @@ Not shared:
 1. components (http, router, processor or llm backends)
 
 #### High level design:
+
+![alt text](./dynamo-ns.png)
+
 1. `DYNAMO_NAMESPACE` environment variable is used by components to scope their functionality.
 
 2. when `DYNAMO_NAMESPACE` is not specified, `default` is the default namespace.
@@ -101,19 +105,9 @@ Not shared:
 3. Frontend components (http, router, processor) are scoped to the dynamo namespace.
 Advantages:
 - Provides sharding ability to scale Routers independently.
-- Provides dynamo namespace scoped sharding ability to scale all-in-one frontend components independently.
+- Provides dynamo namespace scoped `sharding` ability to scale all-in-one frontend components independently.
 
 4. Dynamo namespace itself is hierarchial allowing heierchial isolation of Frontend components.
-for example,
-- Frontend components in `default` namespace can be used to serve models for all users.
-- Frontend components in `llama-8b/version-A` dynamo namespace can be used to serve llama-8b model version-1 for all users.
-- Frontend components in `llama-8b/version-B` dynamo namespace can be used to serve llama-8b model version-2 for all users.
-
-Use cases:
-a. A frontend launched without any `DYNAMO_NAMESPACE` will be scoped to `default` namespace and it will be able to serve models from all namespaces.
-
-b. A frontend launched with specific `DYNAMO_NAMESPACE` will be scoped to it's namespace and all children namespaces.
-
 
 ### Implementation
 
@@ -131,6 +125,8 @@ spec:
 ```
 
 Similar changes are required in helm chart approach as well.
+
+![alt text](./deployment.png)
 
 #### Dynamo Frontend components (http, router, processor):
 They use `DYNAMO_NAMESPACE` environment variable to read from etcd and nats.
@@ -164,6 +160,19 @@ Remove this argument from all backend components.
         help=f"Dynamo endpoint string in 'dyn://namespace.component.endpoint' format. Default: {DEFAULT_ENDPOINT}",
     )
 ```
+
+
+####  Heirarchial Dynamo namespace:
+
+Dynamo namespace itself is hierarchial allowing heierchial isolaton and request routing.
+
+A frontend launched with specific `DYNAMO_NAMESPACE` will be scoped to it's namespace and all children namespaces.
+
+![alt text](./heirarchial-namespace.png)
+
+for example,
+Frontend components in `org-1` dynamo namespace can be used to serve llama-8b model version-A or verion-B for all users.
+
 
 #### Dynamo Planner:
 TODO
