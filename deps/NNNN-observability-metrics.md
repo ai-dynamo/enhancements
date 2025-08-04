@@ -92,36 +92,13 @@ This proposal aims to:
 
 The current `MetricsRegistry` implementation provides a comprehensive metrics framework built into the `DistributedRuntime`. This proposal documents the existing system and outlines enhancements for improved observability.
 
-## Current Implementation Overview
+The Dynamo metrics system follows a layered architecture that automatically collects, stores, and visualizes performance data across all components. This design ensures comprehensive observability with minimal developer effort.
 
-The `MetricsRegistry` trait provides a unified interface for creating and managing Prometheus metrics with automatic labeling and hierarchical organization. Key features include:
+The metrics system operates on three main layers:
 
-* **Automatic Metrics**: All component endpoints automatically collect request count, duration, bytes, and error metrics
-* **Custom Metrics**: Support for creating custom counters, gauges, histograms, and their vector variants
-* **Hierarchical Organization**: Metrics are organized by namespace, component, and endpoint hierarchy
-* **Prometheus Integration**: Native Prometheus format output for integration with monitoring systems
-
-## System Architecture
-
-The metrics system is built around the `MetricsRegistry` trait that provides:
-
-```rust
-pub trait MetricsRegistry: Send + Sync + DistributedRuntimeProvider {
-    fn basename(&self) -> String;
-    fn prefix(&self) -> String;
-    fn parent_hierarchy(&self) -> Vec<String>;
-    
-    // Metric creation methods
-    fn create_counter(&self, name: &str, description: &str, labels: &[(&str, &str)]) -> Result<Arc<Counter>>;
-    fn create_gauge(&self, name: &str, description: &str, labels: &[(&str, &str)]) -> Result<Arc<Gauge>>;
-    fn create_histogram(&self, name: &str, description: &str, labels: &[(&str, &str)], buckets: Option<Vec<f64>>) -> Result<Arc<Histogram>>;
-    // ... additional methods for vectors and other metric types
-    
-    fn prometheus_metrics_fmt(&self) -> Result<String>;
-}
-```
-
-### Topology
+1. **Collection Layer**: Dynamo components automatically generate metrics during operation
+2. **Storage Layer**: Prometheus collects and stores metrics data for historical analysis
+3. **Visualization Layer**: Grafana provides dashboards and alerts based on the collected data
 
 The metrics system follows a hierarchical architecture where metrics are collected from individual components and aggregated through the monitoring stack:
 
@@ -148,28 +125,31 @@ graph TD
 
 The topology ensures that all metrics from Dynamo components using the `DistributedRuntime` framework are automatically collected and made available for monitoring and alerting.
 
-## Automatic Metrics
+The metrics system organizes data in a logical hierarchy that mirrors Dynamo's distributed architecture:
+
+- **Runtime Level**: Global metrics across the entire system
+- **Namespace Level**: Metrics scoped to specific model or service namespaces
+- **Component Level**: Metrics for specific components within a namespace
+- **Endpoint Level**: Metrics for individual API endpoints within a component
+
+This hierarchical structure allows for both broad system-wide monitoring and detailed component-specific analysis.
 
 Dynamo automatically exposes metrics with the `dynamo_` name prefixes and adds the following labels: `dynamo_namespace`, `dynamo_component`, and `dynamo_endpoint` to indicate which component is providing the metric.
 
-### Component Metrics
-
 All component endpoints using the `DistributedRuntime` framework automatically collect the following metrics:
 
-#### Counters
+**Counters:**
 - `dynamo_component_requests_total` - Total requests processed
 - `dynamo_component_request_bytes_total` - Total bytes received
 - `dynamo_component_response_bytes_total` - Total bytes sent
 - `dynamo_component_errors_total` - Total errors (with error_type labels)
 
-#### Histograms
+**Histograms:**
 - `dynamo_component_request_duration_seconds` - Request processing time
 
-#### Gauges
+**Gauges:**
 - `dynamo_component_concurrent_requests` - Currently processing requests
 - `dynamo_component_system_uptime_seconds` - DistributedRuntime uptime
-
-### Frontend Metrics
 
 When using Dynamo HTTP Frontend (`--framework VLLM` or `--framework TENSORRTLLM`), these metrics are automatically exposed with the `dynamo_frontend_*` prefix and include `model` labels containing the model name:
 
@@ -181,104 +161,14 @@ When using Dynamo HTTP Frontend (`--framework VLLM` or `--framework TENSORRTLLM`
 - `dynamo_frontend_requests_total` - Total LLM requests (counter)
 - `dynamo_frontend_time_to_first_token_seconds` - Time to first token (histogram)
 
-### Specialized Component Metrics
-
 Some components expose additional metrics specific to their functionality:
 
 - `dynamo_preprocessor_*` - Metrics specific to preprocessor components
 
-### Labels
 All metrics automatically include:
 - `dynamo_namespace` - The namespace name
 - `dynamo_component` - The component name  
 - `dynamo_endpoint` - The endpoint name
-
-## Metrics Hierarchy
-
-The `MetricsRegistry` trait is implemented by `DistributedRuntime`, `Namespace`, `Component`, and `Endpoint`, providing a hierarchical approach to metric collection that matches Dynamo's distributed architecture:
-
-- **DistributedRuntime**: Global metrics across the entire runtime
-- **Namespace**: Metrics scoped to a specific dynamo_namespace
-- **Component**: Metrics for a specific dynamo_component within a namespace
-- **Endpoint**: Metrics for individual dynamo_endpoint within a component
-
-This hierarchical structure allows you to create metrics at the appropriate level of granularity for your monitoring needs.
-
-## Custom Metrics Implementation
-
-Components can add custom metrics using the endpoint's factory methods:
-
-```rust
-// Create custom metrics
-let custom_metrics = MyCustomMetrics::from_endpoint(&endpoint)?;
-
-// Use in request handler
-let handler = RequestHandler::with_metrics(custom_metrics);
-let ingress = Ingress::for_engine(handler)?;
-
-// Optional: Add custom metrics to the endpoint
-ingress.add_metrics(&endpoint)?;
-```
-
-## Example Implementation
-
-```rust
-#[derive(Clone, Debug)]
-pub struct MyCustomMetrics {
-    pub data_bytes_processed: Arc<IntCounter>,
-}
-
-impl MyCustomMetrics {
-    pub fn from_endpoint(endpoint: &Endpoint) -> Result<Self> {
-        let data_bytes_processed = endpoint.create_intcounter(
-            "my_custom_bytes_processed_total",
-            "Total data bytes processed",
-            &[],
-        )?;
-        
-        Ok(Self { data_bytes_processed })
-    }
-}
-
-struct RequestHandler {
-    metrics: Option<Arc<MyCustomMetrics>>,
-}
-
-#[async_trait]
-impl AsyncEngine<SingleIn<String>, ManyOut<Annotated<String>>, Error> for RequestHandler {
-    async fn generate(&self, input: SingleIn<String>) -> Result<ManyOut<Annotated<String>>> {
-        let (data, ctx) = input.into_parts();
-        
-        // Track custom metrics
-        if let Some(metrics) = &self.metrics {
-            metrics.data_bytes_processed.inc_by(data.len() as u64);
-        }
-        
-        // Business logic here...
-        Ok(ResponseStream::new(Box::pin(stream), ctx.context()))
-    }
-}
-```
-
-## Visualization and Monitoring
-
-### Grafana Dashboards
-
-The metrics system includes pre-configured Grafana dashboards for comprehensive monitoring:
-
-- **General Dynamo Dashboard**: `grafana-dynamo-dashboard.json` - Provides overview of both software and hardware metrics
-- **DCGM GPU Metrics Dashboard**: `grafana-dcgm-metrics.json` - Specialized dashboard for GPU monitoring
-- **LLM Metrics Dashboard**: `grafana-llm-metrics.json` - LLM-specific metrics (being phased out in favor of integrated approach)
-
-### Kubernetes Integration
-
-**Coming Soon**: Comprehensive Kubernetes deployment and monitoring information will be available soon, including:
-- Helm charts for easy deployment
-- Kubernetes-native metrics collection
-- Cluster-wide observability solutions
-- Integration with Kubernetes monitoring ecosystem
-
-## Metrics Output
 
 The system exposes metrics in standard Prometheus format:
 
@@ -294,19 +184,27 @@ dynamo_component_request_duration_seconds_sum{dynamo_component="example",dynamo_
 dynamo_component_request_duration_seconds_count{dynamo_component="example",dynamo_endpoint="generate",dynamo_namespace="default"} 42
 ```
 
-## Getting Started
+The `MetricsRegistry` trait is implemented by `DistributedRuntime`, `Namespace`, `Component`, and `Endpoint`, providing a hierarchical approach to metric collection that matches Dynamo's distributed architecture:
 
-For a complete setup guide including Docker Compose configuration, Prometheus setup, and Grafana dashboards, see the Getting Started section in the deploy metrics documentation.
+- **DistributedRuntime**: Global metrics across the entire runtime
+- **Namespace**: Metrics scoped to a specific dynamo_namespace
+- **Component**: Metrics for a specific dynamo_component within a namespace
+- **Endpoint**: Metrics for individual dynamo_endpoint within a component
 
-The quick start includes:
-- Docker Compose setup for Prometheus and Grafana
-- Pre-configured dashboards and datasources
-- Access URLs for all monitoring endpoints
-- GPU targeting configuration
+This hierarchical structure allows you to create metrics at the appropriate level of granularity for your monitoring needs.
 
-## Implementation Examples
+Components can add custom metrics using the endpoint's factory methods:
 
-See Implementation Examples for detailed examples of creating metrics at different hierarchy levels and using dynamic labels.
+The metrics system includes pre-configured Grafana dashboards for comprehensive monitoring:
+
+- **General Dynamo Dashboard**: `grafana-dynamo-dashboard.json` - Provides overview of both software and hardware metrics
+- **DCGM GPU Metrics Dashboard**: `grafana-dcgm-metrics.json` - Specialized dashboard for GPU monitoring
+
+**Coming Soon**: Comprehensive Kubernetes deployment and monitoring information will be available soon, including:
+- Helm charts for easy deployment
+- Kubernetes-native metrics collection
+- Cluster-wide observability solutions
+- Integration with Kubernetes monitoring ecosystem
 
 # Alternate Solutions
 
