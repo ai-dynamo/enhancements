@@ -92,8 +92,16 @@ Similar changes are required in helm chart approach as well.
 
 #### Dynamo Frontend components (http, router, processor):
 They use `DYNAMO_NAMESPACE` environment variable to read from etcd and nats.
-- Ignore any etcd data/watch events for namespaces other than the specified namespace as prefix.
-- Ignore any nats messages for namespaces other than the specified namespace as prefix.
+Phase 1:
+- Ignore any etcd data/watch events for namespaces other than the specific namespace.
+- Ignore any nats messages for namespaces other than the specific namespace.
+
+Phase 2:
+This phase will handle childrent namespaces as well.
+same frontend can handle `llama/version-A` and `llama/version-B` namespaces.
+- Subscribe to etcd data/watch events for specific namespace as prefix.
+- Subscribe to nats messages for namespaces specified namespace as prefix.
+- Ignore any event which doesn't match the prefix.
 
 #### Dynamo Backend components (vllm,sglang, trtllm):
   - uses `DYNAMO_NAMESPACE` environment variable to scope their functionality.
