@@ -46,6 +46,18 @@ for example,
 - Frontend components in `default/model2` namespace can be used to serve model2 for all users.
 
 Use cases:
-1. A frontend launched without any `DYNAMO_NAMESPACE` will be scoped to `default` namespace and it will be able to serve models from all namespaces.
+a. A frontend launched without any `DYNAMO_NAMESPACE` will be scoped to `default` namespace and it will be able to serve models from all namespaces.
 
-2. A frontend launched with specific `DYNAMO_NAMESPACE` will be scoped to it's namespace and all children namespaces.
+b. A frontend launched with specific `DYNAMO_NAMESPACE` will be scoped to it's namespace and all children namespaces.
+
+
+## Implementation
+
+1. CRD changes:
+    - Top level `dynamoNamespace` in DynamoGraphDeployment automatically sets `DYNAMO_NAMESPACE` environment variable in all components.
+
+2. Frontend components:
+    - use `DYNAMO_NAMESPACE` environment variable to read from etcd and nats.
+
+3. Backend components:
+  - use `DYNAMO_NAMESPACE` environment variable to scope their functionality.
