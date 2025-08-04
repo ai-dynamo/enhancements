@@ -167,7 +167,7 @@ Remove this argument from all backend components.
 ```
 
 
-####  Heirarchial Dynamo namespace scoping (optional)
+####  Heirarchial Dynamo namespace scoping
 
 Dynamo namespace itself is hierarchial allowing heierchial isolaton and request routing.
 
