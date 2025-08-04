@@ -171,7 +171,11 @@ Remove this argument from all backend components.
 
 Dynamo namespace itself is hierarchial allowing heierchial isolaton and request routing.
 
-A frontend launched with specific `DYNAMO_NAMESPACE` will be scoped to it's namespace and all children namespaces.
+A frontend launched with specific `DYNAMO_NAMESPACE` will be scoped to it's namespace and all children namespaces. 
+
+1. It'll allow router to scope to a model as a sharding key and allow it to scale.
+
+2. two level heirarchy (`user/org` and `model-version`) similar to huggingface model hub or github can help group model deployments/dynamo namespaces.
 
 ![alt text](./heirarchial-namespace.png)
 
