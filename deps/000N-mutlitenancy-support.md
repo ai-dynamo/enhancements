@@ -2,9 +2,10 @@
 
 ## Problem
 Currently we dont have strong isolation between dynamo graph deployments.
+
 Users expect a Dynamo namespace scoped frontend to serve models from same dynamo namespace. 
 
-For example, two distinct DynamoGraphDeployment frontend pods should not serve models from the different dynamo namespaces.
+For example, two distinct DynamoGraphDeployment frontend pods should not serve models from the different dynamo namespaces. It same model is deployed in differente dynamo namespaces, frontend pods can cross-reference across dynamo deployments in same namespace. This issue can be aggravated if the same model is deplyed with different versions.
 
 Dynamo namespace is enforced across the entire system.
 - frontend components are not scoped to dynamo namespace.
