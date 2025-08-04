@@ -1,381 +1,363 @@
 # Observability - Metrics
 
-**Status:** Draft
+**Status:** Draft <!-- Choose from: Draft | Under Review | Approved | Replaced | Deferred | Rejected -->
 
-**Authors:** nnshah1, keivenchang, whoisj
+**Authors:** nnshah1, keivenchang <!-- List the authors/team responsible for this proposal -->
 
-**Category:** Architecture
+**Category:** Architecture <!-- Choose from: Architecture | Process | Guidelines -->
 
-**Replaces:** N/A
+**Replaces:** N/A <!-- Link to previous proposal if this replaces one -->
 
-**Replaced By:** N/A
+**Replaced By:** N/A <!-- Link to proposal that replaces this one if applicable -->
 
-**Sponsor:** keivenchang
+**Sponsor:** keivenchang <!-- Name of code owner or maintainer to shepherd the process -->
 
-**Required Reviewers:** TBD
+**Required Reviewers:** TBD <!-- Names of technical leads that are required for acceptance -->
 
-**Review Date:** [Date for review]
+**Review Date:** [Date for review] <!-- Date when this proposal should be reviewed -->
 
-**Pull Request:** [Link to Pull Request of the Proposal itself]
+**Pull Request:** [Link to Pull Request of the Proposal itself] <!-- Link to the PR containing this proposal -->
 
-**Implementation PR / Tracking Issue:** TBD
+**Implementation PR / Tracking Issue:** TBD <!-- Link to PR or tracking issue for implementation -->
 
 # Summary
 
-This document outlines and defines the Metrics API for Dynamo.
+<!-- [Required] Provide a concise summary of the proposal - what it does and why it's needed -->
+
+This document outlines the current state and future direction of the Metrics API for Dynamo. The `MetricsRegistry` framework built into the `DistributedRuntime` provides comprehensive observability capabilities for Dynamo components. This proposal documents the current implementation and outlines improvements for enhanced observability across Dynamo components.
 
 # Motivation
 
-Dynamo's current metrics collection is fragmented, using various libraries across components. This leads to compatibility issues, inconsistent data formats, and increased maintenance costs.
+<!-- [Required] Describe the problem that needs to be addressed with enough detail for someone familiar with the project to understand. Generally one to two short paragraphs. Cover what the issue is and why it needs to be addressed. Link to github issues if relevant. -->
+
+The `MetricsRegistry` framework provides automatic metrics collection for component endpoints and supports custom metrics creation. While the current system provides a solid foundation, there are opportunities to enhance the observability capabilities, improve the developer experience, and ensure comprehensive coverage across all Dynamo components.
 
 ## Goals
 
-This proposal offers a unified way to collect, expose, and manage performance metrics across various registries.
+<!-- [Optional - if not applicable omit] List out any additional goals in bullet points. Goals may be aspirational / difficult to measure but guide the proposal. -->
 
-The Metrics API achieves this by:
+This proposal aims to:
 
-* Ensuring consistent metrics visibility
-* Encouraging best practices in metrics handling
-* Avoiding unsafe and inconsistent raw libraries
-* Providing a flexible abstraction layer for current and future implementations
+* Document and standardize the current `MetricsRegistry` implementation
+* Ensure consistent metrics visibility across all Dynamo components
+* Provide clear guidelines for developers on how to use the metrics system
+* Establish best practices for custom metrics implementation
+* Enable comprehensive observability for production deployments
+
+### Non Goals
+
+<!-- [Optional - if not applicable omit] List out any items which are out of scope / specifically not required in bullet points. Indicates the scope of the proposal and issue being resolved. -->
+
+* Implementing new metrics backends beyond Prometheus
+* Adding complex metrics aggregation or alerting systems
+* Modifying the core `DistributedRuntime` behaviors
 
 ## Requirements
 
-### REQ 1: Prometheus Server
+<!-- [Optional - if not applicable omit] List out any additional requirements in numbered subheadings. Requirements should be measurable and will be used to determine if a DEP has been successfully implemented or not. Use all-caps, bolded terms like MUST and SHOULD when describing each requirement. -->
 
-* **Description:** A Prometheus server MUST be operational and continuously polling each Dynamo component/process to collect and aggregate metrics data for a comprehensive system overview.
-* **Rationale:** Ensuring that a Prometheus server is operational and polling components guarantees that metrics data is consistently aggregated and available for analysis. This setup facilitates seamless integration with existing monitoring ecosystems, such as Grafana dashboards and alerting systems.
-* **Measurability:** Confirm that the Prometheus server is configured to poll each component's /metrics endpoint and that it successfully collects and stores the metrics data. Verify that the collected data can be accessed and visualized through external tools like Grafana.
+### REQ 1: Automatic Metrics Collection
 
-### REQ 2: HTTP Endpoint Exposure for Metrics
+* **Description:** All component endpoints using the `DistributedRuntime` framework MUST automatically collect basic metrics including request count, duration, bytes transferred, and error counts without requiring any code changes.
+* **Rationale:** Automatic metrics collection ensures consistent observability across all components and reduces the burden on developers to implement basic monitoring.
+* **Measurability:** Verify that all component endpoints automatically expose metrics.
 
-* **Description:** Each component/process in Dynamo MUST expose an HTTP endpoint in Prometheus format to support the Prometheus server and other components that query the Prometheus server (e.g., Grafana and even other Dynamo components).
-* **Rationale:** Exposing an HTTP endpoint in Prometheus format ensures that all components can be monitored uniformly, and profiling data can be collected without discrepancies. This approach leverages established tooling for historical analysis, trend identification, and operational monitoring.
-* **Measurability:** Verify that each component has a /metrics endpoint accessible via HTTP, and that it follows a standardized format. Ensure that the API can export profiling data in Prometheus format with proper metric naming conventions and labels. Test that external dashboard tools (such as Grafana) can successfully consume the Prometheus output and display meaningful visualizations. Ensure that the Prometheus endpoint responds efficiently to scraping requests.
+### REQ 2: Standardized Metric Naming
 
-### REQ 3: Common Profiling Interface
+* **Description:** All metrics MUST follow the standard `dynamo_component_*`, `dynamo_frontend_*`, and other `dynamo_<specific-component>_*` prefix in names. Additional **labels** such as `dynamo_namespace`, `dynamo_component`, `dynamo_endpoint` are automatically added to the names.
+* **Rationale:** Consistent naming and labeling enables effective aggregation, filtering, and analysis across the entire Dynamo ecosystem.
+* **Measurability:** Confirm that all metrics follow the established naming patterns and include the required labels.
 
-* **Description:** Each component MUST use the common Rust trait for counts, gauges, and histograms.
-* **Rationale:** A common Rust trait ensures that profiling data collection is consistent and reliable across all components.
-* **Measurability:** Check that all components use the common Rust trait for profiling operations and that the profiling data collected are consistent.
+### REQ 3: Custom Metrics Support
 
-### REQ 4: Profiling Declaration and Registration
+* **Description:** The `MetricsRegistry` MUST support creation of additional custom metric types (counters, gauges, histograms) with proper labeling and integration with the automatic metrics system.
+* **Rationale:** Custom metrics allow components to expose domain-specific observability data while maintaining consistency with the overall metrics framework.
+* **Measurability:** Verify that components can create and use custom metrics through the `MetricsRegistry` interface, implemented in the `DistributedRuntime` framework.
 
-* **Description:** Each component MUST declare a struct that contains profiling types and register what metrics they are profiling with the Metrics API.
-* **Rationale:** Standardizing how components declare and register their profiling structure ensures consistency in the data reported across different components and enables the API to properly manage and expose these metrics.
-* **Measurability:** Confirm that each component has a defined profiling struct, registers its metrics with the Metrics API, and that the registered metrics are used for reporting profiling data.
+### REQ 4: HTTP Metrics Endpoint
 
-### REQ 5: Pluggable Registry Interface
+* **Description:** Each process containing one or more components and/or endpoints MUST expose metrics in Prometheus format via HTTP endpoints that can be scraped by monitoring systems.
+* **Rationale:** HTTP endpoints enable integration with standard monitoring tools like Prometheus, Grafana, and other observability platforms.
+* **Measurability:** Confirm that components expose `/metrics` endpoints that return valid Prometheus-formatted data.
 
-* **Description:** The profiling Rust trait (API) MUST support pluggable registries, such as Prometheus library, OpenTelemetry (OTel), and/or custom C++ implementations, etc. The Metrics API provides an abstraction layer that can work with any of these registry implementations. The common profiling libraries will be exposed through the Dynamo Rust runtime via PyO3 to ensure consistent access across both Rust and Python components.
-* **Rationale:** Pluggable registries provide flexibility in how profiling data are collected and reported, enabling integration with various monitoring tools. Exposing these through the Dynamo Rust runtime ensures a unified Rust trait regardless of the underlying implementation language.
-* **Measurability:** Validate that the API can switch between different registry implementations without requiring changes to the components, and verify that both Rust and Python components can access the profiling libraries through the Dynamo runtime Rust trait.
+### REQ 5: Developer Documentation
 
-### REQ 6: Python Bindings
-
-* **Description:** The common API MUST provide Python bindings to ensure compatibility with Python components in Dynamo.
-* **Rationale:** Python bindings ensure that components written in Python can also utilize Rust structs (with well-defined profiling types) and Rust traits, maintaining consistency across different layers.
-* **Measurability:** Verify the existence and functionality of Python bindings for the profiling Rust trait, and ensure that Python components can use these bindings to report profiling data.
-
+* **Description:** Comprehensive documentation MUST be provided for developers on how to use the metrics system, including examples and best practices.
+* **Rationale:** Clear documentation reduces the learning curve and ensures consistent implementation across teams.
+* **Measurability:** Verify the existence and completeness of developer guides, examples, and API documentation.
 
 # Proposal
 
-Create a common Metrics API that allows each component/process to:
+<!-- [Required] Describe the high level design / proposal. Use sub sections as needed, but start with an overview and then dig into the details. Try to provide images and diagrams to facilitate understanding. -->
 
-* Expose component metrics and/or health profiling data on an HTTP endpoint.
-* Create a metrics struct containing profiling data (e.g., incr counter, gauge, and histogram).
-* Call a common API that mutates the metrics struct.
-* Automatically export the metrics struct to a Prometheus key-val format.
+The current `MetricsRegistry` implementation provides a comprehensive metrics framework built into the `DistributedRuntime`. This proposal documents the existing system and outlines enhancements for improved observability.
 
-## System Diagram
+## Current Implementation Overview
 
-This diagram shows a system for handling different types of metrics, like counters, gauges, and histograms. At the core is a class called Metric, which holds basic information like the metric’s name, type, and description.
+The `MetricsRegistry` trait provides a unified interface for creating and managing Prometheus metrics with automatic labeling and hierarchical organization. Key features include:
 
-From this base, three specific metric types are created: counters that can be increased, gauges that can go up or down or be set to a value, and histograms that record values. Each of these metric types has two versions: one for Prometheus and one for Libnv. These versions add the ability to output their data in a specific format.
+* **Automatic Metrics**: All component endpoints automatically collect request count, duration, bytes, and error metrics
+* **Custom Metrics**: Support for creating custom counters, gauges, histograms, and their vector variants
+* **Hierarchical Organization**: Metrics are organized by namespace, component, and endpoint hierarchy
+* **Prometheus Integration**: Native Prometheus format output for integration with monitoring systems
 
-There’s also a MetricsRegistry class that manages how metrics are created and formatted. It includes methods to create each type of metric and to format them for Prometheus. A specialized version of this registry, called PrometheusRegistry, inherits from it and likely customizes some of its behavior.
+## System Architecture
 
-Note that libnv is an NVIDIA implementation in libnv.so that can gather metrics in C++ layers (e.g. NIXL).
+The metrics system is built around the `MetricsRegistry` trait that provides:
+
+```rust
+pub trait MetricsRegistry: Send + Sync + DistributedRuntimeProvider {
+    fn basename(&self) -> String;
+    fn prefix(&self) -> String;
+    fn parent_hierarchy(&self) -> Vec<String>;
+    
+    // Metric creation methods
+    fn create_counter(&self, name: &str, description: &str, labels: &[(&str, &str)]) -> Result<Arc<Counter>>;
+    fn create_gauge(&self, name: &str, description: &str, labels: &[(&str, &str)]) -> Result<Arc<Gauge>>;
+    fn create_histogram(&self, name: &str, description: &str, labels: &[(&str, &str)], buckets: Option<Vec<f64>>) -> Result<Arc<Histogram>>;
+    // ... additional methods for vectors and other metric types
+    
+    fn prometheus_metrics_fmt(&self) -> Result<String>;
+}
+```
+
+### Topology
+
+The metrics system follows a hierarchical architecture where metrics are collected from individual components and aggregated through the monitoring stack:
 
 ```mermaid
- classDiagram
-    direction TB
+graph TD
+    BROWSER[Browser] -->|:3001| GRAFANA[Grafana :3001]
+    subgraph DockerComposeNetwork [Network inside Docker Compose]
+        NATS_PROM_EXP[nats-prom-exp :7777 /metrics] -->|:8222/varz| NATS_SERVER[nats-server :4222, :6222, :8222]
+        PROMETHEUS[Prometheus server :9090] -->|:2379/metrics| ETCD_SERVER[etcd-server :2379, :2380]
+        PROMETHEUS -->|:9401/metrics| DCGM_EXPORTER[dcgm-exporter :9401]
+        PROMETHEUS -->|:7777/metrics| NATS_PROM_EXP
+        PROMETHEUS -->|:8080/metrics| DYNAMOFE[Dynamo HTTP FE :8080]
+        PROMETHEUS -->|:8081/metrics| DYNAMOBACKEND[Dynamo backend :8081]
+        DYNAMOFE --> DYNAMOBACKEND
+        GRAFANA -->|:9090/query API| PROMETHEUS
+    end
+```
 
-    class Metric {
-        +get_name()
-        +metric_type
-        +description
-    }
+**Key Components:**
+- **Dynamo Components**: Individual components expose metrics via HTTP endpoints (e.g., `:8080/metrics`, `:8081/metrics`)
+- **Prometheus Server**: Collects and stores metrics from all Dynamo services and infrastructure components
+- **Grafana**: Provides dashboards and visualization by querying the Prometheus Server
+- **Infrastructure Metrics**: NATS, etcd, and DCGM exporter provide additional system-level metrics
 
-    class MetricCounter {
-        +increment()
-        +add(value)
-    }
+The topology ensures that all metrics from Dynamo components using the `DistributedRuntime` framework are automatically collected and made available for monitoring and alerting.
 
-    class MetricGauge {
-        +set(value)
-        +increment()
-        +decrement()
-    }
+## Automatic Metrics
 
-    class MetricHistogram {
-        +observe(value: f64)
-    }
+Dynamo automatically exposes metrics with the `dynamo_` name prefixes and adds the following labels: `dynamo_namespace`, `dynamo_component`, and `dynamo_endpoint` to indicate which component is providing the metric.
 
-    class PrometheusCounter {
-        +output_metrics()
-        +increment()
-        +add(value)
-    }
+### Component Metrics
 
-    class PrometheusGauge {
-        +output_metrics()
-        +set(value)
-        +increment()
-        +decrement()
-    }
+All component endpoints using the `DistributedRuntime` framework automatically collect the following metrics:
 
-    class PrometheusHistogram {
-        +output_metrics()
-        +observe(value: f64)
-    }
+#### Counters
+- `dynamo_component_requests_total` - Total requests processed
+- `dynamo_component_request_bytes_total` - Total bytes received
+- `dynamo_component_response_bytes_total` - Total bytes sent
+- `dynamo_component_errors_total` - Total errors (with error_type labels)
 
-    class LibnvCounter {
-        +output_metrics()
-        +increment()
-        +add(value)
-    }
+#### Histograms
+- `dynamo_component_request_duration_seconds` - Request processing time
 
-    class LibnvGauge {
-        +output_metrics()
-        +set(value)
-        +increment()
-        +decrement()
-    }
+#### Gauges
+- `dynamo_component_concurrent_requests` - Currently processing requests
+- `dynamo_component_system_uptime_seconds` - DistributedRuntime uptime
 
-    class LibnvHistogram {
-        +output_metrics()
-        +observe(value: f64)
-    }
+### Frontend Metrics
 
-    class MockCounter {
-        +output_metrics()
-        +increment()
-        +add(value)
-    }
+When using Dynamo HTTP Frontend (`--framework VLLM` or `--framework TENSORRTLLM`), these metrics are automatically exposed with the `dynamo_frontend_*` prefix and include `model` labels containing the model name:
 
-    class MockGauge {
-        +output_metrics()
-        +set(value)
-        +increment()
-        +decrement()
-    }
+- `dynamo_frontend_inflight_requests` - Inflight requests (gauge)
+- `dynamo_frontend_input_sequence_tokens` - Input sequence length (histogram)
+- `dynamo_frontend_inter_token_latency_seconds` - Inter-token latency (histogram)
+- `dynamo_frontend_output_sequence_tokens` - Output sequence length (histogram)
+- `dynamo_frontend_request_duration_seconds` - LLM request duration (histogram)
+- `dynamo_frontend_requests_total` - Total LLM requests (counter)
+- `dynamo_frontend_time_to_first_token_seconds` - Time to first token (histogram)
 
-    class MockHistogram {
-        +output_metrics()
-        +observe(value: f64)
-    }
+### Specialized Component Metrics
 
-    class MetricsRegistry {
-        +prefix
-        +get_registry()
-        +create_counter(name)
-        +create_gauge(name)
-        +create_histogram(name)
-        +prometheus_format_str()
-    }
+Some components expose additional metrics specific to their functionality:
 
-    class PrometheusRegistry {
-    }
+- `dynamo_preprocessor_*` - Metrics specific to preprocessor components
 
-    class NullRegistry {
-    }
+### Labels
+All metrics automatically include:
+- `dynamo_namespace` - The namespace name
+- `dynamo_component` - The component name  
+- `dynamo_endpoint` - The endpoint name
 
-    class MockRegistry {
-    }
+## Metrics Hierarchy
 
-    MetricsRegistry <|-- PrometheusRegistry
-    MetricsRegistry <|-- NullRegistry
-    MetricsRegistry <|-- MockRegistry
+The `MetricsRegistry` trait is implemented by `DistributedRuntime`, `Namespace`, `Component`, and `Endpoint`, providing a hierarchical approach to metric collection that matches Dynamo's distributed architecture:
 
-    Metric <|-- MetricCounter
-    Metric <|-- MetricGauge
-    Metric <|-- MetricHistogram
+- **DistributedRuntime**: Global metrics across the entire runtime
+- **Namespace**: Metrics scoped to a specific dynamo_namespace
+- **Component**: Metrics for a specific dynamo_component within a namespace
+- **Endpoint**: Metrics for individual dynamo_endpoint within a component
 
-    MetricCounter <|-- PrometheusCounter
-    MetricGauge <|-- PrometheusGauge
-    MetricHistogram <|-- PrometheusHistogram
+This hierarchical structure allows you to create metrics at the appropriate level of granularity for your monitoring needs.
 
-    MetricCounter <|-- LibnvCounter
-    MetricGauge <|-- LibnvGauge
-    MetricHistogram <|-- LibnvHistogram
+## Custom Metrics Implementation
 
-    MetricCounter <|-- MockCounter
-    MetricGauge <|-- MockGauge
-    MetricHistogram <|-- MockHistogram 
-``` 
+Components can add custom metrics using the endpoint's factory methods:
 
-Actual example from `lib/runtime/examples/system_stats_endpoint/src/bin/system_stats_server.rs`
-```Rust
-pub struct ExampleHTTPMetrics {
-    registry: Arc<dyn MetricsRegistry>,
-    pub request_counter: Box<dyn MetricCounter>,
-    pub active_requests_gauge: Box<dyn MetricGauge>,
-    pub request_duration_histogram: Box<dyn MetricHistogram>,
+```rust
+// Create custom metrics
+let custom_metrics = MyCustomMetrics::from_endpoint(&endpoint)?;
+
+// Use in request handler
+let handler = RequestHandler::with_metrics(custom_metrics);
+let ingress = Ingress::for_engine(handler)?;
+
+// Optional: Add custom metrics to the endpoint
+ingress.add_metrics(&endpoint)?;
+```
+
+## Example Implementation
+
+```rust
+#[derive(Clone, Debug)]
+pub struct MyCustomMetrics {
+    pub data_bytes_processed: Arc<IntCounter>,
 }
 
-impl ExampleHTTPMetrics {
-    /// Create a new ServiceMetrics instance using the metric backend
-    pub fn new(registry: Arc<dyn MetricsRegistry>) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        // Create request counter
-        let request_counter = registry.create_counter(
-            "service_requests_total",
-            "Total number of requests processed",
-            &[("service", "registry")]
+impl MyCustomMetrics {
+    pub fn from_endpoint(endpoint: &Endpoint) -> Result<Self> {
+        let data_bytes_processed = endpoint.create_intcounter(
+            "my_custom_bytes_processed_total",
+            "Total data bytes processed",
+            &[],
         )?;
-
-        // Create active requests gauge
-        let active_requests_gauge = registry.create_gauge(
-            "service_active_requests",
-            "Number of requests currently being processed",
-            &[("service", "registry")]
-        )?;
-
-        // Create request duration histogram
-        let request_duration_histogram = registry.create_histogram(
-            "service_request_duration_seconds",
-            "Request duration in seconds",
-            &[("service", "registry")]
-        )?;
-
-        Ok(ExampleHTTPMetrics {
-            registry: registry,
-            request_counter,
-            active_requests_gauge,
-            request_duration_histogram,
-        })
-    }
-
-    /// Get a read-only reference to the backend
-    pub fn registry(&self) -> &Arc<dyn MetricsRegistry> {
-        &self.registry
+        
+        Ok(Self { data_bytes_processed })
     }
 }
 
 struct RequestHandler {
-    metrics: Arc<ExampleHTTPMetrics>,
-}
-
-impl RequestHandler {
-    fn new(metrics: Arc<ExampleHTTPMetrics>) -> Arc<Self> {
-        Arc::new(Self { metrics })
-    }
+    metrics: Option<Arc<MyCustomMetrics>>,
 }
 
 #[async_trait]
 impl AsyncEngine<SingleIn<String>, ManyOut<Annotated<String>>, Error> for RequestHandler {
     async fn generate(&self, input: SingleIn<String>) -> Result<ManyOut<Annotated<String>>> {
-        let start_time = std::time::Instant::now();
-
-        // Record request start
-        self.metrics.request_counter.inc();
-        self.metrics.active_requests_gauge.inc(1.0);
-
         let (data, ctx) = input.into_parts();
-
-        let chars = data
-            .chars()
-            .map(|c| Annotated::from_data(c.to_string()))
-            .collect::<Vec<_>>();
-
-        let stream = stream::iter(chars);
-
-        // Calculate duration
-        let duration = start_time.elapsed().as_secs_f64();
-
-        // Record request end
-        self.metrics.active_requests_gauge.dec(1.0);
-        self.metrics.request_duration_histogram.observe(duration);
-
+        
+        // Track custom metrics
+        if let Some(metrics) = &self.metrics {
+            metrics.data_bytes_processed.inc_by(data.len() as u64);
+        }
+        
+        // Business logic here...
         Ok(ResponseStream::new(Box::pin(stream), ctx.context()))
     }
 }
-
-async fn backend(runtime: DistributedRuntime) -> Result<()> {
-    // Get the metrics backend from the runtime (async, lazy-initialized)
-    let registry = runtime.metrics_registry().await?;
-    // Initialize metrics using the profiling-based struct
-    let metrics = Arc::new(ExampleHTTPMetrics::new(registry.clone()).map_err(|e| Error::msg(e.to_string()))?);
-
-    // attach an ingress to an engine, with the RequestHandler using the metrics struct
-    let ingress = Ingress::for_engine(RequestHandler::new(metrics.clone()))?;
-
-    // make the ingress discoverable via a component service
-    // we must first create a service, then we can attach one more more endpoints
-    runtime.namespace(DEFAULT_NAMESPACE)?
-        .component("registry")?
-        .service_builder()
-        .create()
-        .await?
-        .endpoint("generate")
-        .endpoint_builder()
-        .stats_handler(|stats| {
-            println!("stats: {:?}", stats);
-            let stats = MyStats { val: 10 };
-            serde_json::to_value(stats).unwrap()
-        })
-        .handler(ingress)
-        .start()
-        .await?;
-
-    Ok(())
-}
 ```
+
+## Visualization and Monitoring
+
+### Grafana Dashboards
+
+The metrics system includes pre-configured Grafana dashboards for comprehensive monitoring:
+
+- **General Dynamo Dashboard**: `grafana-dynamo-dashboard.json` - Provides overview of both software and hardware metrics
+- **DCGM GPU Metrics Dashboard**: `grafana-dcgm-metrics.json` - Specialized dashboard for GPU monitoring
+- **LLM Metrics Dashboard**: `grafana-llm-metrics.json` - LLM-specific metrics (being phased out in favor of integrated approach)
+
+### Kubernetes Integration
+
+**Coming Soon**: Comprehensive Kubernetes deployment and monitoring information will be available soon, including:
+- Helm charts for easy deployment
+- Kubernetes-native metrics collection
+- Cluster-wide observability solutions
+- Integration with Kubernetes monitoring ecosystem
+
+## Metrics Output
+
+The system exposes metrics in standard Prometheus format:
+
+```prometheus
+# HELP dynamo_component_requests_total Total number of requests processed by component endpoint
+# TYPE dynamo_component_requests_total counter
+dynamo_component_requests_total{dynamo_component="example",dynamo_endpoint="generate",dynamo_namespace="default"} 42
+
+# HELP dynamo_component_request_duration_seconds Time spent processing requests by component endpoint
+# TYPE dynamo_component_request_duration_seconds histogram
+dynamo_component_request_duration_seconds_bucket{dynamo_component="example",dynamo_endpoint="generate",dynamo_namespace="default",le="0.1"} 35
+dynamo_component_request_duration_seconds_sum{dynamo_component="example",dynamo_endpoint="generate",dynamo_namespace="default"} 2.5
+dynamo_component_request_duration_seconds_count{dynamo_component="example",dynamo_endpoint="generate",dynamo_namespace="default"} 42
+```
+
+## Getting Started
+
+For a complete setup guide including Docker Compose configuration, Prometheus setup, and Grafana dashboards, see the Getting Started section in the deploy metrics documentation.
+
+The quick start includes:
+- Docker Compose setup for Prometheus and Grafana
+- Pre-configured dashboards and datasources
+- Access URLs for all monitoring endpoints
+- GPU targeting configuration
+
+## Implementation Examples
+
+See Implementation Examples for detailed examples of creating metrics at different hierarchy levels and using dynamic labels.
 
 # Alternate Solutions
 
-## Alt 1: Separate HTTP metrics endpoints into another process
+<!-- [Required, if not applicable write N/A] List out solutions that were considered but ultimately rejected. Consider free form - but a possible format shown below. -->
 
-An alternative implementation could involve separating the HTTP metrics endpoints into a dedicated process. This could leverage an existing Dynamo monitor sidecar that already handles component restarts and lifecycle management. In this scenario, the sidecar process would be responsible for exposing the metrics endpoint while the main components would communicate their metrics data through the established interface.
+## Alt 1: Deprecated Metrics Component
 
-This approach would still require the same trait interface and instrumentation library as proposed, but the metrics exposure mechanism would be delegated to the sidecar process, potentially through a NATS-based communication channel. However, this introduces additional complexity by routing metrics data through an intermediate messaging layer rather than direct HTTP exposure.
+The original `metrics` component was a separate process that collected and aggregated metrics from workers. This approach has been deprecated in favor of the integrated `MetricsRegistry` framework.
 
 **Pros:**
-* Separation of concerns - main components focus on business logic while sidecar handles metrics exposure
-* Reduced complexity individual components, as it will no longer need to launch an http server
+* Separation of concerns with dedicated metrics process
+* Centralized metrics collection and aggregation
 
 **Cons:**
-* Dependency on messaging channel (e.g. NATS) availability and performance, with potential data loss if messaging channel experiences issues
-* Introduces additional communication overhead (e.g. NATS)
-* Increased latency, reliability concerns, and additional failure points in the metrics pipeline
-* More complex debugging and troubleshooting if/when metrics collection fails
-
-
-## Alt 2: Use Third Party Libraries Directly
-**Pros:**
-* Utilizes well-tested, existing libraries.
-* Potentially quicker initial setup.
-
-**Cons:**
-* Profiling data may not be interoperable between components (e.g., different types and semantics).
-* Changing the library would require significant refactoring.
-* Increased maintenance costs due to varying coding styles among developers.
-* Higher flexibility can introduce performance and safety risks.
+* Additional complexity and deployment overhead
+* Dependency on external messaging for metrics collection
+* Increased latency and potential data loss
+* More complex debugging and troubleshooting
 
 **Reason Rejected:**
-* Inconsistent profiling data and potential interoperability issues.
-* High refactoring effort if a library change is needed.
-* Increased maintenance complexity and potential performance/safety concerns.
+* The integrated `MetricsRegistry` approach provides better performance, reliability, and developer experience while reducing operational complexity.
 
-## Alt 3: Custom Library
+## Alt 2: Third-Party Metrics Libraries
+
+Using third-party metrics libraries directly without the `MetricsRegistry` abstraction.
+
 **Pros:**
-* Tailored to specific needs.
-* Full control over implementation.
+* Leverages well-tested existing libraries
+* Potentially quicker initial setup
 
 **Cons:**
-* Requires more time and resources to develop and test.
-* Not suitable for immediate needs.
+* Inconsistent metrics across components
+* No automatic labeling or organization
+* Higher maintenance burden
+* Potential interoperability issues
 
 **Reason Rejected:**
-* Immediate solution needed.
-* Feasible in the long term, and which we may consider later.
+* The `MetricsRegistry` provides a unified interface that ensures consistency and reduces maintenance overhead while leveraging proven Prometheus libraries under the hood.
+
+## Alt 3: Custom Metrics Implementation
+
+Building a completely custom metrics system from scratch.
+
+**Pros:**
+* Full control over implementation
+* Tailored to specific Dynamo requirements
+
+**Cons:**
+* Significant development time and resources
+* Need to maintain compatibility with monitoring ecosystems
+* Risk of reinventing existing solutions
+
+**Reason Rejected:**
+* The current `MetricsRegistry` approach provides the benefits of a custom solution while leveraging proven Prometheus standards and reducing development effort.
