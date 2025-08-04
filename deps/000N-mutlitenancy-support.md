@@ -175,7 +175,12 @@ A frontend launched with specific `DYNAMO_NAMESPACE` will be scoped to it's name
 
 1. It'll allow router to scope to a model as a sharding key and allow it to scale.
 
-2. two level heirarchy (`user/org` and `model-version`) similar to huggingface model hub or github can help group model deployments/dynamo namespaces.
+2. two level heirarchy of dynamo namespace `tenant_name/model_name` (tenant:`user/org` and model:`model/version`) similar to huggingface model hub or github can help group model deployments/dynamo namespaces.
+for example,
+
+request to Frontend with `DYNAMO_NAMESPACE=org-1` can handle requests for both models as shown below:
+  - `org-1/llama-8b`
+  - `org-1/llama-70b`
 
 ![alt text](./heirarchial-ns.png)
 
