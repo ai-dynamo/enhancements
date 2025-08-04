@@ -53,7 +53,7 @@ b. A frontend launched with specific `DYNAMO_NAMESPACE` will be scoped to it's n
 
 ## Implementation
 
-1. Dynamo Operator changes:
+### Dynamo Operator changes:
     - Top level `dynamoNamespace` in DynamoGraphDeployment automatically sets `DYNAMO_NAMESPACE` environment variable in all components.
 ```yaml
 apiVersion: dynamo.ai/v1alpha1
@@ -64,12 +64,12 @@ spec:
   dynamoNamespace: default/model1
 ```
 
-2. Dynamo Frontend components:
+### Dynamo Frontend components (http, router, processor):
 They use `DYNAMO_NAMESPACE` environment variable to read from etcd and nats.
 - Ignore any etcd data/watch events for namespaces other than the specified namespace as prefix.
 - Ignore any nats messages for namespaces other than the specified namespace as prefix.
 
-3. Dynamo Backend components:
+### Dynamo Backend components (vllm,sglang, trtllm):
   - uses `DYNAMO_NAMESPACE` environment variable to scope their functionality.
 
 Remove `--endpoint` argument in this format(`dyn://namespace.component.endpoint`) from all backend components.
