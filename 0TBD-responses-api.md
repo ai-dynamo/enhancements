@@ -1,6 +1,6 @@
 # Support for Responses API
 
-**Status**: Draft
+**Status**: Approved
 
 **Authors**: Paul Hendricks
 
@@ -14,11 +14,11 @@
 
 **Required Reviewers**: Ryan Olson, Neelay Shah, Maksim Khadkevich, Ryan McCormick
 
-**Review Date**: TBD
+**Review Date**: 07/01/2025
 
-**Pull Request**: TBD
+**Pull Request**: https://github.com/ai-dynamo/enhancements/pull/16
 
-**Implementation PR / Tracking Issue**: TBD
+**Implementation PR / Tracking Issue**: https://github.com/ai-dynamo/dynamo/pull/1694
 
 # Proposal
 
