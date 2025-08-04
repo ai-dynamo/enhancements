@@ -12,6 +12,7 @@ a. k8s CR `dynamoNamespace` is not used to isolate the models.
 ## Requirements
 
 1. Users **SHOULD** be able to create `multiple independent` `DynamoGraphDeployment` (serving same or different models) within single k8s namespace by specifying different `dynamoNamespace` in k8s CR.
+For example, I can create two dynamo graph deployments in same k8s namespace with same models with different parameters/backends and benchmark results.
 
 2. Single Dynamo cloud deployment (etcd/nats/operator) **SHOULD** be able to serve models from multiple dynamo namespaces.
 
