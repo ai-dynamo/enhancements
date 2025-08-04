@@ -30,6 +30,28 @@ For example, I can create two dynamo graph deployments in same k8s namespace wit
 
 
 ## Proposal
+
+### Use K8s namespace as stronger isolation boundary:
+Dynamo graph deployment in different k8s namespaces are fully isolated from each other.
+
+They dont share any -
+1. deployment (etcd, nats, operator, etc) 
+2. resources (cpu, memory, etc)
+3. data (PVC for models, etc)
+4. components (http, router, processor or llm backends)
+
+### Dynamo namespace as secondary isolation boundary within a k8s namespace:
+#### Isolation:
+This approach is a hybrid sharing model.
+
+Shared:
+1. deployment (etcd, nats, operator, etc) and its resources (cpu, memory, etc)
+2. data (PVC for models, etc)
+
+Not shared:
+1. components (http, router, processor or llm backends)
+
+#### High level design:
 1. `DYNAMO_NAMESPACE` environment variable is used by components to scope their functionality.
 
 2. when `DYNAMO_NAMESPACE` is not specified, `default` is the default namespace.
@@ -51,9 +73,9 @@ a. A frontend launched without any `DYNAMO_NAMESPACE` will be scoped to `default
 b. A frontend launched with specific `DYNAMO_NAMESPACE` will be scoped to it's namespace and all children namespaces.
 
 
-## Implementation
+### Implementation
 
-### Dynamo Operator changes:
+#### Dynamo Operator changes:
     - Top level `dynamoNamespace` in DynamoGraphDeployment automatically sets `DYNAMO_NAMESPACE` environment variable in all components.
 ```yaml
 apiVersion: dynamo.ai/v1alpha1
@@ -64,12 +86,12 @@ spec:
   dynamoNamespace: default/model1
 ```
 
-### Dynamo Frontend components (http, router, processor):
+#### Dynamo Frontend components (http, router, processor):
 They use `DYNAMO_NAMESPACE` environment variable to read from etcd and nats.
 - Ignore any etcd data/watch events for namespaces other than the specified namespace as prefix.
 - Ignore any nats messages for namespaces other than the specified namespace as prefix.
 
-### Dynamo Backend components (vllm,sglang, trtllm):
+#### Dynamo Backend components (vllm,sglang, trtllm):
   - uses `DYNAMO_NAMESPACE` environment variable to scope their functionality.
 
 Remove `--endpoint` argument in this format(`dyn://namespace.component.endpoint`) from all backend components.
