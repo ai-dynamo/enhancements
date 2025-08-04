@@ -18,25 +18,36 @@ A Dynamo graph deployment is:
 
 Dynamo namespace maps 1:1 with a k8s `DynamoGraphDeployment` CR.
 
-## Why do we need Dynamo namespace?
-Dynamo namespace enables a hybrid sharing model where we share some resources (operator/etcd/nats deployments, resources, data - pvc) within a k8s namespace and not others (logical component deployments) across multiple dynamo namespaces.
+## Use cases for Dynamo namespace
+Dynamo namespace enables a hybrid sharing model where we share some resources (operator/etcd/nats deployments, resources, data in pvc) within a k8s namespace and not others (logical component deployments) across multiple dynamo namespaces.
 
-It helps multi-tenenacy use cases where each model deployment is managed in a dynamo namespace.
-1. A/B test models in same namespace with model weights in RWX PVC volume.
-2. Deploy 2 models in same k8s namespace and use Inference gateway to serve them. 
-   Allow configuring granular model routing, Flow control and scheduling policies.
+It helps multi-tenenacy use cases where each model deployment is managed in respective isolated`dynamo namespace`.
 
-K8s namespace is the strongest isolation boundary in k8s. It's a shared nothing architecture where model weights and common platform is not shared as well.
+Use cases:
 
+1. Users dont want to create distinct k8s namespaces for each model deployment.
+   a. when dynamic namespace creation and management is not supported/possible
+   b. simple to use and manage. Differentiating roles:
+       -  `Infra team`: deploys and manages etcd, nats, operator and resources.
+       -  `GenAI Inference Team`: deploys and manages etcd, nats, operator and resources. 
+
+2. A/B test models in same namespace with same/shared model weights in RWX PVC volume but different parameters/backends.
+
+3. Deploy multiple models in same k8s namespace use Inference gateway (shared inference pool, endpoint picker) to serve multiple models. This allow configuring granular model routing, Flow control and scheduling policies.
+
+K8s namespace is the strongest isolation boundary in k8s. But its shared nothing architecture and causes issues with
+- sharing model weights
+- sharing common platform (etcd/nats/operator)
+- role based access control (rbac) of above resources vs components
 
 ## Requirements
 
 1. Users **SHOULD** be able to create `multiple independent` `DynamoGraphDeployment` (serving same or different models) within single k8s namespace by specifying different `dynamoNamespace` in k8s CR.
 For example, I can create two dynamo graph deployments in same k8s namespace with same models with different parameters/backends and benchmark results.
 
-2. Single Dynamo cloud deployment (etcd/nats/operator) **SHOULD** be able to serve models from multiple dynamo namespaces.
+2. Single Dynamo cloud deployment (1 etcd+nats+operator) **SHOULD** be able to serve models from multiple dynamo namespaces.
 
-3. User **SHOULD** be able to deploy  in same k8s namespace using different dynamo namespaces.
+3. User **SHOULD** be able to deploy 1 or more `DynamoGraphDeployment` in same k8s namespace using different dynamo namespaces.
 
 ## Design principles
 
@@ -59,6 +70,17 @@ They dont share any -
 2. resources (cpu, memory, etc)
 3. data (PVC for models, etc)
 4. components (http, router, processor or llm backends)
+
+Use cases:
+1. Users can create distinct k8s namespaces for each model deployment.
+
+Pros:
+- Strong isolation boundary.
+- Already supported by k8s.
+
+Cons:
+- 
+- 
 
 ### Dynamo namespace as secondary isolation boundary within a k8s namespace:
 #### Isolation:
