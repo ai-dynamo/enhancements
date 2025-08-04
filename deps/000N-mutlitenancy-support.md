@@ -20,17 +20,32 @@ For example, I can create two dynamo graph deployments in same k8s namespace wit
 
 ## Design principles
 
+- Dynamo namespace is a way to logically partition control, data and event plane.
+
 - Reduce complexity and cognitive load. Reuse existing dynamo namespace as the isolation boundary.
 
 - Minimize cross-contention in FE (http, router, processor) across different namespaces.
 
 - Absolute share nothing architecture should use K8s namespace as the isolation boundary.
 
+
 ## Proposal
 1. `DYNAMO_NAMESPACE` environment variable is used by components to scope their functionality.
-    dont use it to isolate the models.
 
-2. when it is not specified, `default` is the default namespace.
+2. when `DYNAMO_NAMESPACE` is not specified, `default` is the default namespace.
 
 3. Frontend components (http, router, processor) are scoped to the dynamo namespace.
-Provides sharding ability to scale Routers independently.
+Advantages:
+- Provides sharding ability to scale Routers independently.
+- Provides dynamo namespace scoped sharding ability to scale all-in-one frontend components independently.
+
+4. namespace itself can be hierarchial allowing heierchial isolation of Frontend components.
+for example,
+- Frontend components in `default` namespace can be used to serve models for all users.
+- Frontend components in `default/model1` namespace can be used to serve model1 for all users.
+- Frontend components in `default/model2` namespace can be used to serve model2 for all users.
+
+Use cases:
+1. A frontend launched without any `DYNAMO_NAMESPACE` will be scoped to `default` namespace and it will be able to serve models from all namespaces.
+
+2. A frontend launched with specific `DYNAMO_NAMESPACE` will be scoped to it's namespace and all children namespaces.
