@@ -1,12 +1,16 @@
 # Multi-tenancy support for DynamoGraphDeployment
 
 ## Problem
-1. Currently we dont have strong isolation between dynamo graph deployments.
+Currently we dont have strong isolation between dynamo graph deployments.
 Users expect a Dynamo namespace scoped frontend to serve models from same dynamo namespace. 
-For example,two distinct DynamoGraphDeployment frontend pods should not serve models from the different namespaces.
 
-2. Dynamo namespace is logic grouping of components but its not fully enforced across the entire system.
-a. k8s CR `dynamoNamespace` is not used to isolate the models.
+For example, two distinct DynamoGraphDeployment frontend pods should not serve models from the different dynamo namespaces.
+
+2. Dynamo namespace is enforced across the entire system.
+ a. frontend components are not scoped to dynamo namespace.
+ b. backend components are using `--endpoint` argument instead if an env variable.
+ c. operator doesn't pass specified `dynamoNamespace` to components.
+
 
 ## What is a Dynamo namespace? 
 
@@ -162,7 +166,7 @@ Remove this argument from all backend components.
 ```
 
 
-####  Heirarchial Dynamo namespace:
+####  Heirarchial Dynamo namespace scoping (optional)
 
 Dynamo namespace itself is hierarchial allowing heierchial isolaton and request routing.
 
