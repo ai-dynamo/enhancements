@@ -39,11 +39,11 @@ Advantages:
 - Provides sharding ability to scale Routers independently.
 - Provides dynamo namespace scoped sharding ability to scale all-in-one frontend components independently.
 
-4. namespace itself can be hierarchial allowing heierchial isolation of Frontend components.
+4. Dynamo namespace itself is hierarchial allowing heierchial isolation of Frontend components.
 for example,
 - Frontend components in `default` namespace can be used to serve models for all users.
-- Frontend components in `default/model1` namespace can be used to serve model1 for all users.
-- Frontend components in `default/model2` namespace can be used to serve model2 for all users.
+- Frontend components in `llama-8b/version-A` dynamo namespace can be used to serve llama-8b model version-1 for all users.
+- Frontend components in `llama-8b/version-B` dynamo namespace can be used to serve llama-8b model version-2 for all users.
 
 Use cases:
 a. A frontend launched without any `DYNAMO_NAMESPACE` will be scoped to `default` namespace and it will be able to serve models from all namespaces.
@@ -53,11 +53,39 @@ b. A frontend launched with specific `DYNAMO_NAMESPACE` will be scoped to it's n
 
 ## Implementation
 
-1. CRD changes:
+1. Dynamo Operator changes:
     - Top level `dynamoNamespace` in DynamoGraphDeployment automatically sets `DYNAMO_NAMESPACE` environment variable in all components.
+```yaml
+apiVersion: dynamo.ai/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: dynamo-graph-deployment
+spec:
+  dynamoNamespace: default/model1
+```
 
-2. Frontend components:
-    - use `DYNAMO_NAMESPACE` environment variable to read from etcd and nats.
+2. Dynamo Frontend components:
+They use `DYNAMO_NAMESPACE` environment variable to read from etcd and nats.
+- Ignore any etcd data/watch events for namespaces other than the specified namespace as prefix.
+- Ignore any nats messages for namespaces other than the specified namespace as prefix.
 
-3. Backend components:
-  - use `DYNAMO_NAMESPACE` environment variable to scope their functionality.
+3. Dynamo Backend components:
+  - uses `DYNAMO_NAMESPACE` environment variable to scope their functionality.
+
+Remove `--endpoint` argument in this format(`dyn://namespace.component.endpoint`) from all backend components.
+1. namespace is read from `DYNAMO_NAMESPACE` environment variable. This makes it possible to use same backend components for multiple namespaces. it makes a python command line to be `relocatable` across dynamo namespaces by just changing the `DYNAMO_NAMESPACE` environment variable and not the command line arguments.
+
+2. A component hosts multiple endpoints so `dyn://namespace.component.endpoint` is too specific. we dont use it in actual code.
+
+3. components name is unique in a dynamo namespace. we can delegate this until actually we have a use case for multiple components with same name in a namespace.
+
+Remove this argument from all backend components.
+```python
+  parser.add_argument(
+        "--endpoint",
+        type=str,
+        default=DEFAULT_ENDPOINT,
+        help=f"Dynamo endpoint string in 'dyn://namespace.component.endpoint' format. Default: {DEFAULT_ENDPOINT}",
+    )
+
+```
