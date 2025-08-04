@@ -6,10 +6,10 @@ Users expect a Dynamo namespace scoped frontend to serve models from same dynamo
 
 For example, two distinct DynamoGraphDeployment frontend pods should not serve models from the different dynamo namespaces.
 
-2. Dynamo namespace is enforced across the entire system.
- a. frontend components are not scoped to dynamo namespace.
- b. backend components are using `--endpoint` argument instead if an env variable.
- c. operator doesn't pass specified `dynamoNamespace` to components.
+Dynamo namespace is enforced across the entire system.
+- frontend components are not scoped to dynamo namespace.
+- backend components are using `--endpoint` argument instead if an env variable.
+- operator doesn't pass specified `dynamoNamespace` to components.
 
 
 ## What is a Dynamo namespace? 
