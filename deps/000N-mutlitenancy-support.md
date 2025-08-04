@@ -76,7 +76,9 @@ b. A frontend launched with specific `DYNAMO_NAMESPACE` will be scoped to it's n
 ### Implementation
 
 #### Dynamo Operator changes:
-    - Top level `dynamoNamespace` in DynamoGraphDeployment automatically sets `DYNAMO_NAMESPACE` environment variable in all components.
+
+Top level `dynamoNamespace` in DynamoGraphDeployment automatically sets `DYNAMO_NAMESPACE` environment variable in all components.
+
 ```yaml
 apiVersion: dynamo.ai/v1alpha1
 kind: DynamoGraphDeployment
@@ -85,6 +87,8 @@ metadata:
 spec:
   dynamoNamespace: default/model1
 ```
+
+Similar changes are required in helm chart approach as well.
 
 #### Dynamo Frontend components (http, router, processor):
 They use `DYNAMO_NAMESPACE` environment variable to read from etcd and nats.
