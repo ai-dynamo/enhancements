@@ -113,5 +113,4 @@ Remove this argument from all backend components.
         default=DEFAULT_ENDPOINT,
         help=f"Dynamo endpoint string in 'dyn://namespace.component.endpoint' format. Default: {DEFAULT_ENDPOINT}",
     )
-
 ```
