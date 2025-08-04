@@ -8,6 +8,17 @@ For example,two distinct DynamoGraphDeployment frontend pods should not serve mo
 2. Dynamo namespace is logic grouping of components but its not fully enforced across the entire system.
 a. k8s CR `dynamoNamespace` is not used to isolate the models.
 
+## What is a Dynamo namespace? Why do we need this?
+
+Dynamo namespace is a way to logically partition control, data and event plane. This is a hybrid sharing model where we share some resources (operator/etcd/nats deployments, resources, data - pvc) within a k8s namespace and not others (logical component deployments) across multiple dynamo namespaces.
+
+1. It helps multi-tenenacy use cases where each unit (model/user) has a dynamo namespace.
+2. A/B test models in same namespace with model weights in RWX PVC volume.
+3. Deploy 2 models in same k8s namespace and use Inference gateway to serve them. 
+   Allow configuring granular model routing, Flow control and scheduling policies.
+
+Although K8s namespace is the strongest isolation boundary for users and dont need the additional isolation boundary.
+
 
 ## Requirements
 
