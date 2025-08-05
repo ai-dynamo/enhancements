@@ -7,7 +7,7 @@ Users expect a Dynamo namespace scoped frontend to serve models from same dynamo
 
 For example, two distinct DynamoGraphDeployment frontend pods should not serve models from the different dynamo namespaces. It same model is deployed in differente dynamo namespaces, frontend pods can cross-reference across dynamo deployments in same namespace. This issue can be aggravated if the same model is deplyed with different versions.
 
-Dynamo namespace is enforced across the entire system.
+Dynamo namespace is not enforced across the entire system.
 - frontend components are not scoped to dynamo namespace.
 - backend components are using `--endpoint` argument instead if an env variable.
 - operator doesn't pass specified `dynamoNamespace` to components.
