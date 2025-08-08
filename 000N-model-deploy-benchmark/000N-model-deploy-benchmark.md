@@ -64,10 +64,10 @@ observability:
 
 ## Alternative: Composible helm charts
 We can leverage [Helmfile](https://github.com/helmfile/helmfile?tab=readme-ov-file#getting-started) to compose helm charts for different dynamo functionalities.
-- Dynamo Operator (dynamo cloud platform)
+- Dynamo Operator (dynamo cloud platform) is the base helm chart and responsible for managing life cycle of the graph deployment, grove integration, etc. [overtime we can helm chart bits into this]
 - [Dynamo Inference Gateway helm chart](https://github.com/ai-dynamo/dynamo/blob/f7e468c7e8ff0d1426db987564e60572167e8464/deploy/inference-gateway/helm/dynamo-gaie/values.yaml#L27)
 - Benchmark (TBD)
-- Model Express (TBD)
+- Model Express (TBD) - 
 - Troubleshooting (TBD)
 
 ## Phase 1: Quickly iterate with helm chart and publish for public usage
