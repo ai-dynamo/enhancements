@@ -177,6 +177,10 @@ The migration system maintains request continuity by:
 - Appending successful generation tokens to the token_ids vector
 - Using the accumulated token count to determine the continuation position for new streams
 - Ensuring no token duplication or loss during worker transitions
+- Enforcing a maximum sequence length limit for state storage:
+  - When the accumulated token count exceeds the configured maximum sequence length, the request becomes "unmigratable"
+  - Unmigratable requests have their retry count set to 0, preventing further migration attempts
+  - This prevents unbounded memory growth and ensures migration only occurs for reasonably-sized contexts
 
 ## Benefits
 
