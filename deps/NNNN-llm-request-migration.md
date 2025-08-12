@@ -22,25 +22,25 @@
 
 # Summary
 
-Enable Request Migration at the LLM Frontend for Requests that failed to generate due to a loss of
+Enable Request Migration at the LLM Frontend for requests that failed to generate due to a loss of
 connection between the LLM Frontend and the Generate Engine.
 
 # Motivation
 
-There are many different kinds of faults that can cause the loss of an Engine node, for instance,
-the node may be unplugged or disconnected by mistake, or some hardware failed because of prolonged
-use. Since an Engine node is rarely left at idle, when a fault happens, the node will be processing
-some requests. The loss of the Engine node will cause those requests to fail, which
+There are many different kinds of faults that can cause the loss of an Engine node. For instance,
+the node may be unplugged or disconnected by mistake, or some hardware may fail because of prolonged
+use. Since an Engine node is rarely left idle, when a fault happens, the node will be processing
+some requests. The loss of the Engine node will cause those requests to fail, which:
 
-* Requires additional steps on the users to restart their requests; and
-* Wastes the compute resource that generated the response up to the failure point; and
-* Takes a longer time overall for the users to get their response
+* Requires additional steps for users to restart their requests
+* Wastes the compute resources that generated the response up to the failure point
+* Takes a longer time overall for users to get their response
 
-Ultimately leading to poor user experience.
+This ultimately leads to poor user experience.
 
 ## Goals
 
-* A request migrated should continue the response from where it failed.
+* A migrated request should continue the response from where it failed.
 * A migration should be seamless so that the user is unlikely to notice any difference.
 
 ### Non Goals
@@ -71,7 +71,7 @@ worker. This parameter is:
 
 - Configurable per model registration with a default value of 0 (no migration)
 - Validated to be used only on worker nodes, not ingress nodes
-- Propagated through the entire pipeline from launch flags to the migration operator
+- Propagated through the entire pipeline from launch flags to the migration stage
 
 **Design Considerations:**
 
@@ -88,7 +88,7 @@ worker. This parameter is:
 
 A new `Migration` pipeline stage is introduced in the LLM processing pipeline that:
 
-- Sits between the Backend operator and the service backend in the processing chain
+- Sits at the Frontend between the request tokenization and routing/networking stages.
 - Implements retry logic for both new request failures and mid-stream disconnections
 - Tracks partial responses and maintains request state for seamless continuation
 - Handles two types of failures:
@@ -108,18 +108,20 @@ The migration system tracks request state by:
 
 ### 4. Pipeline Integration
 
-The migration operator is integrated into both chat completions and completions pipelines:
+The migration stage is integrated into both chat completions and completions pipelines:
 
 ```
-Frontend → Preprocessor → Backend → Migration → ServiceBackend
+Frontend ➡️ Preprocessor ➡️ Backend ➡️ Migration ➡️ ServiceBackend
+                                                                   ⬇️ (generate)
+Frontend ⬅️ Preprocessor ⬅️ Backend ⬅️ Migration ⬅️ ServiceBackend
 ```
 
 The bidirectional integration ensures that:
 - Forward path: Requests are processed through the migration layer before reaching workers
-- Backward path: Responses are tracked and migration decisions are made based on response
+- Backward path: Responses are tracked, and migration decisions are made based on response
   patterns
 
-## Migration Operator Layer
+## Migration Operation
 
 ### Migration Triggering Scenarios
 
@@ -154,7 +156,7 @@ three primary failure modes:
   2. Decrements remaining migration count and attempts new worker selection
   3. Creates fresh stream with original request (no partial state to preserve)
   4. Successfully processes all responses on retry
-- **Key Insight**: Original request state is preserved since no generation has occurred yet
+- **Key Insight**: The original request state is preserved since no generation has occurred yet
 
 #### 3. Ongoing Request Migration (Mid-Stream Disconnection)
 - **Scenario**: Connection lost during active generation after partial responses received
@@ -166,14 +168,14 @@ three primary failure modes:
   4. Creates new stream with accumulated context
   5. New worker continues generation from where the previous worker left off
   6. Delivers remaining responses to complete the generation
-- **Key Insight**: Request state accumulation enables seamless continuation without restart
+- **Key Insight**: Request state accumulation enables seamless continuation without restarting
 
 #### Token State Tracking
 
 The migration system maintains request continuity by:
 - Starting with initial prompt tokens from the original request
-- Appending successful generation tokens to token_ids vector
-- Using accumulated token count to determine continuation position for new streams
+- Appending successful generation tokens to the token_ids vector
+- Using the accumulated token count to determine the continuation position for new streams
 - Ensuring no token duplication or loss during worker transitions
 
 ## Benefits
