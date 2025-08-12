@@ -1,6 +1,6 @@
 # LLM Request Migration on Engine Failure
 
-**Status**: Draft | **Under Review** | Approved | Replaced | Deferred | Rejected
+**Status**: Approved
 
 **Authors**: [@nnshah1](https://github.com/nnshah1) [@kthui](https://github.com/kthui)
 
