@@ -69,7 +69,7 @@ A new `--migration-limit` command-line flag is added across all engine types (VL
 TensorRT-LLM) that specifies the maximum number of times a request can be migrated to another
 worker. This parameter is:
 
-- Configurable per worker with a default value of 0 (no migration)
+- Configurable per model registration with a default value of 0 (no migration)
 - Validated to be used only on worker nodes, not ingress nodes
 - Propagated through the entire pipeline from launch flags to the migration operator
 
@@ -81,12 +81,12 @@ worker. This parameter is:
   migration attempts to ensure correctness.
 
 - **Multi-Model Flexibility**: Since a frontend may serve multiple models, setting the migration
-  limit at the engine level provides users with the flexibility to configure different migration
+  limit at the model level provides users with the flexibility to configure different migration
   limits for different models based on their specific characteristics and reliability requirements.
 
-### 2. Migration Operator
+### 2. Migration Pipeline Stage
 
-A new `Migration` operator is introduced in the LLM processing pipeline that:
+A new `Migration` pipeline stage is introduced in the LLM processing pipeline that:
 
 - Sits between the Backend operator and the service backend in the processing chain
 - Implements retry logic for both new request failures and mid-stream disconnections
@@ -125,7 +125,7 @@ The bidirectional integration ensures that:
 
 Two distinct error scenarios trigger migration:
 
-1. **NATS NoResponders Error**: Indicates no workers are available for new requests
+1. **NATS NoResponders Error**: Indicates that a specific worker instance is unavailable
    - Triggers immediate retry with remaining migration count
    - Continues until a worker becomes available or retries are exhausted
 
@@ -136,7 +136,7 @@ Two distinct error scenarios trigger migration:
 
 ### Retry Logic
 
-The `RetryManager` implements sophisticated retry logic that handles different failure scenarios
+The `RetryManager` implements retry logic that handles different failure scenarios
 through a comprehensive retry mechanism. Based on comprehensive test cases, the system handles
 three primary failure modes:
 
