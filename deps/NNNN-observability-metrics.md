@@ -92,6 +92,114 @@ This proposal aims to:
 
 The current `MetricsRegistry` implementation provides a comprehensive metrics framework built into the `DistributedRuntime`. This proposal documents the existing system and outlines enhancements for improved observability.
 
+## MetricsRegistry Trait Foundation
+
+The `MetricsRegistry` trait serves as the core abstraction for all metrics collection in Dynamo. It provides a unified interface for creating and managing Prometheus-compatible metrics with automatic label injection and hierarchical naming support.
+
+### Trait Definition and Architecture
+
+The `MetricsRegistry` trait is implemented by four key components in Dynamo's distributed runtime architecture:
+
+```rust
+pub trait MetricsRegistry: Send + Sync + DistributedRuntimeProvider {
+    // Hierarchy management methods
+    fn basename(&self) -> String;
+    fn hierarchy(&self) -> String;
+    fn parent_hierarchy(&self) -> Vec<String>;
+    
+    // Metric creation methods
+    fn create_counter(&self, name: &str, description: &str, labels: &[(&str, &str)]) -> anyhow::Result<prometheus::Counter>;
+    fn create_gauge(&self, name: &str, description: &str, labels: &[(&str, &str)]) -> anyhow::Result<prometheus::Gauge>;
+    fn create_histogram(&self, name: &str, description: &str, labels: &[(&str, &str)], buckets: Option<Vec<f64>>) -> anyhow::Result<prometheus::Histogram>;
+    fn create_intcounter(&self, name: &str, description: &str, labels: &[(&str, &str)]) -> anyhow::Result<prometheus::IntCounter>;
+    fn create_intgauge(&self, name: &str, description: &str, labels: &[(&str, &str)]) -> anyhow::Result<prometheus::IntGauge>;
+    
+    // Vector metrics with dynamic labels
+    fn create_countervec(&self, name: &str, description: &str, const_labels: &[&str], const_label_values: &[(&str, &str)]) -> anyhow::Result<prometheus::CounterVec>;
+    fn create_intcountervec(&self, name: &str, description: &str, const_labels: &[&str], const_label_values: &[(&str, &str)]) -> anyhow::Result<prometheus::IntCounterVec>;
+    fn create_intgaugevec(&self, name: &str, description: &str, const_labels: &[&str], const_label_values: &[(&str, &str)]) -> anyhow::Result<prometheus::IntGaugeVec>;
+    
+    // Output method
+    fn prometheus_metrics_fmt(&self) -> anyhow::Result<String>;
+}
+```
+
+### Hierarchical Implementation
+
+The trait is implemented across Dynamo's hierarchical architecture:
+
+```
+DistributedRuntime (basename: "", hierarchy: "")
+└── Namespace (basename: "namespace_name", hierarchy: "namespace_name")
+    └── Component (basename: "component_name", hierarchy: "namespace_name_component_name")  
+        └── Endpoint (basename: "endpoint_name", hierarchy: "namespace_name_component_name_endpoint_name")
+```
+
+Each level in the hierarchy provides:
+- **Scoped Metrics**: Metrics created at any level automatically include all parent context
+- **Automatic Labels**: When `USE_AUTO_LABELS = true`, metrics automatically receive:
+  - `dynamo_namespace` - The namespace name (sanitized for Prometheus compliance)
+  - `dynamo_component` - The component name (sanitized for Prometheus compliance) 
+  - `dynamo_endpoint` - The endpoint name (sanitized for Prometheus compliance)
+- **Hierarchical Registration**: Metrics are registered at all levels in the hierarchy for comprehensive visibility
+
+### Key Features
+
+**Automatic Label Injection**: All metrics automatically receive hierarchical labels without manual specification:
+
+```rust
+// Creating a counter at the endpoint level automatically gets all three labels
+let counter = endpoint.create_counter("requests", "Total requests processed", &[])?;
+// Results in: dynamo_component_requests{dynamo_namespace="ns",dynamo_component="comp",dynamo_endpoint="ep"} 1
+```
+
+**Name Validation and Sanitization**: The trait automatically validates and sanitizes metric names to ensure Prometheus compliance:
+- Removes invalid characters (preserving alphanumeric, underscores, and colons)
+- Validates against Prometheus naming pattern: `[a-zA-Z_:][a-zA-Z0-9_:]*`
+- Prepends `dynamo_component_` prefix to all metric names
+
+**Prometheus Integration**: All metrics are:
+- Registered in a shared Prometheus registry for each hierarchy level
+- Automatically formatted for Prometheus consumption via `prometheus_metrics_fmt()`
+- Available via HTTP `/metrics` endpoints when using the system status server
+
+### Usage Examples
+
+**Basic Metric Creation**:
+```rust
+// Get a component endpoint
+let endpoint = component.endpoint("my_endpoint");
+
+// Create various metric types
+let counter = endpoint.create_counter("requests", "Total requests", &[])?;
+let gauge = endpoint.create_gauge("queue_size", "Current queue size", &[])?;
+let histogram = endpoint.create_histogram("latency", "Request latency", &[], Some(vec![0.1, 0.5, 1.0, 2.5, 5.0]))?;
+
+// Use the metrics
+counter.inc();
+gauge.set(42.0);
+histogram.observe(0.25);
+```
+
+**Custom Labels**:
+```rust
+// Add custom labels in addition to automatic ones
+let counter = endpoint.create_counter("processed", "Items processed", &[("type", "batch"), ("priority", "high")])?;
+// Results in: dynamo_component_processed{dynamo_namespace="ns",dynamo_component="comp",dynamo_endpoint="ep",type="batch",priority="high"} 1
+```
+
+**Vector Metrics for Dynamic Labels**:
+```rust
+// Create a counter vector for dynamic labeling
+let counter_vec = endpoint.create_countervec("responses", "HTTP responses", &["status_code", "method"], &[("service", "api")])?;
+
+// Use with dynamic labels
+counter_vec.with_label_values(&["200", "GET"]).inc();
+counter_vec.with_label_values(&["404", "POST"]).inc();
+```
+
+### System Architecture Integration
+
 The Dynamo metrics system follows a layered architecture that automatically collects, stores, and visualizes performance data across all components. This design ensures comprehensive observability with minimal developer effort.
 
 The metrics system operates on three main layers:
