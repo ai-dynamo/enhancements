@@ -110,12 +110,21 @@ kind: ConfigMap
 metadata:
   name: my-model-prefill-config
 data:
-  DYNAMO_EXTRA_CONFIG: |
-    prefill:
-      ... # this is the config for the prefill
-    decode:
-      ... # this is the config for the decode
+    # example vllm config
+    is-prefill-worker: true
+    data-parallel-size: 2
+    enable-kv-routing: true
+    max-model-length: 10240
+    gpu-memory-utilization: 0.8
+    enforce-eager: true
 ```
+
+This loosely defines how to pass configs to the components.
+
+Backend component will 
+- read the env variable `DYNAMO_EXTRA_CONFIG` 
+- read the config file during initialization
+- update args based on the config file
 
 
 ## Alternative 1: Composable helm charts
