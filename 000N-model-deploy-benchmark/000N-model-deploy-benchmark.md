@@ -1,17 +1,15 @@
 # Simplify model deployment and auxiliary utilities: benchmarking
 
 ## Problems: 
-1. Missing UX around model deployment and auxiliary utilities.
+1. Missing UX around model deployment and auxiliary utilities (benchmarking)
 
 - Use case 1: I want a simple quickstart reference to deploy a model and optionally run auxiliary utilities like benchmarking, inference gateway, model express, etc.
 
 - Use case 2: I want to specify many configs for trtllm backend and dont want to list all arguments in k8s CR.
+    Listing all arguments in k8s CR is not manageable for trtllm backend which has many configs.
 
 - Use case 3: I want to deploy and reproduce `perf benchmarks` for a specific model. 
     This is hard to do now due to tight coupling between dynamo namespace, SLA profiler code, k8s CR and backend config
-
-2. I want to pass configs to the container instead of listing all arguments in k8s CR. This is not manageable for trtllm backend with many configs.
-
 
 ## Objective:
 - decouple config from framework image: this will simplify model deployment and benchmarking
