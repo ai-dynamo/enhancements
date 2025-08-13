@@ -1,6 +1,6 @@
 # Simplify model deployment and auxiliary utilities: benchmarking
 
-Problems: 
+## Problems: 
 1. Missing UX around model deployment and auxiliary utilities.
 
 - Use case 1: I want a simple quickstart reference to deploy a model and optionally run auxiliary utilities like benchmarking, inference gateway, model express, etc.
@@ -13,13 +13,13 @@ Problems:
 2. I want to pass configs to the container instead of listing all arguments in k8s CR. This is not manageable for trtllm backend with many configs.
 
 
-Objective:
+## Objective:
 - decouple config from framework image: this will simplify model deployment and benchmarking
 - easy quickstart for users: a reference quickstart to deploy a model with benchmarking in minimal steps
 - well-tested recipes: deploy and tune fewer models to generate best configs for benchmarking
 - composable helm charts: use helmfile to deploy all the components in a composable way
 
-Principles:
+## Principles:
 - Use k8s CRD DynamoGraphDeployment as the base
 - Decouple image, helm chart and recipes
 - Provide quick start helm chart/enhance dynamo operator to deploy and benchmark
