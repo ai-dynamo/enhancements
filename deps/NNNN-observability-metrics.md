@@ -18,7 +18,7 @@
 
 **Pull Request:** https://github.com/ai-dynamo/enhancements/pull/21 <!-- Link to the PR containing this proposal -->
 
-**Implementation PR / Tracking Issue:** TBD <!-- Link to PR or tracking issue for implementation -->
+**Implementation PR / Tracking Issue:** https://github.com/ai-dynamo/dynamo/pull/2008 <!-- Link to PR or tracking issue for implementation -->
 
 # Summary
 
@@ -30,7 +30,7 @@ This document outlines the current state and future direction of the Metrics API
 
 <!-- [Required] Describe the problem that needs to be addressed with enough detail for someone familiar with the project to understand. Generally one to two short paragraphs. Cover what the issue is and why it needs to be addressed. Link to github issues if relevant. -->
 
-The `MetricsRegistry` framework provides automatic metrics collection for component endpoints and supports custom metrics creation. While the current system provides a solid foundation, there are opportunities to enhance the observability capabilities, improve the developer experience, and ensure comprehensive coverage across all Dynamo components.
+The `MetricsRegistry`API provides automatic metrics collection for component endpoints and supports custom metrics creation. While the current system provides a solid foundation, there are opportunities to enhance the observability capabilities, improve the developer experience, and ensure comprehensive coverage across all Dynamo components.
 
 ## Goals
 
@@ -90,7 +90,7 @@ This proposal aims to:
 
 <!-- [Required] Describe the high level design / proposal. Use sub sections as needed, but start with an overview and then dig into the details. Try to provide images and diagrams to facilitate understanding. -->
 
-The current `MetricsRegistry` implementation provides a comprehensive metrics framework built into the `DistributedRuntime`. This proposal documents the existing system and outlines enhancements for improved observability.
+The `MetricsRegistry` implementation provides a comprehensive metrics framework built into the `DistributedRuntime`. This proposal documents the existing system and outlines enhancements for improved observability.
 
 ## MetricsRegistry Trait Foundation
 
