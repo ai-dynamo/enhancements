@@ -1,6 +1,6 @@
 # Observability - Metrics
 
-**Status:** Draft <!-- Choose from: Draft | Under Review | Approved | Replaced | Deferred | Rejected -->
+**Status:**  Approved
 
 **Authors:** nnshah1, keivenchang <!-- List the authors/team responsible for this proposal -->
 
@@ -12,9 +12,9 @@
 
 **Sponsor:** keivenchang <!-- Name of code owner or maintainer to shepherd the process -->
 
-**Required Reviewers:** TBD <!-- Names of technical leads that are required for acceptance -->
+**Required Reviewers:** Ryan Olson, Graham King <!-- Names of technical leads that are required for acceptance -->
 
-**Review Date:** [Date for review] <!-- Date when this proposal should be reviewed -->
+**Review Date:** 07/01/2025 <!-- Date when this proposal should be reviewed -->
 
 **Pull Request:** [Link to Pull Request of the Proposal itself] <!-- Link to the PR containing this proposal -->
 
