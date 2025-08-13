@@ -1,32 +1,32 @@
 # Simplify model deployment and auxiliary utilities: benchmarking
 
 Problems: 
-1. `Model deployment` is hard to configure and run. We need a standardized way to configure and quickly launch hand picked models with given backend, (disagg/router) mode and config.
+1. `Model deployment` is hard to configure and run. We need a standardized way to configure and quickly launch hand-picked models with a given backend, (disagg/router) mode and config.
 
 2. Auxiliary utilities like `benchmarking` are hard to configure and run.
-Tight coupling between dynamo namespace, sla profiler code, k8s cr and backend config makes it hard to -
-1. tune the config for different models or parameters (for example vllm parameters)
-2. framework image 
+Tight coupling between dynamo namespace, SLA profiler code, k8s CR and backend config makes it hard to:
+1. tune the config for different models or parameters (for example, vLLM parameters)
+2. framework image
 3. backend config
 
 Objective:
-- decouple config from framework image: this will simplify the model deployment and benchmarking
-- easy quickstart for users: a reference quickstart to deploy a model and with benchmarking with minimal steps
-- well teseted recipies: deploy and tune fewer models to generate best configs for benchmarking
-- composible helm charts: use helmfile to deploy all the components in composible way
+- decouple config from framework image: this will simplify model deployment and benchmarking
+- easy quickstart for users: a reference quickstart to deploy a model with benchmarking in minimal steps
+- well-tested recipes: deploy and tune fewer models to generate best configs for benchmarking
+- composable helm charts: use helmfile to deploy all the components in a composable way
 
 Principles:
 - Use k8s CRD DynamoGraphDeployment as the base
-- Decouple image, helm chart and recipies 
-- Provie quick start helm chart/enhance dynamo operator to deploy and benchmark
+- Decouple image, helm chart and recipes
+- Provide quick start helm chart/enhance dynamo operator to deploy and benchmark
 
 # Design
 
-## High level data model for deployment:
+## High-level data model for deployment:
 
-For example, below yaml can be used to deploy a Qwen model with vllm backend, disagg mode and kv routing in `qwen-test` dynamo namespace. 
+For example, the YAML below can be used to deploy a Qwen model with vLLM backend, disagg mode and KV routing in the `qwen-test` dynamo namespace. 
 
-Additionally, vllm parameters are passed as configmap ref `my-model-config` in the container.
+Additionally, vLLM parameters are passed as configmap ref `my-model-config` in the container.
 
 ```yaml
 dynamoNamespace:  qwen-test
@@ -59,7 +59,6 @@ model:
             configMapRef:
                 name: my-model-decode-config
     ### Deployment mode ###
-    # in helm chart or can be first class attributes in operator CR
     # enables disaggregation
     disaggregation: true
     # routing policy: none, kv, random, round-robin
@@ -75,51 +74,80 @@ observability:
     enabled: true
 ```
 
-This is a high level data model can be used as -
-1. a values.yaml for a parent helm chart to deploy a model and auxiliary utilities like benchmark, inference gateway etc.
-2. in next phase, this can be absorbed by k8s DynamoGraphDeployment CR to be used by operator
+This high-level data model can be used as:
+1. a values.yaml for a parent helm chart to deploy a model and auxiliary utilities like benchmark, inference gateway, etc.
+2. in the next phase, this can be absorbed by k8s DynamoGraphDeployment CR to be used by the operator
 
-A high level (parent helm chart) can take above data model as input and render the k8s DynamoGraphDeployment CR and auxiliary utilities like benchmark, inference gateway etc.
+A high-level (parent helm chart) can take the above data model as input and render the k8s DynamoGraphDeployment CR and auxiliary utilities like benchmark, inference gateway, etc.
 
-## Alternative 1: Composible helm charts
+## Alternative 1: Composable helm charts
 We can leverage [Helmfile](https://github.com/helmfile/helmfile?tab=readme-ov-file#getting-started) to compose helm charts for different dynamo functionalities.
 
-Single helmfile can be used to deploy below components in composible way. a reference would be [wide-ep-lws example in llm-d].(https://github.com/llm-d-incubation/llm-d-infra/tree/main/quickstart/examples/wide-ep-lws)
+A single helmfile can be used to deploy the components below in a composable way. A reference would be the [wide-ep-lws example in llm-d](https://github.com/llm-d-incubation/llm-d-infra/tree/main/quickstart/examples/wide-ep-lws).
 
 Helm charts:
-- [Dynamo cloud platform](https://github.com/ai-dynamo/dynamo/tree/main/deploy/cloud/helm) is the base helm chart and deploys operator for managing life cycle of the graph deployment, grove integration, etc.
+- [Dynamo cloud platform](https://github.com/ai-dynamo/dynamo/tree/main/deploy/cloud/helm) is the base helm chart and deploys the operator for managing the life cycle of the graph deployment, grove integration, etc.
   - current state: independent [Dynamo cloud platform](https://github.com/ai-dynamo/dynamo/tree/main/deploy/cloud/helm) helm chart
 - Dynamo Inference Gateway helm chart
   - current state: independent [Dynamo Inference Gateway helm chart](https://github.com/ai-dynamo/dynamo/blob/f7e468c7e8ff0d1426db987564e60572167e8464/deploy/inference-gateway/helm/dynamo-gaie/values.yaml#L27)
 - Metrics
-  - current state: we dont have helm chart but we have few yaml files with env variables [Metrics](https://github.com/ai-dynamo/dynamo/tree/main/deploy/metrics/k8s)
+  - current state: we don't have a helm chart but we have a few YAML files with env variables [Metrics](https://github.com/ai-dynamo/dynamo/tree/main/deploy/metrics/k8s)
 - Benchmark
-  - current state: few hard-coded jobs in `benchmark` [folder](https://github.com/ai-dynamo/dynamo/tree/main/benchmarks/profiler/deploy)
+  - current state: a few hard-coded jobs in the `benchmark` [folder](https://github.com/ai-dynamo/dynamo/tree/main/benchmarks/profiler/deploy)
 - Model Express
-  - current state: hard-coded yaml for single config in agg mode [model-express](https://github.com/ai-dynamo/modelexpress/pull/31/files)
+  - current state: hard-coded YAML for single config in agg mode [model-express](https://github.com/ai-dynamo/modelexpress/pull/31/files)
 - Fault injection/Test
   - Doesn't exist
 - Troubleshooting
   - Doesn't exist
 
 
-### Other Alternative considerations
-1. use environment variables (current approach)
-- we are reinventing template rendering with `envsubst` in non-sustainable way 
-- this is not ideal extensible quickstart for users
+### Other alternative considerations
+1. Use environment variables (current approach)
+- We are reinventing template rendering with `envsubst` in a non-sustainable way
+- This is not an ideal extensible quickstart for users
 
-2. use `kustomize` to render the template
-- this is a sane way for customization and better than env vars + `envsubst`
-- this can be derieved from helm charts (use `helm template` to get the k8s yaml)
-- helmfile supports `kustomize` to render the template. [reference](https://helmfile.readthedocs.io/en/latest/advanced-features/#deploy-kustomizations-with-helmfile)
+2. Use `kustomize` to render the template
+- This is a sane way for customization and better than env vars + `envsubst`
+- This can be derived from helm charts (use `helm template` to get the k8s YAML)
+- Helmfile supports `kustomize` to render the template. [Reference](https://helmfile.readthedocs.io/en/latest/advanced-features/#deploy-kustomizations-with-helmfile)
 
 
 ## Phase 1: Quickly iterate on helm chart and publish for public usage/feedback
 
-Similar reference structure is already used in  [Dynamo Inference Gateway helm chart](https://github.com/ai-dynamo/dynamo/blob/f7e468c7e8ff0d1426db987564e60572167e8464/deploy/inference-gateway/helm/dynamo-gaie/values.yaml#L27)
+Based on the inputs in values.yaml, the helm chart renders appropriate k8s DynamoGraphDeployment CR/Services fragments.
 
-Based on the inputs in values.yaml, helm chart renders approrpriate k8s DynamoGraphDeployment CR/Services fragments.
+A similar reference structure is already used in the [Dynamo Inference Gateway helm chart](https://github.com/ai-dynamo/dynamo/blob/f7e468c7e8ff0d1426db987564e60572167e8464/deploy/inference-gateway/helm/dynamo-gaie/values.yaml#L27).
+```yaml
 
-## Phase 2: Stabilize and Update operator 
 
-Incorporate the logic in operator after the UX above is validated/finalized after quick iteration.
+# This is the Dynamo namespace where the dynamo model is deployed
+dynamoNamespace: "vllm-agg"
+
+# This is the port on which the model is exposed
+model:
+  # This is the model name that will be used to route traffic to the dynamo model
+  # for example, if the model name is Qwen/Qwen3-0.6B, then the modelShortName should be qwen
+  identifier: "Qwen/Qwen3-0.6B"
+  # This is the short name of the model that will be used to generate the resource names
+  shortName: "qwen"
+  # Criticality level for the inference model
+  criticality: "Critical"
+
+inferencePool:
+  ...
+
+# HTTPRoute configuration
+httpRoute:
+  enabled: true
+  ...
+
+extension:
+  # the GAIE extension
+  image: ...
+```
+
+
+## Phase 2: Stabilize and update operator
+
+Incorporate the logic in the operator after the UX above is validated/finalized through quick iteration.
