@@ -1,13 +1,19 @@
 # Simplify model deployment and auxiliary utilities: benchmarking
 
 Problems: 
-1. `Model deployment` is hard to configure and run. We need a standardized way to configure and quickly launch hand-picked models with a given backend, (disagg/router) mode and config.
+1. I want to deploy a model with dynamo following a well-tested recipe. We lack a standardized way to configure and quickly launch hand-picked models with a given backend, (disagg/router) mode and config.
 
-2. Auxiliary utilities like `benchmarking` are hard to configure and run.
-Tight coupling between dynamo namespace, SLA profiler code, k8s CR and backend config makes it hard to:
-1. tune the config for different models or parameters (for example, vLLM parameters)
-2. framework image
-3. backend config
+2. I want to pass configs to the container instead of listing all arguments in k8s CR. Command line arguments are not manageable for trtllm backend it has many configs.
+
+3. Missing UX around model deployment and auxiliary utilities.
+
+- Use case 1: I want a simple quickstart reference to deploy a model and optionally run auxiliary utilities like benchmarking, inference gateway, model express, etc.
+
+- Use case 2: I want to specify many configs for trtllm backend and dont want to list all arguments in k8s CR.
+
+- Use case 3: I want to deploy and reproduce `perf benchmarks` for a specific model. 
+    This is hard to do now due to tight coupling between dynamo namespace, SLA profiler code, k8s CR and backend config
+
 
 Objective:
 - decouple config from framework image: this will simplify model deployment and benchmarking
@@ -41,23 +47,23 @@ model:
     deployment:
         # create the deployment if not exists
         create: true
-    decode:
-        extraConfig:
-            # this is where the model config is available in the container
-            # this path will be passed to the backend component as 
-            # an environment variable `DYNAMO_EXTRA_CONFIG` in the container
-            # default path is /opt/dynamo/model/config.yaml
-            path: /opt/dynamo/model/config.yaml
-            # this is the configmap that contains the model config
-            # this will be mounted to the container as a volume
-            # at the path specified in the path field above
+    decode: # this is the name of the component
+        extraConfigs:
+        -  name: model-config      # name of the config 
+           # this path will be passed to the backend component as 
+           # an environment variable (default: `DYNAMO_EXTRA_CONFIG`) in the container
+           env: DYNAMO_EXTRA_CONFIG
+           # this is where the model config is available in the container
+           # (default path: /opt/dynamo/model/config.yaml)
+           path: /opt/dynamo/model/config.yaml 
+           # this is the configmap that contains config
+           configMapRef:
+               name: my-model-decode-config
+    prefill: # this is the name of the component
+        extraConfigs:
+          - name: prefill-config
             configMapRef:
                 name: my-model-prefill-config
-    prefill:
-        extraConfig:
-            path: /opt/dynamo/model/config.yaml
-            configMapRef:
-                name: my-model-decode-config
     ### Deployment mode ###
     # enables disaggregation
     disaggregation: true
@@ -79,6 +85,40 @@ This high-level data model can be used as:
 2. in the next phase, this can be absorbed by k8s DynamoGraphDeployment CR to be used by the operator
 
 A high-level (parent helm chart) can take the above data model as input and render the k8s DynamoGraphDeployment CR and auxiliary utilities like benchmark, inference gateway, etc.
+
+### passing configs to the container
+
+Each component can be configured with a k8s configmap ref which is mounted at a path specified in `DYNAMO_EXTRA_CONFIG` environment variable in the container.
+ 
+```yaml
+extraConfig:
+    # this is where the extra config is available in the container
+    # this path will be passed to the backend component as 
+    # an environment variable `DYNAMO_EXTRA_CONFIG` in the container
+    # default path is /opt/dynamo/model/config.yaml
+    path: /opt/dynamo/model/config.yaml
+    # this is the configmap that contains the model config
+    # this will be mounted to the container as a volume
+    # at the path specified in the path field above
+    configMapRef:
+        name: my-model-prefill-config
+```
+
+configmap example:
+
+```yaml
+apiVersion: v1  
+kind: ConfigMap
+metadata:
+  name: my-model-prefill-config
+data:
+  DYNAMO_EXTRA_CONFIG: |
+    prefill:
+      ... # this is the config for the prefill
+    decode:
+      ... # this is the config for the decode
+```
+
 
 ## Alternative 1: Composable helm charts
 We can leverage [Helmfile](https://github.com/helmfile/helmfile?tab=readme-ov-file#getting-started) to compose helm charts for different dynamo functionalities.
