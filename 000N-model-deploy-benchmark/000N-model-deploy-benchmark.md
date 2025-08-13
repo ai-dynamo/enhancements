@@ -1,7 +1,7 @@
 # Simplify model deployment and auxiliary utilities: benchmarking
 
 Problems: 
-1. `Model deployment` is hard to configure and run. We need a standardized way to configure and quickly launch a model service given with given backend, mode and config.
+1. `Model deployment` is hard to configure and run. We need a standardized way to configure and quickly launch hand picked models with given backend, (disagg/router) mode and config.
 
 2. Auxiliary utilities like `benchmarking` are hard to configure and run.
 Tight coupling between dynamo namespace, sla profiler code, k8s cr and backend config makes it hard to -
@@ -10,9 +10,10 @@ Tight coupling between dynamo namespace, sla profiler code, k8s cr and backend c
 3. backend config
 
 Objective:
-- easy quickstart: a reference quickstart to deploy a model and with benchmarking with minimal steps
-- well teseted recipies: deploy and benchmark fewer models with best known config (based on tuning)
-- decouple: Simplify the setup, decouple image, config, etc.
+- decouple config from framework image: this will simplify the model deployment and benchmarking
+- easy quickstart for users: a reference quickstart to deploy a model and with benchmarking with minimal steps
+- well teseted recipies: deploy and tune fewer models to generate best configs for benchmarking
+- composible helm charts: use helmfile to deploy all the components in composible way
 
 Principles:
 - Use k8s CRD DynamoGraphDeployment as the base
