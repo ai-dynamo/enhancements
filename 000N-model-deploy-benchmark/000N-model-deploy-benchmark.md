@@ -1,14 +1,17 @@
-# Simplify model benchmarking and deployment 
+# Simplify model deployment and benchmarking
 
-Problem: `Model deployment` and `benchmarking` are very complex to setup.
+Problems: 
+1. `Model deployment` is hard to configure and run. We need a standardized way to configure and quickly launch a model with given backend, mode and config.
 
-tldr; tight coupling between dynamo namespace, sla profiler code, k8s cr and backend config makes it hard to - 
+2. Auxiliary utilities like `benchmarking` are hard to configure and run.
+
+Tight coupling between dynamo namespace, sla profiler code, k8s cr and backend config makes it hard to -
 1. tune the config for different models or parameters (for example vllm parameters)
-2. change framework image 
-
+2. framework image 
+3. backend config
 
 Objective:
-- Make it easy to quickstart: One command to deploy and benchmark a model name, mode and config
+- Make it easy to quickstart: One command to deploy and benchmark a model with a backend, mode and config
 - Make it repeatable: users can reproduce benchmark results and diagnose issues
 - Make it Simple: Simplify the setup and decouple image and config from the benchmark code
 - ProvideRecipies: Lay down golden path to deploy and benchmark few models with best known config based on tuning
@@ -27,9 +30,13 @@ dynamoNamespace:  xyz
 model:
     name: Qwen/Qwen-0.6b
     shortName: qwen_v1
+    backend:
+        # name of the backend: vllm, trtllm, sglang
+        name: vllm
+        image: dynamo-vllm:0.1.0
     extraConfig:
         # this is where the model config is available in the container
-        # this will be passed to the backend component as 
+        # this path will be passed to the backend component as 
         # an environment variable `DYNAMO_EXTRA_CONFIG` in the container
         path: /path/to/config.yaml
         # this is the configmap that contains the model config
@@ -37,10 +44,6 @@ model:
         # at the path specified in the path field above
         configMapRef:
             name: my-model-config
-
-deployment:
-    # create the deployment if not exists
-    create: true
     ### Deployment mode ###
     # below parameters are used to generate the k8s DynamoGraphDeployment CR
     # in helm chart or can be first class attributes in operator CR
@@ -48,12 +51,15 @@ deployment:
     disagg: true
     # enables routing
     routing:
-        enabled: true
-        # routing policy: kv, random, round-robin
+        # routing policy: none, kv, random, round-robin
         policy: kv 
 
+deployment:
+    # create the deployment if not exists
+    create: true
+
 # enables running the benchmark job
-benchmark
+benchmark:
     enabled: true
     config:
         # benchmark configs
@@ -67,7 +73,7 @@ We can leverage [Helmfile](https://github.com/helmfile/helmfile?tab=readme-ov-fi
 - Dynamo Operator (dynamo cloud platform) is the base helm chart and responsible for managing life cycle of the graph deployment, grove integration, etc. [overtime we can helm chart bits into this]
 - [Dynamo Inference Gateway helm chart](https://github.com/ai-dynamo/dynamo/blob/f7e468c7e8ff0d1426db987564e60572167e8464/deploy/inference-gateway/helm/dynamo-gaie/values.yaml#L27)
 - Benchmark (TBD)
-- Model Express (TBD) - 
+- Model Express (TBD)
 - Troubleshooting (TBD)
 
 ## Phase 1: Quickly iterate with helm chart and publish for public usage
@@ -79,6 +85,3 @@ Based on the inputs in values.yaml, helm chart renders approrpriate k8s DynamoGr
 ## Phase 2: Update operator 
 
 Incorporate the logic in operator after the UX above is validated/finalized after quick iteration.
-
-##  todo
-Image from brainstorming with Anis
