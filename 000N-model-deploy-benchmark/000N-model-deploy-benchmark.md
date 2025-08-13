@@ -1,11 +1,7 @@
 # Simplify model deployment and auxiliary utilities: benchmarking
 
 Problems: 
-1. I want to deploy a model with dynamo following a well-tested recipe. We lack a standardized way to configure and quickly launch hand-picked models with a given backend, (disagg/router) mode and config.
-
-2. I want to pass configs to the container instead of listing all arguments in k8s CR. Command line arguments are not manageable for trtllm backend it has many configs.
-
-3. Missing UX around model deployment and auxiliary utilities.
+1. Missing UX around model deployment and auxiliary utilities.
 
 - Use case 1: I want a simple quickstart reference to deploy a model and optionally run auxiliary utilities like benchmarking, inference gateway, model express, etc.
 
@@ -13,6 +9,8 @@ Problems:
 
 - Use case 3: I want to deploy and reproduce `perf benchmarks` for a specific model. 
     This is hard to do now due to tight coupling between dynamo namespace, SLA profiler code, k8s CR and backend config
+
+2. I want to pass configs to the container instead of listing all arguments in k8s CR. This is not manageable for trtllm backend with many configs.
 
 
 Objective:
