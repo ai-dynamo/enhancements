@@ -84,7 +84,7 @@ This high-level data model can be used as:
 
 A high-level (parent helm chart) can take the above data model as input and render the k8s DynamoGraphDeployment CR and auxiliary utilities like benchmark, inference gateway, etc.
 
-### passing configs to the container
+### Passing configs to the container
 
 Each component can be configured with a k8s configmap ref which is mounted at a path specified in `DYNAMO_EXTRA_CONFIG` environment variable in the container.
  
