@@ -16,7 +16,7 @@
 
 **Review Date:** 07/01/2025 <!-- Date when this proposal should be reviewed -->
 
-**Pull Request:** [Link to Pull Request of the Proposal itself] <!-- Link to the PR containing this proposal -->
+**Pull Request:** https://github.com/ai-dynamo/enhancements/pull/21 <!-- Link to the PR containing this proposal -->
 
 **Implementation PR / Tracking Issue:** TBD <!-- Link to PR or tracking issue for implementation -->
 
