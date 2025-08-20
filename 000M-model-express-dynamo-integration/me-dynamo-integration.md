@@ -1,9 +1,15 @@
 # Model Express ~ Dynamo Integration Proposal
+
 **Status**: Draft
+
 **Authors**: Biswa Panda
+
 **Category**: Architecture
+
 **Sponsor**: Neelay, Ganesh
+
 **Required Reviewers**: Nick, Ganesh, Kavin,  Alec, Graham
+
 **Review Date**: 2025-08-20
 
 # Summary
