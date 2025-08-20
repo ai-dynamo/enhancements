@@ -12,8 +12,8 @@
 ### Non Goals
 ## Requirements
 
-### REQ 1: Model Express can be deployed as a per namespace service as part of Dynamo Operator
-### REQ 2:  
+### REQ 1: Model Express can be deployed as a first class citizen of Dynamo Operator
+### REQ 2: Each component can be configured to use model express service as a shared service or a per namespace service.
 
 # Proposal
 
