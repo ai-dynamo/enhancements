@@ -14,45 +14,65 @@ Meenakshi, Harrison, Neelay
 
 ---
 
+## Test Architecture TL;DR
+- Dynamo uses multiple layers of testing: linting, unit, integration, end-to-end (E2E), performance, benchamrk, stress, and security tests.
+- Each test type targets a specific aspect of system quality.
+- Tests are integrated into CI/CD pipelines to ensure reliability, determinism, performance, visibility, debuggability, and security  at every stage of development.
+
+### Linting & Static Analysis
+- **Tools:** pre-commit, clippy, rustfmt, black, flake8, semgrep
+- **Trigger:** Every commit/PR (gated by copyPR bot)
+
+### Unit Tests
+- **Coverage Target:** 85% (Rust), 80% (Python)
+- **Location:** client/common/server/tests/unit/
+- **Trigger:** Every PR, push to gated branch
+
+### Integration Tests
+- **Location:** tests/integration/
+- **Trigger:** PRs, push to gated branch, nightly, weekly, Release
+- **Focus:** Real service interaction, distributed scenarios
+
+### End-to-End (E2E) Tests
+- **Location:** tests/e2e/
+- **Trigger:** PRs, push to gated branch, nightly, weekly, Release
+- **Focus:** User workflows, CLI/API
+
+### Performance/Benchmark Tests
+- **Location:** benchmark/
+- **Trigger:** Nightly, weekly, Release
+- **Metrics:** Latency, throughput, resource usage
+
+### Stress Tests
+- **Location:** tests/stress/
+- **Trigger:** weekly
+- **Vision:** Early detection of rare, resource and distributed failures
+
+### Security Tests
+- **Location:** tests/security/
+- **Trigger:** nightly, weekly, release
+
+---
+
 ## Overview
 Dynamo is a distributed, high-throughput inference framework. This strategy defines a layered, automated, and scalable approach to testing, CI/CD, and observability, with the objective of achieving high reliability and rapid iteration.
 
 ---
 
-## Test Architecture
+### Gated Branch Definition
+A gated branch refers to any branch in the repository that is subject to branch protections and quality controls. This includes main, release, or any other protected branch, such as long-term support (LWS/PB) branches.
 
-### Linting & Static Analysis
-- **Tools:** pre-commit, clippy, rustfmt, black, flake8, semgrep
-- **Trigger:** Every commit/PR
+- **Pre-commit:** Linting, static analysis
+- **PR:** Lint, unit, integration, E2E (CPU), security, any OSRB checks(?)
+- **Push to a Gated branch:** Full integration/E2E, coverage.
+- **Github Nightly:** All tests, all hardware, performance smoke (?), coverage
+- **Gitlab Nightly:** All tests, all hardware, benchmarks, coverage trend
+- **Gitlab Weekly:** Nightly plus 24-72h stress/chaos, cross-component (using NIXL, aiperf, modelexpress), distributed scale
+- **Gitlab Release:** All tests, all hardware, benchmarks, coverage trend, security
 
-### Unit Tests
-- **Coverage Target:** 85% (Rust), 80% (Python)
-- **Location:** client/common/server/tests/unit/
-- **Trigger:** Every PR, push
+**Long-Standing Test CI:** A weekly pipeline for multi-day stress/chaos on dedicated runners is recommended. This enables detection of memory leaks, resource starvation, and rare bugs.
 
-### Integration Tests
-- **Location:** tests/integration/
-- **Trigger:** PRs, nightly, weekly
-- **Focus:** Real service interaction, distributed scenarios
-
-### End-to-End (E2E) Tests
-- **Location:** tests/e2e/
-- **Trigger:** PRs, nightly, weekly
-- **Focus:** User workflows, CLI/API
-
-### Performance/Benchmark Tests
-- **Location:** benchmark/
-- **Trigger:** Nightly, weekly
-- **Metrics:** Latency, throughput, resource usage
-
-### Stress/Chaos Tests
-- **Location:** tests/stress/
-- **Trigger:** Dedicated long-duration CI (weekly)
-- **Vision:** Early detection of rare, long-tail failures
-
-### Security Tests
-- **Location:** tests/security/
-- **Trigger:** PRs, nightly, weekly
+**Dynamic Test Selection:**  CI should adapt test selection based on code changes (and historical flakiness ?). vLLM is currently the default framework, but if persistent flakiness is detected, the default can switch to TensorRTLLM or another framework with lower build time.
 
 ---
 
@@ -65,43 +85,17 @@ The CI/CD pipelines for Dynamo should be designed with the following criteria:
 - **Caching & Efficiency:** Build and test result caching, Docker layer caching, and resource-aware scheduling.
 - **Flakiness Management:** Automatic retries, quarantine for unstable tests, and flakiness analytics.
 - **Environment Isolation:** Clean, containerized builds and reproducible infrastructure.
-- **Rich Reporting:** Coverage trends, performance regression detection, and resource usage metrics.
+- **Reporting:** Coverage trends, performance regression detection, and resource usage metrics.
 
 These criteria ensure robust, efficient, and scalable pipelines that support rapid development and high-quality releases.
-
-### Gated Branch Definition
-A gated branch refers to any branch in the repository that is subject to branch protections and quality controls. This includes main, release, or any other protected branch, such as long-term support (LWS/PB) branches.
-
-- **Pre-commit:** Linting, static analysis
-- **PR:** Lint, unit, integration, E2E (CPU), security
-- **Post-merge:** Full integration/E2E, coverage, performance smoke
-- **Nightly:** All tests, all hardware, benchmarks, coverage trend
-- **Weekly:** Nightly plus 24-72h stress/chaos, cross-component (using NIXL, aiperf, modelexpress), distributed scale
-
-**Long-Standing Test CI:** A weekly pipeline for multi-day stress/chaos on dedicated runners is recommended. This enables detection of memory leaks, resource starvation, and rare distributed bugs.
-
-**Dynamic Test Selection:** CI should adapt test selection based on code changes and historical flakiness.
-
----
-
-## Monitoring & Alerting
-
-- **Metrics:** All test jobs emit duration, pass/fail, flakiness, resource usage (Prometheus)
-- **Dashboards:** Grafana for test health, coverage, flakiness, performance
-- **Alerts:**
-  - Critical failures: Immediate Slack/email
-  - Coverage drop >2%: Block merge, alert
-  - Flaky test rate >5%: Quarantine, review
-  - Performance regression >5%: Alert, block release
-
-**Test Flakiness Heatmap:** Visualization of unstable areas is recommended to prioritize engineering effort.
-
-**Open Metrics:** All test and coverage data should be visible to the team for transparency and accountability.
 
 ---
 
 ## Directory Structure
 
+Previous directiry structure recommendation is not followed. Dynamo team to review and finalize the structure. 
+
+TODO : Update with final decision. 
 ```
 dynamo/
 ├── client/common/server/tests/unit/
@@ -125,27 +119,30 @@ dynamo/
 - CI_COVERAGE_THRESHOLD
 - CI_SKIP_SLOW_TESTS
 - DYNAMO_LOG_LEVEL
+- DYNAMO_DEFAULT_FRAMEWORK
+- .... (will continue to update this)
 
 ---
 
 ## Test Segmentation and Grouping
 
-Dynamo's test suite is segmented by component, scenario, and environment to enable targeted CI runs, clear ownership, and efficient debugging. Pytest markers are used for Python, and module/feature-based grouping is used for Rust.
+Dynamo's test suite is segmented by component, h/w requirements, and environment to enable targeted CI runs, clear ownership, and debugging. Pytest markers are used for Python, and module/feature-based grouping is used for Rust.
 
 ### Python (pytest) Markers
 
 Markers are used to select, group, and report on tests in CI and local runs. Example markers:
 
 - **Lifecycle:**
-  - pre_merge, nightly, weekly
+  - pre_commit, pre_merge, nightly, weekly
 - **Hardware:**
-  - gpu_1, gpu_2, gpu_4, gpu_8, h100
+  - gpu_0, gpu_1, gpu_2, gpu_4, gpu_8
+  - h100, gb200, a100, l40
 - **Test Type:**
-  - unit, integration, e2e, stress, smoke, regression, performance, scalability, distributed, flaky, slow
+  - unit, integration, e2e, stress, smoke, performance, scalability, distributed, flaky, slow, security
 - **Component/Feature:**
   - kv_cache, kvbm, planner, router, api, config, logging, security, data_plane, control_plane
 - **Framework/Backend:**
-  - vllm, trtllm_marker, sglang, openai, custom_backend
+  - vllm, trtllm, sglang, custom_backend
 - **Environment/Infra:**
   - k8s, slurm, docker, cloud
 
@@ -156,6 +153,7 @@ markers =
     pre_merge: marks tests to run before merging
     nightly: marks tests to run nightly
     weekly: marks tests to run weekly
+    gpu_0: marks tests to run on CPU
     gpu_1: marks tests to run on GPU
     gpu_2: marks tests to run on 2GPUs
     gpu_4: marks tests to run on 4GPUs
@@ -165,14 +163,14 @@ markers =
     unit: marks tests as unit tests
     stress: marks tests as stress tests
     vllm: marks tests as requiring vllm
-    trtllm_marker: marks tests as requiring trtllm
+    trtllm: marks tests as requiring trtllm
     sglang: marks tests as requiring sglang
     slow: marks tests as known to be slow
     h100: marks tests to run on H100
-    kvbm: marks tests for KV behavior and model determinism
+    kvbm: marks tests for KVBM
     kv_cache: marks tests for key-value cache
-    planner: marks tests for planner logic
-    router: marks tests for router logic
+    planner: marks tests for planner 
+    router: marks tests for router
     api: marks tests for API endpoints
     config: marks tests for configuration
     logging: marks tests for logging/metrics
@@ -189,14 +187,13 @@ markers =
     slurm: marks Slurm tests
     docker: marks Dockerized tests
     cloud: marks cloud-only tests
-    openai: marks OpenAI backend tests
     custom_backend: marks custom backend tests
 ```
 
 **Usage Example:**
 ```python
 @pytest.mark.integration
-@pytest.mark.kv_cache
+@pytest.mark.kvbm
 @pytest.mark.gpu_2
 def test_kv_cache_multi_gpu_behavior():
     ...
@@ -231,21 +228,19 @@ mod kv_cache_tests {
 
 ---
 
-## Forward-Looking Recommendations
+## Recommendations
 
-- Long-standing CI for stress/chaos is established as a first-class pipeline.
-- Dynamic, code-aware test selection is implemented in CI.
-- Test flakiness and coverage are tracked, visualized, and used to drive engineering priorities.
+- Fail fast is enforced in CI.
+- Dynamic, code-aware test selection is implemented in CI. Dynamically choose the trigger varaibles.
+- Test flakiness and coverage are tracked and visualized.
 - All test failures and regressions are actionable and monitored.
 - Test ownership and escalation paths are documented.
+- Long-standing (weekly scheduled) CI for stress tests is also treated as a first-class pipeline.
 
 ---
 
-## Goal
 
-Enable Dynamo to deliver reliable, scalable inference with confidence, using a modern, automated, and transparent testing and CI/CD ecosystem. 
-
-## Test Coverage and Adequacy
+## Metric : Test Coverage and Adequacy
 
 Test coverage is a primary metric for assessing the quality and completeness of the Dynamo test suite. The following concepts and criteria are used to define and measure coverage:
 
@@ -328,36 +323,74 @@ Gating checks are essential jobs in the CI pipeline that must pass before code c
 
 This approach ensures that only code passing the most critical, cross-component workflows is allowed to merge or release, improving overall system reliability and reducing the risk of regressions in production.
 
-## CI Pipeline Flow and Stages
+## CI Pipeline workflows
 
-The CI/CD process for Dynamo is structured into distinct stages, each with specific triggers, checks, and alerting mechanisms:
+Some pipelines, such as the Pull Request (PR) Pipeline, run a targeted subset of builds and tests. The CI system determines if code changes are limited to a specific framework; if so, that framework is set as the changed framework. Otherwise, the pipeline defaults to a pre-defined framework. This is controlled by:
 
-- **Pull Request (PR) Pipeline:**
-  - Triggers on every PR.
-  - Runs only relevant tests for the changed framework or defaults to the main framework.
+DYNAMO_TEST_FRAMEWORK = <changed framework> (if detected) or DYNAMO_DEFAULT_FRAMEWORK (fallback)
+
+
+- **[GITHUB] Pull Request (PR) Pipeline:**
+  - Triggers on every PR (gated by copypr bot).
+  - Runs only relevant builds and tests for the changed framework, or defaults to the main framework if no specific change is detected.
   - Executes build, sanity checks (prime path E2E), and coverage tests.
   - Fails silently (does not block merge) if any check fails.
 
-- **Merge to Protected Branches (main, release, LWS/PB):**
+- **[GITHUB] Merge to Gated Branches (main, release, LWS/PB):**
   - Triggers on every merge.
   - Builds for the relevant or default framework.
   - Runs all performance tests for the chosen/default framework.
   - Alerts the latest commit author and Ops team on failure.
   - Optionally auto-reverts the commit on failure.
 
-- **Nightly Pipeline:**
-  - Triggers nightly.
+- **[GITHUB] Nightly Pipeline:**
+  - Triggers nightly on Github.
+  - Builds for all frameworks on the default platform.
+  - Alerts the Dynamo Ops team and sends notifications (Slack/Email) on failure.
+  - Can be triggered by the scheduled nightly on GitLab, reusing build artifacts from GitHub to avoid redundant builds.
+
+- **[GITLAB] Nightly Pipeline:**
+  - Triggers scheduled nightly on Github.
+  - Triggers additional tests on Gitlab.
   - Builds for all frameworks on the default platform.
   - Runs all performance, security, and benchmarking tests.
   - Alerts the Dynamo Ops team and sends notifications (Slack/Email) on failure.
 
-- **Release Pipeline:**
+- **[GITLAB] Release Pipeline:**
   - Triggers on release branch events.
   - Builds for all frameworks.
   - Runs all performance, security, and benchmarking tests.
   - Alerts the Ops team and sends notifications (Slack/Email) on failure.
 
-The following flowchart illustrates the CI pipeline stages and decision points:
+---
+
+## Additional Suggestions: Logging Improvements
+
+Robust logging is essential for improving debuggability and reducing turnaround time for test failures and fixes. The following recommendations are proposed:
+
+- Adopt a consistent logging structure, such as: `<component name> - <state of the system where the error occurred>`. This aids in quick identification and resolution of issues. Need to work with the Dynamo team to come to an agreement.
+- Assign component-wise PICs to verify and confirm that logging is correct and complete for their respective areas.
+- Logs can be used to detect which component failed and automatically create tickets for the PIC responsible for that component.
+- Future goals imo such as developing dashboards that helps visualize from inference logs. Not critical as we can use aiperf at the time of benchamrking.
+
+## Additional Suggestions: Monitoring & Alerting
+
+- **Metrics:** All test jobs log duration, pass/fail, resource usage (Prometheus)
+- **Dashboards:** Grafana for test health, coverage, flakiness, performance, container size, security/OSRB violations.
+- **Alerts:**
+  - Critical failures: Immediate Slack/email
+  - Coverage drop >2%: Block merge, alert
+  - Flaky test rate >5%: Alert, review
+  - Performance regression >5%: Alert, block release
+
+**Test Flakiness analytics:** Visualization of unstable areas is recommended to prioritize engineering effort.
+
+**Open/Closed Metrics:** All test coverage data should be visible to the internal team only.
+
+TODO: Define critical falures here. These failures can be the gating tests failing in gated branches. Refine the gating tests further here to include performance (?).
+
+---
+
 
 
 
