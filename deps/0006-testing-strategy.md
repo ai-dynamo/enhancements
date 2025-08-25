@@ -358,7 +358,7 @@ DYNAMO_TEST_FRAMEWORK = <changed framework> (if detected) or DYNAMO_DEFAULT_FRAM
   - Triggers on every PR (gated by copypr bot).
   - Runs only relevant builds and tests for the changed framework, or defaults to the main framework if no specific change is detected.
   - Executes build, sanity checks (prime path E2E), and coverage tests.
-  - Fails silently (does not block merge) if any check fails.
+  - Fails in Github check and will not alert (does not block merge) if any check fails.
 
 - **[GITHUB] Merge to Gated Branches (main, release, LWS/PB):**
   - Triggers on every merge.
