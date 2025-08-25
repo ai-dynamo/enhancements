@@ -222,9 +222,33 @@ mod kv_cache_tests {
 ### CI and Ownership
 
 - CI pipelines use marker expressions to select relevant tests for each stage (e.g., `pytest -m "integration and planner and gpu_2"`).
-- Markers support component ownership, reporting, and targeted debugging.
-- Rust and Python tests are both first-class; segmentation enables fast, relevant, and reliable CI runs.
+- Rust and Python tests are both first-class.
 - Ownership and escalation for each test group/component are documented in the project.
+
+### Component Ownership (PIC)
+
+| Component | Point of Contact (PIC) |
+|-----------|-----------------------|
+| vllm      |       Alec            |
+| trtllm    |      Tanmay           |
+| sglang    |      Ishan            |
+| kvbm      |       Ryan Oslon      |
+| planner   |       HongKuan        |
+| router    |      (?)              |
+| nixl      |       Adit            |
+
+### CI Area Ownership
+
+| CI Area      | Point of Contact (PIC) |
+|--------------|-----------------------|
+| Test Fail    |      Pavithra         |
+| Infra Fail   |       Meenakshi       |
+| Docker Build |      Tushar           |
+| K8s          |        (?)            |
+| Cloud        |       Anant           |
+| Reporting    |     Pavithra          |
+| Security     |      Dmitry           |
+| OSRB         |      Dmitry           |
 
 ---
 
