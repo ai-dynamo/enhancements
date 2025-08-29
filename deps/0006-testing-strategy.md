@@ -36,6 +36,9 @@ By achieving these goals, the Dynamo project aims to ensure high reliability, ra
 - Each test type targets a specific aspect of system quality.
 - Tests are integrated into CI/CD pipelines to ensure reliability, determinism, performance, visibility, debuggability, and security at every stage of development.
 
+
+## Types of tests
+
 ### Linting & Static Analysis
 - **Tools:** pre-commit, clippy, rustfmt, black, flake8, semgrep
 - **Trigger:** Every commit/PR (gated by copyPR bot)
@@ -77,8 +80,10 @@ By achieving these goals, the Dynamo project aims to ensure high reliability, ra
 - **BDD (Behavior-Driven Development):** A development methodology that emphasizes designing or specifying the expected behavior of a system or component before implementation. Tests are derived from these designs or behavioral specifications to ensure correctness.
 - **ATDD (Acceptance Test-Driven Development):** A collaborative approach where acceptance criteria are defined as tests before development begins. These tests represent the requirements from the user's perspective and serve as the basis for validating that the system meets business needs.
 - **Gated Branch:** Any branch in the repository that is subject to branch protections and quality controls. This includes main, release, or any other protected branch, such as long-term support (LWS/PB) branches.
-- **Prime Path (in Testing):** In the context of this strategy, the prime path is defined as the longest happy path through the system, ideally integrating the happy paths of all critical components (e.g., planner, router, kvbm, dynamo serve). This path represents the most comprehensive, non-redundant execution flow and is validated by E2E tests.
+- **control flow graph:** CFG is a graphical representation of all possible execution paths of a program.
 - **Critical Components of the Dynamo System:** Key subsystems or modules whose correct operation is essential for the overall reliability and functionality of Dynamo. Examples include the planner, router, kvbm, and others as identified in the project.
+- **Prime Path (in Testing):** In the context of this strategy, the prime path is defined as the longest happy path through the system, ideally integrating the happy paths of all critical components (e.g., planner, router, kvbm, dynamo serve). This path represents the most comprehensive, non-redundant execution flow and is validated by E2E tests.
+
 
 ### Comparison of ATDD, TDD, and BDD
 
@@ -89,38 +94,65 @@ By achieving these goals, the Dynamo project aims to ensure high reliability, ra
 | **Stakeholders** | All stakeholders, including customers | Primarily developers          | Developers, testers, and business stakeholders |
 | **Language**  | Plain, business-readable language        | Programming language-specific test code | Human-readable language (often Gherkin) |
 
-## CI/CD Vision
+## Vision
 
-### Pipeline Design Criteria
-The CI/CD pipelines for Dynamo should be designed with the following criteria:
+The Dynamo test strategy and CI/CD pipelines are guided by the following key criteria:
 - **Fail Fast:** Early termination on critical failures, quick lint/syntax checks, and immediate feedback.
+- Dynamic, code-aware test selection is implemented in CI. Dynamically choose the trigger varaibles.
 - **Parallelization:** Matrix builds, parallel test execution, and concurrent pipeline stages.
 - **Caching & Efficiency:** Build and test result caching, Docker layer caching, and resource-aware scheduling. Currenlty have sccache.
 - **Flakiness Management:** Automatic retries, quarantine for unstable tests, and flakiness analytics.
 - **Environment Isolation:** Clean, containerized builds and reproducible infrastructure.
-- **Reporting:** Coverage trends, performance regression detection, and resource usage metrics.
+- **Reporting:** Coverage trends, performance regression detection, and resource usage metrics. All test failures and regressions are actionable and monitored.
+- Test ownership and escalation paths are documented.
+- Long-standing (weekly scheduled) CI for stress tests is also treated as a first-class pipeline.
 
 These criteria ensure robust, efficient, and scalable pipelines that support rapid development and high-quality releases.
 
+## Metric
 
-## CI Types and Triggering Workflows
+### Test metric discussed below
+
+### Quality Gate on Pipeline
+
+A quality gate on a pipeline is a set of conditions that must be met for the pipeline to be considered successful and for code to progress to the next stage ( merge, or release as RC).
+
+**Example:**
+- In a pull request pipeline, the quality gate may require that all unit, integration, and prime path E2E tests pass, and that code coverage remains above a defined threshold.
+- In a release pipeline, the quality gate may additionally require that security and performance tests pass.
+
+In general
+  - No Critical failures
+  - Coverage drop >2%: Block merge, alert
+  - Performance regression >5%: Alert, block release
+
+
+
+## Triggering Workflows and CI types
 
 Dynamo employs two primary CI systems:
 1. **Public-Facing CI**
 2. **Internal CI**
 
-### CI Triggering Workflows
+### Workflows triggering CI
+
+Some pipelines, such as the Pull Request (PR) Pipeline, run a targeted subset of builds and tests. The CI system determines if code changes are limited to a specific framework; if so, that framework is set as the changed framework. Otherwise, the pipeline defaults to a pre-defined framework. This is controlled by:
+
+DYNAMO_TEST_FRAMEWORK = <changed framework> (if detected) or DYNAMO_DEFAULT_FRAMEWORK (fallback)
 
 The following workflows trigger CI runs in the Dynamo project:
 
 1. **Pull Request (PR) on GitHub (Targeting Gated Branches):**
    - Gated by copy-pr bot (for external contribution; manual intervention required)
+   - Runs only relevant builds and tests for the changed framework, or defaults to the main framework if no specific change is detected.
    - Dynamically choose the trigger variables
    - Triggers the public-facing CI to run
-   - Quality gate on pipeline
+   - Quality gate on pipeline, if failed blocks merge.
 
 2. **Push to Gated Branches:**
    - Triggers the public-facing CI to run all builds and tests for a dynamically chosen framework
+   - Builds for the relevant or default framework.
+   - Runs all performance tests for the chosen/default framework.
    - Quality gate on pipeline; if the gate checks fail, alerts DynamoOps
    - Auto-revert commit (not recommended)
 
@@ -199,21 +231,61 @@ Each subsequent pipeline inherits the tests from the previous pipeline type, wit
 Previous directiry structure recommendation is not followed. Dynamo team to review and finalize the structure. 
 
 TODO : Update with final decision. 
+
+``` 
+# Dynamo top-level folder
+tests/
+└── conftest.py
+
+└── router/
+    └── conftest.py
+    └── test_runtime_initialization.py
+    └── runtime_utils.py
+    ...
+└── planner/
+    └── conftest.py
+    └── test_llm_initialization.py
+        ...
+└── utils/
+    └──  ...
+    ...
 ```
-dynamo/
-├── client/common/server/tests/unit/
-├── tests/integration/
-├── tests/e2e/
-├── tests/stress/
-├── tests/performance/
-├── tests/security/
-├── benchmark/
-└── .github/workflows/
+
+``` 
+# Dynamo top-level folder
+tests/
+└── conftest.py
+
+└── runtime/
+    └── conftest.py
+    └── test_runtime_initialization.py
+    └── runtime_utils.py
+    ...
+└── llm/
+    └── conftest.py
+    └── test_llm_initialization.py
+        ...
+    ...
+```
+
+```
+tests/
+├── unit/               # Unit tests for individual components
+│   ├── conftest.py     # Unit test fixtures and configuration
+│   └── unittest_utils.py
+├── integration/        # Integration tests between components
+│   ├── conftest.py     # Integration test fixtures and configuration
+│   └── integtest_utils.py
+├── e2e/                # End-to-end system tests
+│   ├── conftest.py     # E2E test fixtures and configuration
+│   └── e2etest_utils.py
+├── conftest.py         # Shared fixtures and configuration
+└── README.md        
 ```
 
 ---
 
-## CI Variables
+## Trigger Variables
 
 All CI variables must be defined in one place and have the same meaning across all CI systems.
 
@@ -238,12 +310,12 @@ Dynamo's test suite is segmented by component, h/w requirements, and environment
 Markers are used to select, group, and report on tests in CI and local runs. Example markers:
 
 - **Lifecycle:**
-  - pre_commit, pre_merge, nightly, weekly
+  - pre_commit, pre_merge, nightly, weekly, release
 - **Hardware:**
   - gpu_0, gpu_1, gpu_2, gpu_4, gpu_8
   - h100, gb200, a100, l40
 - **Test Type:**
-  - unit, integration, e2e, stress, smoke, performance, scalability, distributed, flaky, slow, security
+  - unit, integration, e2e, stress, smoke, performance, scalability, distributed, flaky, slow, security, conformance
 - **Component/Feature:**
   - kv_cache, kvbm, planner, router, api, config, logging, security, data_plane, control_plane
 - **Framework/Backend:**
@@ -330,7 +402,7 @@ mod kv_cache_tests {
 - Rust and Python tests are both first-class.
 - Ownership and escalation for each test group/component are documented in the project.
 
-### Component Ownership (PIC)
+### Component Ownership (PIC) 
 
 | Component | Point of Contact (PIC) |
 |-----------|-----------------------|
@@ -356,16 +428,6 @@ mod kv_cache_tests {
 
 ---
 
-## Recommendations
-
-- Fail fast is enforced in CI.
-- Dynamic, code-aware test selection is implemented in CI. Dynamically choose the trigger varaibles.
-- Test flakiness and coverage are tracked and visualized.
-- All test failures and regressions are actionable and monitored.
-- Test ownership and escalation paths are documented.
-- Long-standing (weekly scheduled) CI for stress tests is also treated as a first-class pipeline.
-
----
 
 
 ## Metric : Test Coverage and Adequacy
@@ -419,7 +481,7 @@ Choosing the right tool is imortant - pytest-cov for pytests and rust uses a llv
 
 Coverage metrics, adequacy criteria, and the handling of non-deterministic tests are reviewed regularly to ensure the test suite remains effective as Dynamo evolves. 
 
-More informaton on fault tolerance and testing can be found in @Neelay Shah.
+More informaton on fault tolerance and testing can be found in #TODO add link here. @Neelay Shah.
 
 ## Gating Checks and Prime Path Testing
 
@@ -451,45 +513,6 @@ Gating checks are essential jobs in the CI pipeline that must pass before code c
   - Additional performance and security gating checks may be included as needed.
 
 This approach ensures that only code passing the most critical, cross-component workflows is allowed to merge or release, improving overall system reliability and reducing the risk of regressions in production.
-
-## CI Pipeline workflows
-
-Some pipelines, such as the Pull Request (PR) Pipeline, run a targeted subset of builds and tests. The CI system determines if code changes are limited to a specific framework; if so, that framework is set as the changed framework. Otherwise, the pipeline defaults to a pre-defined framework. This is controlled by:
-
-DYNAMO_TEST_FRAMEWORK = <changed framework> (if detected) or DYNAMO_DEFAULT_FRAMEWORK (fallback)
-
-
-- **[GITHUB] Pull Request (PR) Pipeline:**
-  - Triggers on every PR (gated by copypr bot).
-  - Runs only relevant builds and tests for the changed framework, or defaults to the main framework if no specific change is detected.
-  - Executes build, sanity checks (prime path E2E), and coverage tests.
-  - Fails in Github check and will not alert (does not block merge) if any check fails.
-
-- **[GITHUB] Merge to Gated Branches (main, release, LWS/PB):**
-  - Triggers on every merge.
-  - Builds for the relevant or default framework.
-  - Runs all performance tests for the chosen/default framework.
-  - Alerts the latest commit author and Ops team on failure.
-  - Optionally auto-reverts the commit on failure.
-
-- **[GITHUB] Nightly Pipeline:**
-  - Triggers nightly on Github.
-  - Builds for all frameworks on the default platform.
-  - Alerts the Dynamo Ops team and sends notifications (Slack/Email) on failure.
-  - Can be triggered by the scheduled nightly on GitLab, reusing build artifacts from GitHub to avoid redundant builds.
-
-- **[GITLAB] Nightly Pipeline:**
-  - Triggers scheduled nightly on Github.
-  - Triggers additional tests on Gitlab.
-  - Builds for all frameworks on the default platform.
-  - Runs all performance, security, and benchmarking tests.
-  - Alerts the Dynamo Ops team and sends notifications (Slack/Email) on failure.
-
-- **[GITLAB] Release Pipeline:**
-  - Triggers on release branch events.
-  - Builds for all frameworks.
-  - Runs all performance, security, and benchmarking tests.
-  - Alerts the Ops team and sends notifications (Slack/Email) on failure.
 
 
 #### CI Test Trigger Matrix
