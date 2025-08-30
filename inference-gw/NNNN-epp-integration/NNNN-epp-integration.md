@@ -28,8 +28,34 @@ This proposal outlines the integration of Dynamo components with the [Gateway AP
 
 
 The prior [version of Dynamo Inference Gateway Integration](https://github.com/ai-dynamo/enhancements/blob/bis/inference-gw/0001-TBD-inference-gw-integration/0001-TBD-inference-gw-integration.md) leaves room for 2 enhancements to how Dynamo integrates with the EPP.
+
+## HTTP call overhead
+
 First, the EPP sends and HTTP request to the Dynamo FrontEnd to obtain the target worker instance id and the tokens. Even though the FrontEnd is deployed as a sidecar, this approach introduces additional latency. Given how well optimized the Dynamo system is, this latency would offset the performance gains provided by the highly efficient Dynamo Router.
+
+## EPP offers richer routing control.
+
 Second, even though the Dynamo Routing call is implemented as a plugin in accordance with the plugin interface EPP provides, Dynamo cannot support other EPP-provided routing mechanisms such as Routing Filters. EPP offers more flexibility to the end user on how to route and provides a nice declarative configuration yaml file.
+
+For example, in Dynamo router there is a small chance that not the optimal worker will be picked:
+ We can have A perfect KV match on an overloaded worker  but the request on this worker may be slower than a near-miss on an idle one.
+
+### Worker A (Overloaded + Perfect Cache)
+- **overlap** = 100% → `prefill_blocks = 0`  
+- **active_blocks** = 1000 (very busy)  
+- **Cost** = `1.0 × 0 + 1000 = 1000`  
+
+### Worker B (Idle + Near Miss)
+- **overlap** = 80% → `prefill_blocks = 20% of request`  
+- **active_blocks** = 10 (idle)  
+- **Cost** = `1.0 × (0.2 × request_size) + 10`  
+
+If the request is small enough, Worker A could still win despite being overloaded.
+The current model only uses active_blocks but ignores the queue depth (num_requests_waiting)
+
+
+This situation can be mitigated by setting temperature but not eliminated. 
+We can add the Queue aware penalty to our router. Alternatively, we can use an EPP filter **LowQueueFilter**. It enforces a hard ceiling on queue depth and will drop overloaded pods from the router consideration. 
 
 ## Goals 
 
