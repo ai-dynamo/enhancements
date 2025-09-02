@@ -105,11 +105,20 @@ The base container will be a pre-built container that will be used by the backen
 
 Each backend-specific Dockerfile should follow a specific format. The backend-specific Dockerfiles should be divided up into multiple stages, with each stage inheriting artifacts/leveraging the previous stage as the base container. The following stages should be defined in the backend-specific Dockerfile: 
 
-| Stage    | Targeted User                | Base Image           | Functionality                                                                                                         |
-|----------|---------------------|----------------------|----------------------------------------------------------------------------------------------------------------------|
-| Backend Build    | Developers          | Cuda base devel image     | Builds targeted backend along with backend-specific dependencies in editable mode. 
-| Runtime  | Customers/Production| Cuda base runtime image| Minimal image with only the dependencies required to deploy and run Dynamo w/backend from the backend build stage; intended for production deployments. Copies dynamo artifacts from base image and backend artifaces from backend build image. |
-| CI       | Developers/Internal CI Pipelines/Local Debugging | Runtime image          | Adds CI-specific tools, QA test scripts, internal models, and other dependencies needed for automated testing.         |
+**Backend Build Stage:**
+- Targeted User: Developers
+- Base Image: Cuda base devel image
+- Functionality: Builds targeted backend along with backend-specific dependencies in editable mode.
+
+**Runtime Stage:**
+- Targeted User: Customers/Production
+- Base Image: Cuda base runtime image
+- Functionality: Minimal image with only the dependencies required to deploy and run Dynamo w/backend from the backend build stage; intended for production deployments. Copies dynamo artifacts from base image and backend artifacts from backend build image.
+
+**CI Stage:**
+- Targeted User: Developers/Internal CI Pipelines/Local Debugging
+- Base Image: Runtime image
+- Functionality: Adds CI-specific tools, QA test scripts, internal models, and other dependencies needed for automated testing.
 
 The CUDA base images will be used from the [NVIDIA CUDA Container Registry](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/cuda). Please refer to the Pros and Cons section for more details on why we chose to use the cuda runtime image instead of the Deep Learning CUDA image.
 
@@ -119,20 +128,20 @@ The CUDA base images will be used from the [NVIDIA CUDA Container Registry](http
 
 ```mermaid
 flowchart TD
-    A[Manylinux build base image]:::gray
+    A[Manylinux build base image]
     B[NIXL Setup/Build NIXL Wheel]
     C[Build Dependencies]
     D[Build Dynamo]
-    E[Dynamo Base Container]:::gray
+    E[Build Base Container]
     F[Build Backend from source]
-    G[Backend Build Image]:::gray
-    J[Cuda Runtime<br/>nvcr.io/nvidia/cuda.XX.YY-runtime]:::gray
+    G[Backend Build Image]
+    J[Cuda Runtime<br/>nvcr.io/nvidia/cuda.XX.YY-runtime]
     K[Install NATS + ETCD]
     L[Runtime-specific dependencies]
     M[pip install dynamo + Backend && NIXL]
-    N[Backend Runtime Image]:::gray
+    N[Backend Runtime Image]
     O[Install CI/Test/Dev dependencies]
-    P[CI Minimum image]:::gray
+    P[CI Minimum image]
 
     %% Main build flow (left)
     A --> B
@@ -216,17 +225,15 @@ TBD
 
 ## Phase \<\#1\> \<Build Base Container Development\>
 
-**Release Target**: TBD
+**Release Target**: v0.5.0
 
-**Release Target**: Date
+**Effort Estimate**: 1 engineer, 1 week
 
-**Effort Estimate**: \<estimate of time and number of engineers to complete the phase\>
-
-**Work Item(s):** \<one or more links to github issues\>
+**Work Item(s):** N/A
 
 **Supported API / Behavior:**
 
-* Pre-built Dynamo base container with multi-arch support
+* Pre-built Build base container with multi-arch support containing Dynamo and NIXL
 * NIXL integration in base container
 * Manylinux base for broad distribution compatibility
 * Standardized environment variables and paths
@@ -237,9 +244,9 @@ TBD
 
 ## Phase \<\#2\> \<Restructure backend Dockerfiles to follow proposed structure\>
 
-**Release Target**: Date
+**Release Target**: v0.5.1
 
-**Effort Estimate**: \<estimate of time and number of engineers to complete the phase\>
+**Effort Estimate**: 1 engineer, 1 week
 
 **Work Item(s):** \<one or more links to github issues\>
 
@@ -256,11 +263,11 @@ TBD
 
 ## Phase \<\#3\> \<Build Caching Optimization\>
 
-**Release Target**: TBD
+**Release Target**: v0.5.1
 
-**Effort Estimate**: \<estimate of time and number of engineers to complete the phase\>
+**Effort Estimate**: 1 engineer, 1 week
 
-**Work Item(s):** \<one or more links to github issues\>
+**Work Item(s):** N/A
 
 **Supported API / Behavior:**
 
@@ -301,6 +308,47 @@ List out solutions that were considered but ultimately rejected. Consider free f
 
 - There are more cons than pros for this approach. Along with the cons, the Dynamo base container is a good drop-in replacement for the multi-backend container.
 
+## Alt #3 Published Base Container with Pinned Dependencies
+
+**Description:**
+
+Instead of building NIXL, UCX, and other stable dependencies from source in each build, publish a pre-built base container with these pinned components. This would create a three-tier container hierarchy:
+
+1. **Base Image (Published):** CUDA + NIXL + UCX + uv + cargo + other stable dependencies
+2. **Dynamo Image:** Base Image + Dynamo Rust/Python builds  
+3. **Framework Image:** Dynamo Image + Framework builds (vLLM, sglang, TRT-LLM)
+
+The base image would be published to a public registry (GitHub Container Registry or NGC) and updated infrequently when NIXL or other core dependencies change.
+
+**Pros:**
+
+- **Dramatically reduced build times:** Skip compilation of NIXL, UCX, and other stable components that rarely change
+- **Consistent environment:** All builds use the same pinned versions of core dependencies
+- **Simplified maintenance:** Base image updates are centralized and infrequent
+- **Better caching:** Base image can be cached across all builds and CI pipelines
+- **Reduced CI resource usage:** Less compilation work in CI/CD pipelines
+- **Public availability:** Base image could be made available to external users/partners
+
+**Cons:**
+
+- **Additional publishing workflow:** Need separate CI/CD pipeline to build and publish base images
+- **Registry management:** Need to manage storage and access for published base images
+- **Storage costs:** Published images consume registry storage space
+- **Security scanning:** Published base images need regular security scanning and updates
+- **Dependency on external registry:** Builds depend on availability of published base image
+
+**Implementation Considerations:**
+
+- **Publishing cadence:** Base image updates triggered by NIXL/UCX version changes or monthly schedule
+- **Versioning strategy:** Semantic versioning for base images (e.g., `nvidia/dynamo-base:v1.2.0`)
+- **Multi-arch support:** Publish both x86_64 and arm64 variants
+- **Registry choice:** GitHub Container Registry (ghcr.io) for open source, NGC for enterprise
+- **Fallback strategy:** Ability to build from source if published image unavailable
+
+**Reason Rejected:**
+
+N/A
+
 # Background
 
 **\[Optional \- if not applicable omit\]**
@@ -317,15 +365,19 @@ Add additional references as needed to help reviewers and authors understand the
 
 ## Terminology & Definitions
 
-| Term | Definition |
-| :---- | :---- |
-| **Base Container** | Pre-built container with Dynamo and NIXL that serves as foundation for backend-specific builds |
-| **Backend Build** | Container stage that builds backend-specific code and dependencies |
-| **sccache** | Compiler cache tool that speeds up recompilation by caching previous compilation results |
-| **CI Stage** | Container stage with testing tools and validation requirements |
-| **Manylinux** | PEP 513 standard for Linux wheel distribution compatibility |
-| **NIXL** | High-throughput, low-latency point-to-point communication library for accelerating inference |
-| **Runtime Stage** | Minimal container stage with only production deployment requirements |
+**Base Container:** Pre-built container with Dynamo and NIXL that serves as foundation for backend-specific builds
+
+**Backend Build:** Container stage that builds backend-specific code and dependencies
+
+**sccache:** Compiler cache tool that speeds up recompilation by caching previous compilation results
+
+**CI Stage:** Container stage with testing tools and validation requirements
+
+**Manylinux:** PEP 513 standard for Linux wheel distribution compatibility
+
+**NIXL:** High-throughput, low-latency point-to-point communication library for accelerating inference
+
+**Runtime Stage:** Minimal container stage with only production deployment requirements
 
 ## Acronyms & Abbreviations
 
