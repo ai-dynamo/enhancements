@@ -46,6 +46,8 @@ The Dynamo project is an open-source project, and as such is required to partici
 
 NOTE: The solution is meant to be location agnostic. Diagrams will may show a particular cloud provider, but the solution can be deployed anywhere, given the needed updates to IaC.
 
+IaC code for Velonix will be hosted in the following private repository: https://github.com/ai-dynamo/velonix
+
 ## Key Tools
 
 ### Terraform
@@ -86,7 +88,7 @@ Additionally, ARC provides a `HorizontalRunnerAutoscaler`, which is its way of a
 
 # Alternate Solutions
 
-## Alt \<\#\> \<IPP Provided Solution\>
+## Alt 1 IPP Provided Solution
 
 **Pros:**
 
