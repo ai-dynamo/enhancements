@@ -55,6 +55,8 @@ Since these steps are reusable across different tests, we can swap the container
     a. Generate charts, graphs, and tables from the benchmark metrics
 
 
+LLM benchmarking container can use the `python3 -m benchmarks.utils.*` utils to generate the config and run the benchmark.
+
 ## Config
 
 Benchmarking config file:
