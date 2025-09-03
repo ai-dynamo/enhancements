@@ -113,6 +113,9 @@ This approach is simpler but introduces higher latency since every call crosses 
 ---
 
 ### 2. C-Bindings (FFI Layer)
+
+Client Request → Gateway API → Endpoint Picker → C Bindings → KV Router → Best Worker
+
 Add calls to existing C-bindings and invoke them from Go (`cgo → extern "C" Rust`).  
 
 - Expose a C-compatible FFI layer using `#[no_mangle] extern "C" fn`.  
@@ -131,10 +134,70 @@ EPP filters rely on Prometheus metrics. We would have to make them available  in
 We would have to rename the metrics of interest to EPP. For example, dynamo exposes the `num_requests_waiting` metric for the number of requests that have been routed to a specific worker but are waiting in that worker's internal queue to be processed. But EPP filters expect the `vllm:num_requests_waiting` and `nv_trt_llm_request_metrics{request_type=waiting}`.  For KV cache utilization EPP expects `vllm:gpu_cache_usage_perc` and `nv_trt_llm_kv_cache_block_metrics{kv_cache_block_type=fraction}`. 
 It is also notable that the tokenization can be performed in a plugin to the Inference Gateway API BBR (Body Based Routing). At the time of the proposal tokenization is coupled with the routing and tokens are returned to the Gateway along with the worker instance id. 
 
+EPP expects the following metrics:
 
-## Exposing Dynamo workers without the FrontEnd.
+LeastKVCacheFilter and LowQueueFilter (kvCacheUsagePercentageMetric):
+For vLLM: vllm:gpu_cache_usage_perc
+For TRTLLM: nv_trt_llm_kv_cache_block_metrics{kv_cache_block_type=fraction}
+SGLang: sglang:token_usage
 
-Feasibility needs to be evaluated. 
+LeastQueueFilter (totalQueuedRequestsMetric):
+For vLLM: vllm:num_requests_waiting
+For TRTLLM: nv_trt_llm_request_metrics{request_type=waiting}
+SGLang: sglang:num_queue_reqs
+
+
+
+LoRA: (Dynamo does not yet support)
+--loraInfoMetric="vllm:lora_requests_info"
+
+
+
+The names can be configurable via env vars:
+TOTAL_QUEUED_REQUESTS_METRIC="your_queue_metric_name"
+KV_CACHE_USAGE_PERCENTAGE_METRIC="your_kv_cache_metric_name"
+LORA_INFO_METRIC="your_lora_metric_name"
+
+
+
+## Exposing Dynamo Workers Without the FrontEnd
+
+**Flow:**  
+`Client Request → Gateway API → Endpoint Picker → Best Worker`
+
+This option relies on the routing choices provided by the **Standard Endpoint Picker**.
+
+---
+
+### Components Needed
+
+1. **Keep Dynamo Runtime**
+   - **etcd**
+   - **NATS**
+
+2. **Create an HTTP service in front of each worker**
+   - Purpose: translate incoming requests into the worker’s **Dynamo endpoint call** and stream the response back.
+   - The service should also subscribe to the same events via NATS.
+
+   **Implementation options:**
+   - **SGLang:** extend  
+     `components/backends/sglang/src/dynamo/sglang/main.py`
+   - **vLLM / TRT-LLM:** create a new service  
+     `lib/llm/src/http/gateway_sidecar.rs`  
+     or a lightweight Python equivalent similar to `main.py`
+
+   **The HTTP service must expose standardized endpoints:**
+   - `/ready`
+   - `/health`
+   - `/metrics`
+
+   > Ensure `/health`, `/ready`, and `/metrics` return expected schemas.  
+   > Expose worker metrics such as **queue depth** and **resource usage**.
+
+3. **Deployment**
+   - Deploy each worker with a **sidecar HTTP service**.
+   - Configure the **InferencePool** to select these services.
+
 
 ## Deferred to Implementation
 
