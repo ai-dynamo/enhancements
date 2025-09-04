@@ -196,7 +196,7 @@ Notes:
 
 ## Approach 2: Controller-managed DynamoEndpoint Resources
 
-This approach combines the best of both previous approaches: pods create DynamoEndpoint resources directly (like Approach 1), but a controller manages their status based on pod readiness (like Approach 2).
+Pods create DynamoEndpoint resources directly, but a controller keeps status in sync with underlying pod readiness status. Instead of using leases, we sync with the readiness status of the pod (as advertised by the probe).
 
 ### Server side:
 1. Dynamo pods create DynamoEndpoint CRs directly when they start serving an endpoint
@@ -269,9 +269,9 @@ Notes:
 - Controller is in charge of updating the status of the DynamoEndpoint as underlying pod readiness changes.
 
 
-## Approach 3: Pod Lifecycle-Driven Discovery
+## Approach 3: Pod Lifecycle-Driven Discovery using EndpointSlices
 
-Disclaimer: This approach is exploratory and would require significant changes to the current Dynamo architecture. It eliminates explicit lease management by leveraging Kubernetes' built-in pod lifecycle and readiness probes.
+Disclaimer: This idea is still WIP. It is similar to Approach 2, but eliminates the need for a controller relying on the Kubernetes Service controller to keep EndpointSlices up to date.
 
 ### Server side:
 1. Dynamo operator creates server instances. Pods are labeled with `dynamo-namespace` and `dynamo-component`.
