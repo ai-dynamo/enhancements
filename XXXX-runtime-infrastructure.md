@@ -144,7 +144,7 @@ Used to discover routers and cleanup router consumers in jetstream.
 
 ```
   {
-    xo"key": "kv_routers/dynamo/backend/27cc845d-5b93-494f-8978-af45d0ffba39",
+    "key": "kv_routers/dynamo/backend/27cc845d-5b93-494f-8978-af45d0ffba39",
     "create_revision": 544,
     "mod_revision": 544,
     "version": 1,
