@@ -219,30 +219,26 @@ Disclaimer: This approach is exploratory and would require significant changes t
 4. Client routes requests to healthy instances via NATS transport.
 
 ```mermaid
-graph TD
-    A[Dynamo Pod] --> B{Kubernetes Service}
-    B --> C[EndpointSlice]
-    C --> D[Client Watch]
+sequenceDiagram
+    participant Pod
+    participant K8s API
+    participant Client
 
-    A --> E[Readiness Probe]
-    E --> F{Endpoint Healthy?}
-    F -->|Yes| G[Pod Ready]
-    F -->|No| H[Pod Not Ready]
+    Note over Pod: Dynamo Pod Lifecycle
+    Pod->>K8s API: Create Service (if doesn't exist)
+    Pod->>K8s API: Update pod labels for endpoint
+    Pod->>Pod: Readiness probe health check
 
-    D --> I[Instance Cache]
-    I --> J[Route to NATS]
+    Note over K8s API: Service Management
+    K8s API->>K8s API: Create EndpointSlice for Service
+    K8s API->>K8s API: Update EndpointSlice with pod readiness
+    K8s API->>K8s API: Remove failed pods from EndpointSlice
 
-    subgraph "Pod Lifecycle"
-        K[Pod Starts] --> L[Register Endpoint]
-        L --> M[Update Labels]
-        M --> N[Create Service]
-    end
-
-    subgraph "Service Discovery"
-        O[Watch EndpointSlices] --> P[Receive Updates]
-        P --> Q[Update Cache]
-        Q --> R[Route Requests]
-    end
+    Note over Client: Service Discovery
+    Client->>K8s API: Watch EndpointSlice for target Service
+    K8s API-->>Client: Stream readiness changes
+    Client->>Client: Update instance cache
+    Client->>Pod: Route requests via NATS
 ```
 
 Kubernetes concepts:
