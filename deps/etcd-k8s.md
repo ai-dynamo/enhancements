@@ -193,7 +193,83 @@ Notes:
 - Unavoidable: overhead of going through kube api as opposed to direct etcd calls.
 - Need to work out atomicity of operations
 
-## Approach 2: Pod Lifecycle-Driven Discovery
+
+## Approach 2: Controller-managed DynamoEndpoint Resources
+
+This approach combines the best of both previous approaches: pods create DynamoEndpoint resources directly (like Approach 1), but a controller manages their status based on pod readiness (like Approach 2).
+
+### Server side:
+1. Dynamo pods create DynamoEndpoint CRs directly when they start serving an endpoint
+2. Pods set ownerReferences to themselves on the DynamoEndpoint resources
+3. DynamoEndpoint resources are automatically cleaned up when pods terminate
+
+### Controller:
+1. Dynamo controller watches pod lifecycle events and readiness status
+2. Controller updates the status field of DynamoEndpoint resources based on pod readiness
+3. Controller maintains instance lists and transport information in DynamoEndpoint status
+
+### Client side:
+1. Client watches DynamoEndpoint resources using kubectl watch API
+2. Client maintains cache of available instances from DynamoEndpoint status
+3. Client routes requests to healthy instances via NATS transport
+
+```mermaid
+sequenceDiagram
+    participant Pod
+    participant K8s API
+    participant Controller
+    participant Client
+
+    Note over Pod: Dynamo Pod Startup
+    Pod->>K8s API: Create DynamoEndpoint CR
+    Pod->>K8s API: Set ownerReference to pod
+
+    Note over Controller: Status Management
+    Controller->>K8s API: Watch Pod lifecycle events
+    Controller->>K8s API: Watch Pod readiness changes
+    Controller->>K8s API: Update DynamoEndpoint status
+    K8s API->>K8s API: Auto-delete DynamoEndpoint (ownerRef)
+
+    Note over Client: Service Discovery
+    Client->>K8s API: Watch DynamoEndpoint resources
+    K8s API-->>Client: Stream status changes
+    Client->>Client: Update instance cache
+    Client->>Pod: Route requests via NATS
+```
+
+```yaml
+# Example DynamoEndpoint resource
+apiVersion: dynamo.nvidia.com/v1alpha1
+kind: DynamoEndpoint
+metadata:
+  name: dynamo-generate-endpoint
+  namespace: dynamo
+  labels:
+    dynamo-namespace: dynamo
+    dynamo-component: backend
+    dynamo-endpoint: generate
+  ownerReferences:
+  - apiVersion: v1
+    kind: Pod
+    name: dynamo-pod-abc123
+    uid: abc123-def456
+spec:
+  endpoint: generate
+  namespace: dynamo
+  component: backend
+status:
+    ready: true # controller updates this on readiness change events
+```
+
+Kubernetes concepts:
+- Custom Resource Definitions: Define the schema for DynamoEndpoint resources
+- Owner references: Automatic cleanup when pods terminate
+
+Notes:
+- Controller is in charge of updating the status of the DynamoEndpoint as underlying pod readiness changes.
+
+
+## Approach 3: Pod Lifecycle-Driven Discovery
 
 Disclaimer: This approach is exploratory and would require significant changes to the current Dynamo architecture. It eliminates explicit lease management by leveraging Kubernetes' built-in pod lifecycle and readiness probes.
 
@@ -294,77 +370,3 @@ Notes:
 - Pro: We don't need a dedicated controller to delete leases on expiry. (No leases)
 - We need to find a better pattern for a pod to influence the services it is part of than mutating its label set. Potentially a controller could be involved.
 - The service is not actually used for transport here. Only to manage the EndpointSlices which are doing book keeping for which pods are backing the endpoint.
-
-## Approach 3: Controller-managed DynamoEndpoint Resources
-
-This approach combines the best of both previous approaches: pods create DynamoEndpoint resources directly (like Approach 1), but a controller manages their status based on pod readiness (like Approach 2).
-
-### Server side:
-1. Dynamo pods create DynamoEndpoint CRs directly when they start serving an endpoint
-2. Pods set ownerReferences to themselves on the DynamoEndpoint resources
-3. DynamoEndpoint resources are automatically cleaned up when pods terminate
-
-### Controller:
-1. Dynamo controller watches pod lifecycle events and readiness status
-2. Controller updates the status field of DynamoEndpoint resources based on pod readiness
-3. Controller maintains instance lists and transport information in DynamoEndpoint status
-
-### Client side:
-1. Client watches DynamoEndpoint resources using kubectl watch API
-2. Client maintains cache of available instances from DynamoEndpoint status
-3. Client routes requests to healthy instances via NATS transport
-
-```mermaid
-sequenceDiagram
-    participant Pod
-    participant K8s API
-    participant Controller
-    participant Client
-
-    Note over Pod: Dynamo Pod Startup
-    Pod->>K8s API: Create DynamoEndpoint CR
-    Pod->>K8s API: Set ownerReference to pod
-
-    Note over Controller: Status Management
-    Controller->>K8s API: Watch Pod lifecycle events
-    Controller->>K8s API: Watch Pod readiness changes
-    Controller->>K8s API: Update DynamoEndpoint status
-    K8s API->>K8s API: Auto-delete DynamoEndpoint (ownerRef)
-
-    Note over Client: Service Discovery
-    Client->>K8s API: Watch DynamoEndpoint resources
-    K8s API-->>Client: Stream status changes
-    Client->>Client: Update instance cache
-    Client->>Pod: Route requests via NATS
-```
-
-```yaml
-# Example DynamoEndpoint resource
-apiVersion: dynamo.nvidia.com/v1alpha1
-kind: DynamoEndpoint
-metadata:
-  name: dynamo-generate-endpoint
-  namespace: dynamo
-  labels:
-    dynamo-namespace: dynamo
-    dynamo-component: backend
-    dynamo-endpoint: generate
-  ownerReferences:
-  - apiVersion: v1
-    kind: Pod
-    name: dynamo-pod-abc123
-    uid: abc123-def456
-spec:
-  endpoint: generate
-  namespace: dynamo
-  component: backend
-status:
-    ready: true # controller updates this on readiness change events
-```
-
-Kubernetes concepts:
-- Custom Resource Definitions: Define the schema for DynamoEndpoint resources
-- Owner references: Automatic cleanup when pods terminate
-
-Notes:
-- Controller is in charge of updating the status of the DynamoEndpoint as underlying pod readiness changes.
