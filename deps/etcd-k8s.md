@@ -1,4 +1,4 @@
-# Alternative Approach to ETCD Dependency in Kubernetes
+# ETCD-less Dynamo setup in Kubernetes
 
 ## Problem
 
