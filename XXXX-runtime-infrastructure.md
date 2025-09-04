@@ -219,7 +219,6 @@ Forward pass metrics published over NATS - as well as available via
 ### Service Info
 
 ```
-neelays@neelays-dt:~/dynamo/dynamo$ ~/go/bin/nats service info dynamo_backend 
 Service Information
 
           Service: dynamo_backend (okiyFEOD9hlENGX2twGyxV)
