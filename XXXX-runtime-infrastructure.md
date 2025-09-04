@@ -216,8 +216,102 @@ pub const ACTIVE_SEQUENCES_SUBJECT: &str = "active_sequences_events";
 Forward pass metrics published over NATS - as well as available via
 `load_metrics` endpoint.
 
-### 
+### Service Info
 
+```
+neelays@neelays-dt:~/dynamo/dynamo$ ~/go/bin/nats service info dynamo_backend 
+Service Information
+
+          Service: dynamo_backend (okiyFEOD9hlENGX2twGyxV)
+      Description: Dynamo component backend in namespace dynamo
+          Version: 0.0.1
+
+Endpoints:
+
+               Name: dynamo_backend-clear_kv_blocks-694d98147d54c0a8
+            Subject: dynamo_backend.clear_kv_blocks-694d98147d54c0a8
+        Queue Group: q
+  
+               Name: dynamo_backend-load_metrics-694d98147d54c0a8
+            Subject: dynamo_backend.load_metrics-694d98147d54c0a8
+        Queue Group: q
+  
+               Name: dynamo_backend-generate-694d98147d54c0a8
+            Subject: dynamo_backend.generate-694d98147d54c0a8
+        Queue Group: q
+
+Statistics for 3 Endpoint(s):
+
+  dynamo_backend-clear_kv_blocks-694d98147d54c0a8 Endpoint Statistics:
+
+           Requests: 0 in group "q"
+    Processing Time: 0s (average 0s)
+            Started: 2025-09-04 15:15:11 (1m28s ago)
+             Errors: 0
+
+  Endpoint Specific Statistics:
+
+    null
+
+  dynamo_backend-load_metrics-694d98147d54c0a8 Endpoint Statistics:
+
+           Requests: 0 in group "q"
+    Processing Time: 0s (average 0s)
+            Started: 2025-09-04 15:15:11 (1m28s ago)
+             Errors: 0
+
+  Endpoint Specific Statistics:
+
+    {
+        "worker_stats": {
+            "data_parallel_rank": 0,
+            "request_active_slots": 0,
+            "request_total_slots": 256,
+            "num_requests_waiting": 0
+        },
+        "kv_stats": {
+            "kv_active_blocks": 0,
+            "kv_total_blocks": 24064,
+            "gpu_cache_usage_perc": 0.0,
+            "gpu_prefix_cache_hit_rate": 0.0
+        },
+        "spec_decode_stats": null
+    }
+
+  dynamo_backend-generate-694d98147d54c0a8 Endpoint Statistics:
+
+           Requests: 0 in group "q"
+    Processing Time: 0s (average 0s)
+            Started: 2025-09-04 15:15:11 (1m28s ago)
+             Errors: 0
+
+  Endpoint Specific Statistics:
+
+    null
+```
+
+```
+╭───────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                      Streams                                                      │
+├──────────────────────────────────────────────┬─────────────┬─────────────────────┬──────────┬──────┬──────────────┤
+│ Name                                         │ Description │ Created             │ Messages │ Size │ Last Message │
+├──────────────────────────────────────────────┼─────────────┼─────────────────────┼──────────┼──────┼──────────────┤
+│ namespace-dynamo-component-backend-kv-events │             │ 2025-09-03 16:35:56 │ 0        │ 0 B  │ never        │
+╰──────────────────────────────────────────────┴─────────────┴─────────────────────┴──────────┴──────┴──────────────╯
+```
+
+```
+╭────────────────────────────────────────────────────────╮
+│                     Bucket Contents                    │
+├────────────────────────┬─────────┬─────────────────────┤
+│ Name                   │ Size    │ Time                │
+├────────────────────────┼─────────┼─────────────────────┤
+│ config.json            │ 726 B   │ 2025-09-04 15:15:30 │
+│ tokenizer_config.json  │ 9.5 KiB │ 2025-09-04 15:15:30 │
+│ tokenizer.json         │ 11 MiB  │ 2025-09-04 15:15:31 │
+│ generation_config.json │ 239 B   │ 2025-09-04 15:15:31 │
+╰────────────────────────┴─────────┴─────────────────────╯
+```
 
 ## etcd:
 Discovery:
