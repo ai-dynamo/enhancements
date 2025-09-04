@@ -312,24 +312,6 @@ Statistics for 3 Endpoint(s):
 ╰────────────────────────┴─────────┴─────────────────────╯
 ```
 
-## etcd:
-Discovery:
-     + Frontend discovers the existence of workers and learns the capabilities (which model they serve, whether they want pre-processing, etc).
-     + Large files (tokenizer.json) will be represented by a nats object store URL - see below.
-     + An etcd lease ensures cleanup on shutdown.
-     + The /health URL uses etcd to list available instances, same objects as discovery.
-KV data persistence (WIP): https://github.com/ai-dynamo/dynamo/pull/2756
-grpc/kserve has an etcd client, check with Guan.
-## nats:
-Message queue frontend -> backend
-     + Migration/failover code is NATS specific, catches errors the message queue.
-Object store for model config: tokenizer and the other json files. I'm hoping we can replace this with modelexpress.
-Service metrics for KV routing: KV events are requested/pulled from workers.
-System status uses the nats service API similar to KV events. It also gathers component metrics. Check with Keiven.
-
-
-
-### Nats
 
 ## References
 
@@ -344,3 +326,20 @@ System status uses the nats service API similar to KV events. It also gathers co
 * https://docs.nats.io/nats-concepts/core-nats/queue
 
 * https://docs.rs/async-nats/latest/async_nats/service/struct.Service.html
+
+## Notes
+
+### etcd:
+Discovery:
+     + Frontend discovers the existence of workers and learns the capabilities (which model they serve, whether they want pre-processing, etc).
+     + Large files (tokenizer.json) will be represented by a nats object store URL - see below.
+     + An etcd lease ensures cleanup on shutdown.
+     + The /health URL uses etcd to list available instances, same objects as discovery.
+KV data persistence (WIP): https://github.com/ai-dynamo/dynamo/pull/2756
+grpc/kserve has an etcd client, check with Guan.
+### nats:
+Message queue frontend -> backend
+     + Migration/failover code is NATS specific, catches errors the message queue.
+Object store for model config: tokenizer and the other json files. I'm hoping we can replace this with modelexpress.
+Service metrics for KV routing: KV events are requested/pulled from workers.
+System status uses the nats service API similar to KV events. It also gathers component metrics. Check with Keiven.
