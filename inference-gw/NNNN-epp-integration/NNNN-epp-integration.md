@@ -35,7 +35,7 @@ First, the EPP sends and HTTP request to the Dynamo FrontEnd to obtain the targe
 
 ## EPP offers richer routing control
 
-Second, EPP-provides additional routing mechanisms such as Routing Filters which Dynamo does not offer. EPP also provides a nice declarative configuration yaml file on how to route.
+Second, EPP-provides additional routing mechanisms such as Routing Filters which Dynamo does not offer. 
 
 For example, in Dynamo router there is a small chance that not the optimal worker will be picked:
  We can have A perfect KV match on an overloaded worker  but the request on this worker may be slower than a near-miss on an idle one.
@@ -61,7 +61,7 @@ We can add the Queue aware penalty to our router. Alternatively, we can use an E
 
 * Expose Dynamo Router as a a Library for Go through c-bindings or a Binary Library crate.
 
-* Provide support for EPP standard Routing filters, Pickers and Scorers so that an end user can mix an match Dynamo Routing approach with the EPP filters, pickers and scorers through a single yaml - based config file.
+* Provide support for EPP standard Routing filters, Pickers and Scorers so that an end user can mix and match the Dynamo Routing approach with the EPP filters, pickers and scorers. We want to support the yaml - based config file.
 
 * Modularize Dynamo to enable Inference Gateway API usage with workers, without relying on the Dynamo Router.
 
@@ -136,13 +136,16 @@ Filters enforce hard constraints and shrink the candidate set before ranking (i.
 Scorers express preferences across the remaining pods (e.g., prefer lower queue, lower KV usage).
 Pickers choose the final endpoint (max-score, round-robin, prefix-aware, etc.).
 
-EPP offers standard filters one can pick and choose though yaml config :
-DecisionTreeFilter — try one path, if failed go for a fallback.
-LeastKVCacheFilter — keep pods in the lowest KV-usage bucket.
-LeastQueueFilter — keep pods in the lowest queue-depth bucket.
-LoraAffinityFilter — prefer/require pods with the target LoRA already loaded.
-LowQueueFilter — hard ceiling on queue depth (drop overloaded pods).
-Declarative config: EPP policies live in YAML. For example, a DecisionTreeFilter can encode: “If LoRA is hot, continue; else, fall back to a low-queue path.” This is nice.
+EPP offers standard filters one can pick and choose through YAML config:
+
+- **DecisionTreeFilter** — try one path, if failed go for a fallback.  
+- **LeastKVCacheFilter** — keep pods in the lowest KV-usage bucket.  
+- **LeastQueueFilter** — keep pods in the lowest queue-depth bucket.  
+- **LoraAffinityFilter** — prefer/require pods with the target LoRA already loaded.  
+- **LowQueueFilter** — hard ceiling on queue depth (drop overloaded pods).  
+
+
+EPP enables a declarative config: EPP policies live in YAML. For example, a DecisionTreeFilter can encode: “If LoRA is hot, continue; else, fall back to a low-queue path.” This is nice.
 
 Our approach (Dynamo)
 We have EPP delegate the final routing decision to the Dynamo Frontend. EPP framework allows for custom plugins and this is the approach I have taken. The Dynamo Routing call is implemented as a scorer. 
@@ -150,21 +153,22 @@ We have EPP delegate the final routing decision to the Dynamo Frontend. EPP fram
 Current gap: we do not support LoRA-affinity routing in our FE path (so we can’t enforce “LoRA must be hot” as a hard gate). Everything else above remains compatible.
 
 
-EPP filters rely on Prometheus metrics. We would have to make them available  in the *InferencePool* CR. 
-We would have to rename the metrics of interest to EPP. For example, dynamo exposes the `num_requests_waiting` metric for the number of requests that have been routed to a specific worker but are waiting in that worker's internal queue to be processed. But EPP filters expect the `vllm:num_requests_waiting` and `nv_trt_llm_request_metrics{request_type=waiting}`.  For KV cache utilization EPP expects `vllm:gpu_cache_usage_perc` and `nv_trt_llm_kv_cache_block_metrics{kv_cache_block_type=fraction}`. 
+EPP filters rely on Prometheus metrics. We would have to make them available  in the *InferencePool* CR on the workers. 
+We would have to rename the metrics of interest to EPP or expose them through environment variables. For example, dynamo exposes the `num_requests_waiting` metric for the number of requests that have been routed to a specific worker but are waiting in that worker's internal queue to be processed. But EPP filters expect the `vllm:num_requests_waiting` and `nv_trt_llm_request_metrics{request_type=waiting}`.  For KV cache utilization EPP expects `vllm:gpu_cache_usage_perc` and `nv_trt_llm_kv_cache_block_metrics{kv_cache_block_type=fraction}`. 
+
 It is also notable that the tokenization can be performed in a plugin to the Inference Gateway API BBR (Body Based Routing). At the time of the proposal tokenization is coupled with the routing and tokens are returned to the Gateway along with the worker instance id. 
 
 EPP expects the following metrics:
 
 LeastKVCacheFilter and LowQueueFilter (kvCacheUsagePercentageMetric):
-For vLLM: vllm:gpu_cache_usage_perc
-For TRTLLM: nv_trt_llm_kv_cache_block_metrics{kv_cache_block_type=fraction}
-SGLang: sglang:token_usage
+**For vLLM: vllm:gpu_cache_usage_perc**
+**For TRTLLM: nv_trt_llm_kv_cache_block_metrics{kv_cache_block_type=fraction}**
+**SGLang: sglang:token_usage**
 
 LeastQueueFilter (totalQueuedRequestsMetric):
-For vLLM: vllm:num_requests_waiting
-For TRTLLM: nv_trt_llm_request_metrics{request_type=waiting}
-SGLang: sglang:num_queue_reqs
+**For vLLM: vllm:num_requests_waiting**
+**For TRTLLM: nv_trt_llm_request_metrics{request_type=waiting}**
+**SGLang: sglang:num_queue_reqs**
 
 
 
@@ -172,27 +176,29 @@ LoRA: (Dynamo does not yet support)
 --loraInfoMetric="vllm:lora_requests_info"
 
 
-
 The names can be configurable via env vars:
-TOTAL_QUEUED_REQUESTS_METRIC="your_queue_metric_name"
-KV_CACHE_USAGE_PERCENTAGE_METRIC="your_kv_cache_metric_name"
-LORA_INFO_METRIC="your_lora_metric_name"
+**TOTAL_QUEUED_REQUESTS_METRIC="your_queue_metric_name"**
+**KV_CACHE_USAGE_PERCENTAGE_METRIC="your_kv_cache_metric_name"**
+**LORA_INFO_METRIC="your_lora_metric_name"**
 
 
 
 ## Exposing Dynamo Workers Without the FrontEnd
 
-**Flow:**  
+**Current Flow:**  
+`Client Request → Gateway API → Endpoint Picker → Dynamo Router -> Best Worker`
+
+**New Flow:**  
 `Client Request → Gateway API → Endpoint Picker → Best Worker`
 
-This option relies on the routing choices provided by the **Standard Endpoint Picker**.
+This option relies on the routing options provided by the **Standard Endpoint Picker**.
 
 ---
 
 ### Components Needed
 
 1. **Keep Dynamo Runtime**
-   - **etcd**
+   - **ETCD**
    - **NATS**
 
 2. **Create an HTTP service in front of each worker**
