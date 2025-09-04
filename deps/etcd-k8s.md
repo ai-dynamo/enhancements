@@ -271,23 +271,22 @@ Notes:
 
 ## Approach 3: EndpointSlice based discovery
 
-Disclaimer: This idea is still WIP. It is similar to Approach 2, but eliminates the need for a controller relying on the Kubernetes Service controller to keep EndpointSlices up to date.
+Disclaimer: This idea is a WIP. It is similar to Approach 2, but eliminates the need for a custom controller relying instead on the Kubernetes Service controller to keep EndpointSlices up to date.
 
 ### Server side:
-1. Dynamo operator creates server instances. Pods are labeled with `dynamo-namespace` and `dynamo-component`.
+1. Pods for dynamo workers have labels for `dynamo-namespace` and `dynamo-component`.
 2. When a pod wants to serve an endpoint, it performs two actions:
    - Creates a Service for that endpoint (if it doesn't exist) with selectors:
-     - `dynamo-namespace`
-     - `dynamo-component`
+     - `dynamo-namespace: NS_NAME`
+     - `dynamo-component: COMPONENT_NAME`
      - `dynamo-endpoint-<NAME>: true`
    - Patches its own labels to add `dynamo-endpoint-<NAME>: true`
-3. Readiness probe status reflects the health of this specific endpoint.
+3. Concurrently, the readiness probe is reporting the status of the worker and its endpoints.
 
 ### Client side:
 1. Client watches EndpointSlices associated with the target Kubernetes Service.
-2. EndpointSlices maintain the current state of pods serving the endpoint and their readiness status.
-3. Client maintains a cache of available instances, updating as EndpointSlice changes arrive.
-4. Client routes requests to healthy instances via NATS transport.
+3. Client maintains a cache of available instances, updating as EndpointSlice changes arrive (in response to pods readiness status/addition/deletion).
+4. Client routes requests to ready instances.
 
 ```mermaid
 sequenceDiagram
@@ -313,7 +312,7 @@ sequenceDiagram
 ```
 
 Kubernetes concepts:
-- Services and EndpointSlices: Services define pod sets, EndpointSlices track pod addresses and readiness
+- Services and EndpointSlices
 - Readiness probes: Health checks that determine pod readiness for traffic
 
 ```yaml
@@ -370,3 +369,4 @@ Notes:
 - Pro: We don't need a dedicated controller to delete leases on expiry. (No leases)
 - We need to find a better pattern for a pod to influence the services it is part of than mutating its label set. Potentially a controller could be involved.
 - The service is not actually used for transport here. Only to manage the EndpointSlices which are doing book keeping for which pods are backing the endpoint.
+
