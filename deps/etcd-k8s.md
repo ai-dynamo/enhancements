@@ -296,11 +296,8 @@ endpoints:
     name: dynamo-pod-def456
 ```
 
-Trade-offs:
-- Pros: No lease management, automatic cleanup, native health checks
-- Cons: Dynamic Service creation, label management complexity, limited granularity
-
 Notes:
-- Service creation could be moved to a controller
-- Consider annotations instead of labels for endpoint advertisement
-- Multiple readiness probes per pod for per-endpoint health status
+- Pro: We don't need a dedicated controller to delete leases on expiry. (No leases)
+- We need to find a better pattern for a pod to influence the services it is part of than mutating its label set. Potentially a controller could be involved.
+- The service is not actually used for transport here. Only to enumerate the endpointslices which are doing book keeping for which pods are backing the endpoint.
+
