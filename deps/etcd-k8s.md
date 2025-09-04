@@ -269,7 +269,7 @@ Notes:
 - Controller is in charge of updating the status of the DynamoEndpoint as underlying pod readiness changes.
 
 
-## Approach 3: Pod Lifecycle-Driven Discovery using EndpointSlices
+## Approach 3: EndpointSlice based discovery
 
 Disclaimer: This idea is still WIP. It is similar to Approach 2, but eliminates the need for a controller relying on the Kubernetes Service controller to keep EndpointSlices up to date.
 
