@@ -187,16 +187,11 @@ Kubernetes concepts:
 - kubectl watch API: Real-time subscription to resource changes
 - Custom resources: Extension mechanism for arbitrary data storage. We can introduce a new CRD for DynamoEndpoint and DynamoModel and similar to store state associated with a lese.
 
-Trade-offs:
-- Pros: No external etcd cluster, leverages Kubernetes primitives, automatic cleanup
-- Cons: API latency overhead, limited prefix watching, atomicity complexity, controller overhead
-
 Notes:
 - Requires a controller to delete leases on expiry. This is not something k8s automatically handles for us.
 - prefix-based watching for changes is not supported by the kubectl `watch` api. We can however watch on a set of labels that correspond to the endpoints we are interested in.
 - Unavoidable: overhead of going through kube api as opposed to direct etcd calls.
 - Need to work out atomicity of operations
-
 
 ## Approach 2: Pod Lifecycle-Driven Discovery
 
@@ -243,7 +238,6 @@ sequenceDiagram
 
 Kubernetes concepts:
 - Services and EndpointSlices: Services define pod sets, EndpointSlices track pod addresses and readiness
-- Pod labels and selectors: Key-value pairs for pod identification and Service targeting
 - Readiness probes: Health checks that determine pod readiness for traffic
 
 ```yaml
@@ -299,7 +293,7 @@ endpoints:
 Notes:
 - Pro: We don't need a dedicated controller to delete leases on expiry. (No leases)
 - We need to find a better pattern for a pod to influence the services it is part of than mutating its label set. Potentially a controller could be involved.
-- The service is not actually used for transport here. Only to enumerate the endpointslices which are doing book keeping for which pods are backing the endpoint.
+- The service is not actually used for transport here. Only to manage the EndpointSlices which are doing book keeping for which pods are backing the endpoint.
 
 ## Approach 3: Controller-managed DynamoEndpoint Resources
 
