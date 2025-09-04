@@ -33,9 +33,9 @@ The prior [version of Dynamo Inference Gateway Integration](https://github.com/a
 
 First, the EPP sends and HTTP request to the Dynamo FrontEnd to obtain the target worker instance id and the tokens. Even though the FrontEnd is deployed as a sidecar, this approach introduces additional latency. Given how well optimized the Dynamo system is, this latency would offset the performance gains provided by the highly efficient Dynamo Router.
 
-## EPP offers richer routing control.
+## EPP offers richer routing control
 
-Second, even though the Dynamo Routing call is implemented as a plugin in accordance with the plugin interface EPP provides, Dynamo cannot support other EPP-provided routing mechanisms such as Routing Filters. EPP offers more flexibility to the end user on how to route and provides a nice declarative configuration yaml file.
+Second, EPP-provides additional routing mechanisms such as Routing Filters which Dynamo does not offer. EPP also provides a nice declarative configuration yaml file on how to route.
 
 For example, in Dynamo router there is a small chance that not the optimal worker will be picked:
  We can have A perfect KV match on an overloaded worker  but the request on this worker may be slower than a near-miss on an idle one.
@@ -129,6 +129,26 @@ This approach has **higher maintenance overhead** but offers **lower latency**:
 
 
 ## Enabling EPP filters
+
+EPP filtering approach has a different shape: filter -> score -> pick
+EPP’s architecture explicitly stages decisions:
+Filters enforce hard constraints and shrink the candidate set before ranking (i.e. drop pods with queue above a threshold, require LoRA affinity).
+Scorers express preferences across the remaining pods (e.g., prefer lower queue, lower KV usage).
+Pickers choose the final endpoint (max-score, round-robin, prefix-aware, etc.).
+
+EPP offers standard filters one can pick and choose though yaml config :
+DecisionTreeFilter — try one path, if failed go for a fallback.
+LeastKVCacheFilter — keep pods in the lowest KV-usage bucket.
+LeastQueueFilter — keep pods in the lowest queue-depth bucket.
+LoraAffinityFilter — prefer/require pods with the target LoRA already loaded.
+LowQueueFilter — hard ceiling on queue depth (drop overloaded pods).
+Declarative config: EPP policies live in YAML. For example, a DecisionTreeFilter can encode: “If LoRA is hot, continue; else, fall back to a low-queue path.” This is nice.
+
+Our approach (Dynamo)
+We have EPP delegate the final routing decision to the Dynamo Frontend. EPP framework allows for custom plugins and this is the approach I have taken. The Dynamo Routing call is implemented as a scorer. 
+
+Current gap: we do not support LoRA-affinity routing in our FE path (so we can’t enforce “LoRA must be hot” as a hard gate). Everything else above remains compatible.
+
 
 EPP filters rely on Prometheus metrics. We would have to make them available  in the *InferencePool* CR. 
 We would have to rename the metrics of interest to EPP. For example, dynamo exposes the `num_requests_waiting` metric for the number of requests that have been routed to a specific worker but are waiting in that worker's internal queue to be processed. But EPP filters expect the `vllm:num_requests_waiting` and `nv_trt_llm_request_metrics{request_type=waiting}`.  For KV cache utilization EPP expects `vllm:gpu_cache_usage_perc` and `nv_trt_llm_kv_cache_block_metrics{kv_cache_block_type=fraction}`. 
