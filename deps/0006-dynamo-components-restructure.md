@@ -164,61 +164,27 @@ dynamo/
 │   │       │   └── README.md
 │   │       ├── planner/
 │   │       │   ├── __init__.py
-│   │       │   ├── __main__.py
-│   │       │   ├── config.py
-│   │       │   ├── defaults.py
-│   │       │   ├── kube.py
-│   │       │   ├── kubernetes_connector.py
-│   │       │   ├── planner_connector.py
-│   │       │   ├── planner_sla.py
-│   │       │   ├── prometheus.py
+│   │       │   ├── ..
 │   │       │   ├── README.md
-│   │       │   └── utils/
 │   │       ├── vllm/             # vLLM backend
 │   │       │   ├── __init__.py
-│   │       │   ├── __main__.py
-│   │       │   ├── main.py
-│   │       │   ├── args.py
-│   │       │   ├── engine_monitor.py
-│   │       │   ├── handlers.py
-│   │       │   ├── ports.py
-│   │       │   ├── protocol.py
-│   │       │   ├── publisher.py
+│   │       │   ├── ...
 │   │       │   └── README.md
 │   │       ├── sglang/           # SGLang backend
 │   │       │   ├── __init__.py
-│   │       │   ├── __main__.py
-│   │       │   ├── main.py
-│   │       │   ├── args.py
-│   │       │   ├── protocol.py
-│   │       │   ├── publisher.py
-│   │       │   ├── register.py
+│   │       │   ├── ..
 │   │       │   ├── README.md
-│   │       │   ├── decode_worker/
-│   │       │   ├── request_handlers/
-│   │       │   ├── utils/
-│   │       │   └── worker/
 │   │       ├── trtllm/           # TensorRT-LLM backend
 │   │       │   ├── __init__.py
-│   │       │   ├── __main__.py
-│   │       │   ├── main.py
-│   │       │   ├── encode_helper.py
-│   │       │   ├── engine.py
-│   │       │   ├── multimodal_processor.py
-│   │       │   ├── publisher.py
+│   │       │   ├── ..
 │   │       │   ├── README.md
-│   │       │   ├── logits_processing/
-│   │       │   ├── request_handlers/
-│   │       │   └── utils/
 │   │       ├── llama_cpp/        # llama.cpp backend
 │   │       │   ├── __init__.py
-│   │       │   ├── __main__.py
-│   │       │   ├── main.py
+│   │       │   ├── ..
 │   │       │   └── README.md
 │   │       └── mocker/           # Mock backend
 │   │           ├── __init__.py
-│   │           ├── __main__.py
-│   │           ├── main.py
+│   │           ├── ..
 │   │           └── README.md
 │   └── metrics/                  # Metrics component (Rust)
 │       ├── Cargo.toml
