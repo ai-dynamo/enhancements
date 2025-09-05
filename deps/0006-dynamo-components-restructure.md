@@ -1,4 +1,4 @@
-# Dynamo Components Restructure
+# Dynamo Components Directory Restructure
 
 **Status**: Draft
 
@@ -10,9 +10,9 @@
 
 **Replaced By**: N/A
 
-**Sponsor**: @nnshah1, @grahamking, @saturley-hall
+**Sponsor**: @nnshah1, @grahamking
 
-**Required Reviewers**: Core Dynamo Team, DevOps Team
+**Required Reviewers**: @nnshah1, @grahamking, @athreesh, @nealvaidya, @ishandhanani, @rmccorm4, @ai-dynamo/DevOps
 
 **Review Date**: TBD
 
@@ -50,8 +50,8 @@ The current structure makes it difficult for users to:
 * Simplify the package structure to use a single `src/dynamo/` directory
 * Enable easier editable installs with `pip install -e .`
 * Reduce configuration complexity in `pyproject.toml`
+* Keep all backend requirements defined in `pyproject.toml`
 * Consolidate all non-source files into logical, centralized directories
-* Improve developer experience and code discoverability
 * Create a more maintainable and navigable repository structure
 * Maintain all existing functionality and API compatibility
 * Preserve the current wheel packaging behavior
@@ -71,7 +71,9 @@ The project **MUST** use a single `src/dynamo/` directory containing all compone
 
 ### REQ 2 Simplified pyproject.toml
 
-The `pyproject.toml` **MUST** reference only a single package path: `"src/dynamo"` instead of the current 7 separate package paths.
+The `pyproject.toml` **MUST** reference only a single package path: `"src/dynamo"` instead of the current 7 separate package paths. 
+
+All the python dependencies **MUST** be defined in optional installed under `pyproject.toml`
 
 ### REQ 3 Preserved Import Structure
 
@@ -153,61 +155,27 @@ dynamo/
 │   │       ├── planner/
 │   │       │   ├── __init__.py
 │   │       │   ├── __main__.py
-│   │       │   ├── config.py
-│   │       │   ├── defaults.py
-│   │       │   ├── kube.py
-│   │       │   ├── kubernetes_connector.py
-│   │       │   ├── planner_connector.py
-│   │       │   ├── planner_sla.py
-│   │       │   ├── prometheus.py
-│   │       │   ├── README.md
-│   │       │   └── utils/
+│   │       │   ├── ...
 │   │       ├── vllm/             # vLLM backend
 │   │       │   ├── __init__.py
 │   │       │   ├── __main__.py
-│   │       │   ├── main.py
-│   │       │   ├── args.py
-│   │       │   ├── engine_monitor.py
-│   │       │   ├── handlers.py
-│   │       │   ├── ports.py
-│   │       │   ├── protocol.py
-│   │       │   ├── publisher.py
-│   │       │   └── README.md
+│   │       │   ├── ..
 │   │       ├── sglang/           # SGLang backend
 │   │       │   ├── __init__.py
 │   │       │   ├── __main__.py
-│   │       │   ├── main.py
-│   │       │   ├── args.py
-│   │       │   ├── protocol.py
-│   │       │   ├── publisher.py
-│   │       │   ├── register.py
-│   │       │   ├── README.md
-│   │       │   ├── decode_worker/
-│   │       │   ├── request_handlers/
-│   │       │   ├── utils/
-│   │       │   └── worker/
+│   │       │   ├── ..
 │   │       ├── trtllm/           # TensorRT-LLM backend
 │   │       │   ├── __init__.py
 │   │       │   ├── __main__.py
-│   │       │   ├── main.py
-│   │       │   ├── encode_helper.py
-│   │       │   ├── engine.py
-│   │       │   ├── multimodal_processor.py
-│   │       │   ├── publisher.py
-│   │       │   ├── README.md
-│   │       │   ├── logits_processing/
-│   │       │   ├── request_handlers/
-│   │       │   └── utils/
+│   │       │   ├── ....
 │   │       ├── llama_cpp/        # llama.cpp backend
 │   │       │   ├── __init__.py
 │   │       │   ├── __main__.py
-│   │       │   ├── main.py
-│   │       │   └── README.md
+│   │       │   ├── ...
 │   │       └── mocker/           # Mock backend
 │   │           ├── __init__.py
 │   │           ├── __main__.py
-│   │           ├── main.py
-│   │           └── README.md
+│   │           ├── ...
 │   └── metrics/                  # Metrics component (Rust)
 │       ├── Cargo.toml
 │       ├── src/
@@ -215,43 +183,17 @@ dynamo/
 ├── configs/                      # All configuration files
 │   ├── engines/                  # Engine-specific configs
 │   │   ├── trtllm/
-│   │   │   ├── agg.yaml
-│   │   │   ├── decode.yaml
-│   │   │   ├── prefill.yaml
-│   │   │   ├── deepseek_r1/
-│   │   │   ├── gemma3/
-│   │   │   ├── llama4/
-│   │   │   └── multimodal/
 │   │   ├── sglang/
-│   │   │   └── deepseek_r1/
 │   │   └── vllm/
 │   └── deployments/              # Deployment configs
-│       ├── aggregated/
-│       │   ├── vllm/
-│       │   ├── sglang/
-│       │   └── trtllm/
-│       ├── disaggregated/
-│       │   ├── vllm/
-│       │   ├── sglang/
-│       │   └── trtllm/
-│       └── multinode/
-│           ├── vllm/
-│           ├── sglang/
-│           └── trtllm/
+│       ├── vllm/
+│       ├── sglang/
+│       └── trtllm/
 ├── scripts/                      # All launch and utility scripts
 │   ├── launch/                   # Launch scripts
-│   │   ├── aggregated/
-│   │   │   ├── vllm/
-│   │   │   ├── sglang/
-│   │   │   └── trtllm/
-│   │   ├── disaggregated/
-│   │   │   ├── vllm/
-│   │   │   ├── sglang/
-│   │   │   └── trtllm/
-│   │   └── multinode/
-│   │       ├── vllm/
-│   │       ├── sglang/
-│   │       └── trtllm/
+|   |   ├── vllm/
+│   │   ├── sglang/
+│   │   └── trtllm/
 │   ├── slurm/                    # SLURM job scripts
 │   │   ├── sglang/
 │   │   └── trtllm/
@@ -278,10 +220,7 @@ dynamo/
 │   │       ├── multimodal_epd.md
 │   │       ├── multimodal_support.md
 │   │       └── multinode-examples.md
-│   ├── frontend/
-│   └── planner/
-├── benchmarks/                   # Performance benchmarks
-│   ├── vllm/
+├── benchmarks/                   
 │   ├── sglang/
 │   │   ├── bench.sh
 │   │   └── generate_bench_data.py
@@ -291,24 +230,9 @@ dynamo/
 │       ├── plot_performance_comparison.py
 │       ├── post_process.py
 │       └── scripts/
-├── tests/                        # All tests (existing structure preserved)
-│   ├── planner/                  # Planner tests (consolidated from components/planner/test/)
-│   │   ├── conftest.py
-│   │   ├── test_replica_calculation.py
-│   │   ├── test_scaling_e2e.py
-│   │   ├── perf_test_configs/
-│   │   ├── scaling/
-│   │   └── utils/
-│   ├── serve/                    # Backend tests
-│   │   ├── test_vllm.py
-│   │   ├── test_sglang.py
-│   │   └── test_trtllm.py
-│   ├── router/                   # Router tests
-│   ├── fault_tolerance/          # Fault tolerance tests
-│   ├── kvbm/                     # KV cache behavior tests
-│   ├── lmcache/                  # LMCache tests
-│   └── profiler/                 # Profiler tests
-├── pyproject.toml
+├── tests/                        
+│   ├── planner/unit/ # Copy files from components/planner/test
+├── pyproject.toml 
 └── ... (other root files)
 ```
 
@@ -323,7 +247,7 @@ dynamo/
 5. **Consolidate scripts**: Move all `launch/` directories to `scripts/launch/` organized by deployment type
 6. **Consolidate docs**: Move component-specific documentation to `docs/` organized by component
 7. **Consolidate benchmarks**: Move all benchmark files to `benchmarks/` organized by component
-8. **Consolidate tests**: Move `components/planner/test/` content to `tests/planner/` (main tests directory already exists)
+8. **Consolidate tests**: Move `components/planner/test/` content to `tests/planner/unit/` (main tests directory already exists)
 9. **Update pyproject.toml**: Change packages configuration to use single `"components/src/dynamo"` path
 10. **Update build system**: Ensure hatch build system works with new structure
 11. **Test packaging**: Verify wheel output remains identical
