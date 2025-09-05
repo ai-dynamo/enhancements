@@ -83,6 +83,24 @@ The wheel packaging output **MUST** remain identical to the current structure to
 
 Comprehensively restructure the entire Dynamo repository to use a single `src/dynamo/` package structure and consolidate all non-source files into a logical, maintainable organization. This includes source code, deployment configurations, launch scripts, documentation, benchmarks, and all other repository files.
 
+### Key Changes Summary
+
+#### Source Code Organization
+- **Current**: Scattered across `components/*/src/dynamo/*`
+- **Proposed**: Consolidated in `components/src/dynamo/*`
+
+#### Configuration and Script files
+- **Current**: Scattered in `components/*/deploy/`, `components/*/launch/`
+- **Proposed**: Consolidated in `configs/deployments/`, `scripts/launch/`
+
+#### Documentation
+- **Current**: Mixed with source code in component directories
+- **Proposed**: Organized in `docs/` by component type
+
+#### Tests
+- **Current**: `components/planner/test/` + existing `tests/`
+- **Proposed**: All tests in `tests/` with `planner/unit/` subdirectory
+
 ## Current Structure
 
 ```
@@ -147,27 +165,61 @@ dynamo/
 │   │       ├── planner/
 │   │       │   ├── __init__.py
 │   │       │   ├── __main__.py
-│   │       │   ├── ...
+│   │       │   ├── config.py
+│   │       │   ├── defaults.py
+│   │       │   ├── kube.py
+│   │       │   ├── kubernetes_connector.py
+│   │       │   ├── planner_connector.py
+│   │       │   ├── planner_sla.py
+│   │       │   ├── prometheus.py
+│   │       │   ├── README.md
+│   │       │   └── utils/
 │   │       ├── vllm/             # vLLM backend
 │   │       │   ├── __init__.py
 │   │       │   ├── __main__.py
-│   │       │   ├── ..
+│   │       │   ├── main.py
+│   │       │   ├── args.py
+│   │       │   ├── engine_monitor.py
+│   │       │   ├── handlers.py
+│   │       │   ├── ports.py
+│   │       │   ├── protocol.py
+│   │       │   ├── publisher.py
+│   │       │   └── README.md
 │   │       ├── sglang/           # SGLang backend
 │   │       │   ├── __init__.py
 │   │       │   ├── __main__.py
-│   │       │   ├── ..
+│   │       │   ├── main.py
+│   │       │   ├── args.py
+│   │       │   ├── protocol.py
+│   │       │   ├── publisher.py
+│   │       │   ├── register.py
+│   │       │   ├── README.md
+│   │       │   ├── decode_worker/
+│   │       │   ├── request_handlers/
+│   │       │   ├── utils/
+│   │       │   └── worker/
 │   │       ├── trtllm/           # TensorRT-LLM backend
 │   │       │   ├── __init__.py
 │   │       │   ├── __main__.py
-│   │       │   ├── ....
+│   │       │   ├── main.py
+│   │       │   ├── encode_helper.py
+│   │       │   ├── engine.py
+│   │       │   ├── multimodal_processor.py
+│   │       │   ├── publisher.py
+│   │       │   ├── README.md
+│   │       │   ├── logits_processing/
+│   │       │   ├── request_handlers/
+│   │       │   └── utils/
 │   │       ├── llama_cpp/        # llama.cpp backend
 │   │       │   ├── __init__.py
 │   │       │   ├── __main__.py
-│   │       │   ├── ...
+│   │       │   ├── main.py
+│   │       │   └── README.md
 │   │       └── mocker/           # Mock backend
 │   │           ├── __init__.py
 │   │           ├── __main__.py
-│   │           ├── ...
+│   │           ├── main.py
+│   │           └── README.md
 │   └── metrics/                  # Metrics component (Rust)
 │       ├── Cargo.toml
 │       ├── src/
@@ -183,7 +235,7 @@ dynamo/
 │       └── trtllm/
 ├── scripts/                      # All launch and utility scripts
 │   ├── launch/                   # Launch scripts
-|   |   ├── vllm/
+│   │   ├── vllm/
 │   │   ├── sglang/
 │   │   └── trtllm/
 │   ├── slurm/                    # SLURM job scripts
@@ -212,7 +264,7 @@ dynamo/
 │   │       ├── multimodal_epd.md
 │   │       ├── multimodal_support.md
 │   │       └── multinode-examples.md
-├── benchmarks/                   
+├── benchmarks/                   # Performance benchmarks
 │   ├── sglang/
 │   │   ├── bench.sh
 │   │   └── generate_bench_data.py
@@ -222,9 +274,9 @@ dynamo/
 │       ├── plot_performance_comparison.py
 │       ├── post_process.py
 │       └── scripts/
-├── tests/                        
-│   ├── planner/unit/ # Copy files from components/planner/test
-├── pyproject.toml 
+├── tests/     
+│   ├── planner/unit/             # Move from components/planner/test
+├── pyproject.toml
 └── ... (other root files)
 ```
 
