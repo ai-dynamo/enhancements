@@ -1,72 +1,51 @@
-# ETCD-less Dynamo setup in Kubernetes
+# ETCD-less Dynamo in Kubernetes: Endpoint Instance Discovery
 
-## Problem
+## Background
 
-Customers are hesitant to stand up and maintain dedicated etcd clusters to deploy Dynamo. ETCD, however, is a hard dependency of the Dynamo Runtime.
+This document is part of a series of deps attempting to eliminate the ETCD dependency in Dynamo. 
 
-It enables the following functionalities within DRT:
+Source: https://github.com/ai-dynamo/enhancements/blob/neelays/runtime/XXXX-runtime-infrastructure.md
 
-- Heartbeats/leases
-- Component Registry/Service Discovery
-- Cleanup on Shutdown
-- General Key-value storage for various purposes (KVCache Metadata, Model Metadata, etc.)
+ETCD usage in Dynamo can be categorized into the following:
+- Endpoint Instance Discovery (Current focus)
+- Model / Worker Discovery
+- Worker Port Conflict Resolution
+- Router State Sharing Synchronization
 
-## ETCD and Kubernetes
+Here we resolve how we can achieve endpoint instance discovery without ETCD in Kubernetes environments.
 
-Kubernetes stores its own state in ETCD. With a few tradeoffs, we can use native Kubernetes APIs and Resources to achieve the same functionality. Under the hood, these operations are still backed by etcd. This amounts to an alternative implementation of the Dynamo Runtime interface that can run without needing ETCD in K8s environments.
 
-This document explores a few approaches to achieve this.
+## Current Implementation of Endpoint Instance Discovery
 
-Note: This document is only to explore alternative approaches to eliminating the ETCD dependency. Decoupling from NATS (the transport layer) is a separate concern.
+Here is a primer on the current implementation of endpoint instance discovery between a server and a client.
 
-## DRT Component Registry Primer
-
-Here is a primer on the core workflow that ETCD is used for in DRT:
-
+### APIs
 ```python
-# server.py - Server side workflow
-from dynamo.runtime import DistributedRuntime, dynamo_worker
+# server side
+endpoint = runtime.namespace("dynamo").component("backend")
+service = await component.create_service()
+endpoint = service.endpoint("generate")
+await endpoint.serve_endpoint(RequestHandler().generate)
 
-@dynamo_worker(static=False)
-async def worker(runtime: DistributedRuntime):
-    component = runtime.namespace(ns).component("backend")
-    await component.create_service()
-    endpoint = component.endpoint("generate")
-
-    await endpoint.serve_endpoint(RequestHandler().generate)
-```
-
-```python
-# client.py - Client side workflow
-from dynamo.runtime import DistributedRuntime, dynamo_worker
-
-@dynamo_worker(static=False)
-async def worker(runtime: DistributedRuntime):
-    await init(runtime, "dynamo")
-
-    endpoint = runtime.namespace(ns).component("backend").endpoint("generate")
-
-    # Create client and wait for an endpoint to be ready
-    client = await endpoint.client()
-    await client.wait_for_instances()
-
-    stream = await client.generate("hello world")
-    async for char in stream:
-        print(char)
+# client side
+endpoint = runtime.namespace("dynamo").component("backend").endpoint("generate")
+client = await endpoint.client()
+await client.wait_for_instances()
+stream = await client.generate("request")
 ```
 
 ### Server Side:
 1. Server registers with DRT, receiving a primary lease (unique instance identifier) from ETCD
-2. Server creates an entry in ETCD advertising its endpoint. The entry is tied to the lease of the instance.
+2. Server creates one or more entries in ETCD advertising its endpoint. The entry is tied to the lease of the instance.
 3. Server continues to renew the lease. This keeps its associated endpoint entries alive. If a lease fails to renew, associated endpoint entries are automatically removed by ETCD.
 
 ### Client Side:
-1. Client asks ETCD for a watch of endpoints.
+1. Client asks ETCD for a watch of endpoints 
 2. Client maintains a cache of such entries, updating its cache as it receives updates from ETCD.
-3. Client uses the transport to target one of the instances in its cache.
+3. Client selects one of the endpoint instances in its cache and routes requests to it.
 
 ```bash
-# Example etcd keys showing endpoints
+# Example of an etcd key showing an endpoint entry associated with an instance
 $ etcdctl get --prefix instances/
 instances/dynamo/worker/generate:5fc98e41ac8ce3b
 {
@@ -79,294 +58,183 @@ instances/dynamo/worker/generate:5fc98e41ac8ce3b
 }
 ```
 
-Summary of entities:
-- Leases: Unique identifier for an instance with TTL and auto-renewal
-- Endpoints: Service registration entries associated with a lease
-- Watches: Real-time subscription to key prefix changes
-
-Summary of operations:
-- Creating/renewing leases: create_lease(), keep_alive background task
-- Creating endpoints: kv_create() with lease attachment
-- Watching endpoints: kv_get_and_watch_prefix() for real-time updates
-- Automatic cleanup: Lease expiration removes associated keys
-
-Key ETCD APIs used in Dynamo Runtime (from lib/runtime/src/transports/etcd.rs):
-
-Lease Management:
-- create_lease() - Create lease with TTL
-- revoke_lease() - Revoke lease explicitly
-
-Key-Value Operations:
-- kv_create() - Create key if it doesn't exist
-- kv_create_or_validate() - Create or validate existing key
-- kv_get_and_watch_prefix() - Get initial values and watch for changes
-
-
-## Approach 1: Lease-Based Endpoint Registry
-
-We use the kubectl `watch` API and Custom Resources for Lease and DynamoEndpoint to achieve similar functionality.
-
-### Server side:
-1. Server registers with DRT, creating a Lease resource in K8s
-2. Server creates a DynamoEndpoint CR in K8s with the owner ref set to its Lease resource
-3. Server renews its Lease, keeping the controller/operator from terminating it (and the associated DynamoEndpoint CR)
-
-### Client side:
-1. Client asks K8s for a watch of DynamoEndpoints (using the kubectl `watch` API).
-2. Client maintains a cache of such entries, updating its cache as it receives updates from K8s
-3. Client uses the transport to target one of the instances in its cache.
-
-### Controller:
-1. Dynamo controller is responsible for deleting leases that have not been renewed.
-2. When a lease is deleted, all associated DynamoEndpoint CRs are also deleted.
-
 ```mermaid
 sequenceDiagram
     participant Server
-    participant K8s API
-    participant Controller
+    participant ETCD
     participant Client
 
-    Note over Server: Dynamo Instance Startup
-    Server->>K8s API: Create Lease resource
-    Server->>K8s API: Create DynamoEndpoint CR (ownerRef=Lease)
-    Server->>K8s API: Renew Lease periodically
+    Server->>ETCD: Register instance, get lease
+    Server->>ETCD: Create endpoint entries tied to lease
+    Server->>ETCD: Renew lease periodically
 
-    Note over Controller: Lease Management
-    Controller->>K8s API: Watch Lease resources
-    Controller->>Controller: Check lease expiry
-    Controller->>K8s API: Delete expired Leases
-    K8s API->>K8s API: Auto-delete DynamoEndpoints (ownerRef)
+    Client->>ETCD: Watch for endpoints
+    ETCD-->>Client: Send endpoint updates
+    Client->>Client: Update local cache
+    Client->>Server: Route requests to selected instance
 
-    Note over Client: Service Discovery
-    Client->>K8s API: Watch DynamoEndpoint resources
-    K8s API-->>Client: Stream endpoint changes
-    Client->>Client: Update instance cache
-    Client->>Server: Route requests via NATS
+    Note over ETCD: Lease expires → entries auto-removed
 ```
 
-```yaml
-# Example Lease resource
-apiVersion: coordination.k8s.io/v1
-kind: Lease
-metadata:
-  name: dynamo-lease
-  namespace: dynamo
-  ownerReferences:
-    - apiVersion: pods/v1
-      kind: Pod
-      name: dynamo-pod-abc123
-spec:
-  holderIdentity: dynamo-pod-abc123
-  leaseDurationSeconds: 30
-  renewDeadlineSeconds: 20
+**How do we achieve these (or roughly similar) APIs in Kubernetes?**
+
+## Approach 1: Ready pod <=> Ready component (No explicit endpoint entity)
+
+High level ideas:
+- Each pod is a unique instance of a component. The operator attaches labels for namespace, component to the pod.
+- The readiness probe of the pod reflects the health of the instance. If it is ready, clients can route traffic to it.
+- The readiness probe is only 200 when all endpoints are ready.
+- The pod name is the unique instance identifier for internal use. When using NATS based transport, the topic is a function of the pod name.
+- Clients simply set a watch for ready pods matching the labels for namespace, component. They update their cache of instances as events arrive (pod creation, pod deletion, pod readiness change).
+- ***NOTE***: There is no explicit entity for endpoint. Clients know apriori which endpoints are available for a component. If the client made a mistake this will be known at request time.
+
+
+### APIs
+
+APIs stay the same
+
+```python
+# SERVER SIDE
+
+# Operator creates a pod with labels for namespace, component. The namespace, component, and pod name are injected into the pod.
+# get_component() returns a struct with info on the current instance's namespace, component, and pod name.
+endpoint = get_component().endpoint("generate")
+# subscribes to a NATS topic that is a function of (namespace, component, endpoint, pod name)
+await endpoint.serve_endpoint(RequestHandler().generate)
+
+# CLIENT SIDE
+
+# setup a kube watch for pods matching the labels for namespace, component
+# block until a ready pod is found that matches the labels for namespace, component
+# NOTE: No validation is done that the pod actually serves the endpoint that we are interested in
+endpoint = runtime.namespace("dynamo").component("backend").endpoint("generate")
+client = await endpoint.client()
+await client.wait_for_instances()
+
+# write to the NATS topic that is a function of (namespace, component, endpoint, pod name)
+# errors out if the component doesn't actually have such an endpoint
+stream = await client.generate("request")
 ```
-
-```yaml
-# Example DynamoEndpoint CR
-apiVersion: dynamo.nvidia.com/v1alpha1
-kind: DynamoEndpoint
-metadata:
-  name: dynamo-endpoint
-  namespace: dynamo
-  ownerReferences:
-    - apiVersion: coordination.k8s.io/v1
-      kind: Lease
-      name: dynamo-lease
-  labels:
-    dynamo-namespace: dynamo
-    dynamo-component: backend
-    dynamo-endpoint: generate
-spec:
-    ...
-```
-
-Kubernetes concepts:
-- Lease: Existing Kubernetes resource in the coordination.k8s.io API group
-- Owner references: Metadata establishing parent-child relationships for automatic cleanup
-- kubectl watch API: Real-time subscription to resource changes
-- Custom resources: Extension mechanism for arbitrary data storage. We can introduce a new CRD for DynamoEndpoint and DynamoModel and similar to store state associated with a lese.
-
-Notes:
-- Requires a controller to delete leases on expiry. This is not something k8s automatically handles for us.
-- prefix-based watching for changes is not supported by the kubectl `watch` api. We can however watch on a set of labels that correspond to the endpoints we are interested in.
-- Unavoidable: overhead of going through kube api as opposed to direct etcd calls.
-- Need to work out atomicity of operations
-
-
-## Approach 2: Controller-managed DynamoEndpoint Resources
-
-Pods create DynamoEndpoint resources directly, but a controller keeps status in sync with underlying pod readiness status. Instead of using leases, we sync with the readiness status of the pod (as advertised by the probe).
-
-### Server side:
-1. Dynamo pods create DynamoEndpoint CRs directly when they start serving an endpoint
-2. Pods set ownerReferences to themselves on the DynamoEndpoint resources
-3. DynamoEndpoint resources are automatically cleaned up when pods terminate
-
-### Controller:
-1. Dynamo controller watches pod lifecycle events and readiness status
-2. Controller updates the status field of DynamoEndpoint resources based on pod readiness
-3. Controller maintains instance lists and transport information in DynamoEndpoint status
-
-### Client side:
-1. Client watches DynamoEndpoint resources using kubectl watch API
-2. Client maintains cache of available instances from DynamoEndpoint status
-3. Client routes requests to healthy instances via NATS transport
 
 ```mermaid
 sequenceDiagram
     participant Pod
-    participant K8s API
-    participant Controller
+    participant KubeAPI
     participant Client
 
-    Note over Pod: Dynamo Pod Startup
-    Pod->>K8s API: Create DynamoEndpoint CR
-    Pod->>K8s API: Set ownerReference to pod
+    Pod->>KubeAPI: Pod created with namespace/component labels
+    Pod->>Pod: Readiness probe becomes healthy
+    Pod->>KubeAPI: Pod status updated to Ready
 
-    Note over Controller: Status Management
-    Controller->>K8s API: Watch Pod lifecycle events
-    Controller->>K8s API: Watch Pod readiness changes
-    Controller->>K8s API: Update DynamoEndpoint status
-    K8s API->>K8s API: Auto-delete DynamoEndpoint (ownerRef)
+    Client->>KubeAPI: Watch pods with matching labels
+    KubeAPI-->>Client: Send pod events (create/update/delete)
+    Client->>Client: Update local cache of ready pods
+    Client->>Pod: Route requests to selected pod instance
 
-    Note over Client: Service Discovery
-    Client->>K8s API: Watch DynamoEndpoint resources
-    K8s API-->>Client: Stream status changes
-    Client->>Client: Update instance cache
-    Client->>Pod: Route requests via NATS
+    Note over KubeAPI: No explicit endpoint validation
 ```
-
-```yaml
-# Example DynamoEndpoint resource
-apiVersion: dynamo.nvidia.com/v1alpha1
-kind: DynamoEndpoint
-metadata:
-  name: dynamo-generate-endpoint
-  namespace: dynamo
-  labels:
-    dynamo-namespace: dynamo
-    dynamo-component: backend
-    dynamo-endpoint: generate
-  ownerReferences:
-  - apiVersion: v1
-    kind: Pod
-    name: dynamo-pod-abc123
-    uid: abc123-def456
-spec:
-  endpoint: generate
-  namespace: dynamo
-  component: backend
-status:
-    ready: true # controller updates this on readiness change events
-```
-
-Kubernetes concepts:
-- Custom Resource Definitions: Define the schema for DynamoEndpoint resources
-- Owner references: Automatic cleanup when pods terminate
 
 Notes:
-- Controller is in charge of updating the status of the DynamoEndpoint as underlying pod readiness changes.
+- Assumes that all components serve the same set of endpoints.
+- If a client makes a mistake and requests a non-existent endpoint, it will error out at request time.
+- Addressing relies on convention. I know the names of the endpoints that are available on a given component.
+- Assumes each pod holds exactly 1 instance of a component (TODO: what setups is this not true for?)
 
+## Approach 2: Endpoints are dynamically exposed and discovered on components
 
-## Approach 3: EndpointSlice based discovery
+This approach is very similar to the first approach, but we components dynamically expose endpoints. Idea from Julien M.
 
-Disclaimer: This idea is a WIP. It is similar to Approach 2, but eliminates the need for a custom controller relying instead on the Kubernetes Service controller to keep EndpointSlices up to date.
-
-### Server side:
-1. Pods for dynamo workers have labels for `dynamo-namespace` and `dynamo-component`.
-2. When a pod wants to serve an endpoint, it performs two actions:
-   - Creates a Service for that endpoint (if it doesn't exist) with selectors:
-     - `dynamo-namespace: NS_NAME`
-     - `dynamo-component: COMPONENT_NAME`
-     - `dynamo-endpoint-<NAME>: true`
-   - Patches its own labels to add `dynamo-endpoint-<NAME>: true`
-3. Concurrently, the readiness probe is reporting the status of the worker and its endpoints.
-
-### Client side:
-1. Client watches EndpointSlices associated with the target Kubernetes Service.
-3. Client maintains a cache of available instances, updating as EndpointSlice changes arrive (in response to pods readiness status/addition/deletion).
-4. Client routes requests to ready instances.
-
-```mermaid
-sequenceDiagram
-    participant Pod
-    participant K8s API
-    participant Client
-
-    Note over Pod: Dynamo Pod Lifecycle
-    Pod->>K8s API: Create Service (if doesn't exist)
-    Pod->>K8s API: Update pod labels for endpoint
-    Pod->>Pod: Readiness probe health check
-
-    Note over K8s API: Service Management
-    K8s API->>K8s API: Create EndpointSlice for Service
-    K8s API->>K8s API: Update EndpointSlice with pod readiness
-    K8s API->>K8s API: Remove failed pods from EndpointSlice
-
-    Note over Client: Service Discovery
-    Client->>K8s API: Watch EndpointSlice for target Service
-    K8s API-->>Client: Stream readiness changes
-    Client->>Client: Update instance cache
-    Client->>Pod: Route requests via NATS
-```
-
-Kubernetes concepts:
-- Services and EndpointSlices
-- Readiness probes: Health checks that determine pod readiness for traffic
+High level ideas:
+- Pod adds an annotation on itself to list out the endpoints it exposes. The labels for namespace and component are injected as before.
+- Clients watch for pod events on the tuple (namespace, component) and do a client side filter to check if there is an annotation on the pod matching the endpoint they are interested in.
 
 ```yaml
-# Example Service and EndpointSlice
+# Example pod annotation
 apiVersion: v1
-kind: Service
+kind: Pod
 metadata:
-  name: dynamo-generate-service
-  namespace: dynamo
+  name: dynamo-pod-abc123
   labels:
-    dynamo-namespace: dynamo
-    dynamo-component: backend
-    dynamo-endpoint: generate
-spec:
-  selector:
-    dynamo-namespace: dynamo
-    dynamo-component: backend
-    dynamo-endpoint-generate: "true"
-  ports: # dummy port since transport isn't actually taking place through this
-  - ...
-  type: ClusterIP
+    nvidia.com/dynamo-namespace: dynamo # set by pod
+    nvidia.com/dynamo-component: backend
+  annotations:
+    dynamo.nvidia.com/endpoint/generate="{...}" # pod dynamically adds and updates this annotatino
+    dynamo.nvidia.com/endpoint/generate_tokens="{...}"
 
----
-apiVersion: discovery.k8s.io/v1
-kind: EndpointSlice
-metadata:
-  name: dynamo-generate-service-abc12
-  namespace: dynamo
-  labels:
-    kubernetes.io/service-name: dynamo-generate-service
-addressType: IPv4
-ports:
-- ... # dummy port since transport isn't actually taking place through this
-endpoints:
-- addresses:
-  - "10.0.1.100"
-  conditions:
-    ready: true
-  targetRef:
-    apiVersion: pods/v1
-    kind: Pod
-    name: dynamo-pod-abc123
-- addresses:
-  - "10.0.1.101"
-  conditions:
-    ready: false  # Pod failed readiness probe
-  targetRef:
-    apiVersion: pods/v1
-    kind: Pod
-    name: dynamo-pod-def456
+```
+
+### APIs
+
+APIs stay the same
+
+```python
+# SERVER SIDE
+
+# Operator creates a pod with labels for namespace, component. The namespace, component, and pod name are injected into the pod.
+# get_component() returns a struct with info on the current instance's namespace, component, and pod name.
+endpoint = get_component().endpoint("generate")
+# NEW: Modifies its own annotation to add the endpoint to the list of endpoints it serves
+# subscribes to a NATS topic that is a function of (namespace, component, endpoint, pod name)
+await endpoint.serve_endpoint(RequestHandler().generate)
+
+# CLIENT SIDE
+
+# setup a kube watch for pods matching the labels for namespace, component
+# filter the pods to only include ones that have the endpoint in their annotation
+# block until a READY pod is found that matches the labels for namespace, component and has the endpoint in their annotation
+endpoint = runtime.namespace("dynamo").component("backend").endpoint("generate")
+client = await endpoint.client()
+await client.wait_for_instances()
+
+# write to the NATS topic that is a function of (namespace, component, endpoint, pod name)
+stream = await client.generate("request")
+```
+
+```mermaid
+sequenceDiagram
+    participant Pod
+    participant KubeAPI
+    participant Client
+
+    Pod->>KubeAPI: Pod created with namespace/component labels
+    Pod->>KubeAPI: Add endpoint annotation dynamically
+    Pod->>Pod: Readiness probe becomes healthy
+    Pod->>KubeAPI: Pod status updated to Ready
+
+    Client->>KubeAPI: Watch pods with matching labels
+    KubeAPI-->>Client: Send pod events with annotations
+    Client->>Client: Filter pods by endpoint annotation
+    Client->>Client: Update local cache of matching ready pods
+    Client->>Pod: Route requests to selected pod instance
+
+    Note over Client: Client-side filtering by endpoint annotation
 ```
 
 Notes:
-- Pro: We don't need a dedicated controller to delete leases on expiry. (No leases)
-- We need to find a better pattern for a pod to influence the services it is part of than mutating its label set. Potentially a controller could be involved.
-- The service is not actually used for transport here. Only to manage the EndpointSlices which are doing book keeping for which pods are backing the endpoint.
+- Allows for storage of metadata associated with the endpoint in the annotation
+- Allows for dynamic updates of endpoints
+- Client side parsing and filtering of the annotation may add overhead
+- Honors the API, blocks until we know for sure an endpoint is available on the given component
 
+## Approach 3: Endpoints associated with a component are statically defined on the DGD
+
+This approach is similar to the first approach, but the endpoints and any metadata about them are statically defined on the DGD.
+
+Instead of a pod dynamically adding and updating its own annotations, the operator can define a set of labels on pod start that enable it to be watched by clients.
+
+```yaml
+# Example DGD
+apiVersion: v1
+kind: DGD
+metadata:
+  name: dynamo-dgd-abc123
+  labels:
+    nvidia.com/dynamo-namespace: dynamo
+    nvidia.com/dynamo-component: backend
+    nvidia.com/expose-dynamo-endpoint/generate: true
+    nvidia.com/expose-dynamo-endpoint/generate_tokens: true
+```
+
+Notes:
+- Endpoints of the component are codified in the spec itself
+- TODO: enforce that the application logic exposes the endpoints that it is supposed to according to what is defined in the spec
