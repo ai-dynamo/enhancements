@@ -12,7 +12,7 @@
 
 **Sponsor**: @nnshah1, @grahamking
 
-**Required Reviewers**: @nnshah1, @grahamking, @athreesh, @nealvaidya, @ishandhanani, @rmccorm4, @ai-dynamo/DevOps
+**Required Reviewers**: @nnshah1, @grahamking, @athreesh, @nealvaidya, @ishandhanani, @rmccorm4, @biswapanda, @alec-flowers ,@ai-dynamo/DevOps
 
 **Review Date**: TBD
 
@@ -22,7 +22,7 @@
 
 # Summary
 
-Comprehensively restructure the entire Dynamo repository to use a single `src/dynamo/` package structure and consolidate all non-source files (deploy/, launch/, docs/, configs/, etc.) into a logical, maintainable organization. This change will simplify packaging, improve editable installs, enhance developer experience, and create a more maintainable codebase while preserving all existing functionality.
+Restructure the `components` directory in Dynamo repository to use a single `src/dynamo/` package structure and consolidate all non-source files (deploy/, launch/, docs/, configs/, etc.) into a logical, maintainable organization. This change will simplify packaging, improve editable installs, enhance developer experience, and create a more maintainable codebase while preserving all existing functionality.
 
 # Motivation
 
@@ -30,20 +30,12 @@ The current Dynamo repository structure has several organizational issues that i
 
 1. **Deep nesting complexity**: Each component follows a `components/*/src/dynamo/component_name/` pattern, creating unnecessary directory depth
 2. **Fragmented packaging**: The `pyproject.toml` requires listing 7 separate package paths, making it complex to manage
-3. **Poor editable install experience**: Developers must navigate through multiple nested directories to find source code
+3. **Poor editable installß experience**: Developers must navigate through multiple nested directories to find source code
 4. **Scattered non-source files**: Deployment configs, launch scripts, documentation, and benchmarks are scattered across component directories
 5. **Inconsistent organization**: Similar files (deploy/, launch/, docs/) are duplicated across components with no central organization
 6. **Maintenance overhead**: Adding new components requires updating multiple configuration files and duplicating directory structures
 7. **Poor discoverability**: Related files are hard to find because they're buried in component-specific directories
 8. **Operational complexity**: DevOps teams must navigate multiple directories to find deployment configurations
-
-The current structure makes it difficult for users to:
-- Quickly locate and understand component relationships
-- Set up development environments with editable installs
-- Find deployment configurations and launch scripts
-- Maintain consistent packaging across components
-- Add new components without complex configuration changes
-- Understand the overall project structure at a glance
 
 ## Goals
 
@@ -73,7 +65,7 @@ The project **MUST** use a single `src/dynamo/` directory containing all compone
 
 The `pyproject.toml` **MUST** reference only a single package path: `"src/dynamo"` instead of the current 7 separate package paths. 
 
-All the python dependencies **MUST** be defined in optional installed under `pyproject.toml`
+All the python dependencies **MUST** be defined in optional install under `pyproject.toml`
 
 ### REQ 3 Preserved Import Structure
 
