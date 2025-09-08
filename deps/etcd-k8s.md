@@ -84,7 +84,7 @@ High level ideas:
 - Each pod is a unique instance of a component. The operator attaches labels for namespace, component to the pod.
 - The readiness probe of the pod reflects the health of the instance. If it is ready, clients can route traffic to it.
 - The readiness probe is only 200 when all endpoints are ready.
-- The pod name is the unique instance identifier for internal use. When using NATS based transport, the topic is a function of the pod name.
+- The pod name is the unique instance identifier for internal use. When using NATS based transport, the topic is a function of the pod name. (Similar to the primary lease in etcd)
 - Clients simply set a watch for ready pods matching the labels for namespace, component. They update their cache of instances as events arrive (pod creation, pod deletion, pod readiness change).
 - ***NOTE***: There is no explicit entity for endpoint. Clients know apriori which endpoints are available for a component. If the client made a mistake this will be known at request time.
 
@@ -99,7 +99,7 @@ APIs stay the same
 # Operator creates a pod with labels for namespace, component. The namespace, component, and pod name are injected into the pod.
 # get_component() returns a struct with info on the current instance's namespace, component, and pod name.
 endpoint = get_component().endpoint("generate")
-# subscribes to a NATS topic that is a function of (namespace, component, endpoint, pod name)
+# exposes the endpoint on the transport
 await endpoint.serve_endpoint(RequestHandler().generate)
 
 # CLIENT SIDE
@@ -111,9 +111,19 @@ endpoint = runtime.namespace("dynamo").component("backend").endpoint("generate")
 client = await endpoint.client()
 await client.wait_for_instances()
 
-# write to the NATS topic that is a function of (namespace, component, endpoint, pod name)
+# Send the message via the transport
 # errors out if the component doesn't actually have such an endpoint
 stream = await client.generate("request")
+```
+
+```
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dynamo-pod-abc123
+  labels:
+    nvidia.com/dynamo-namespace: dynamo
+    nvidia.com/dynamo-component: backend
 ```
 
 ```mermaid
@@ -140,7 +150,68 @@ Notes:
 - Addressing relies on convention. I know the names of the endpoints that are available on a given component.
 - Assumes each pod holds exactly 1 instance of a component (TODO: what setups is this not true for?)
 
-## Approach 2: Endpoints are dynamically exposed and discovered on components
+
+## Approach 2: Endpoints associated with a component are statically defined on the DGD
+
+This approach is similar to the first approach, but the endpoints and any metadata about them are statically defined on the DGD.
+
+Instead of a pod dynamically adding and updating its own annotations, the operator can define a set of labels on pod start that enable it to be watched by clients.
+
+```yaml
+# Example DGD
+apiVersion: v1
+kind: DGD
+metadata:
+  name: dynamo-dgd-abc123
+  services:
+    decode: # the decode component defines the endpoints it is associated with
+      endpoints:
+        - generate
+        - generate_tokens
+
+# Pods are created with labels for namespace, component, and endpoints that can then be used to filter by kube watch
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dynamo-pod-abc123
+  labels:
+    nvidia.com/dynamo-namespace: dynamo
+    nvidia.com/dynamo-component: backend
+    nvidia.com/expose-dynamo-endpoint/generate: true
+    nvidia.com/expose-dynamo-endpoint/generate_tokens: true
+```
+
+### APIs
+
+APIs stay the same
+
+```python
+# SERVER SIDE
+
+# Operator creates a pod with labels for namespace, component. The namespace, component, endpoints, and pod name are injected into the pod.
+endpoint = get_component().endpoint("generate")
+# exposes the endpoint on the transport
+# NOTE: This endpoint will be discoverable as soon as the pod marks itself ready. (No explicit registration necessary)
+await endpoint.serve_endpoint(RequestHandler().generate)
+
+# CLIENT SIDE
+
+# setup a kube watch for pods matching the labels for namespace, component, endpoint
+# block until a ready pod is found that matches the labels for namespace, component
+endpoint = runtime.namespace("dynamo").component("backend").endpoint("generate")
+client = await endpoint.client()
+await client.wait_for_instances()
+
+# Send the message via the transport. (e.g if transport is NATS, the message is sent to the NATS topic that is a function of (namespace, component, endpoint, pod name))
+# errors out if the component doesn't actually have such an endpoint
+stream = await client.generate("request")
+```
+
+Notes:
+- Endpoints of the component are codified in the spec itself
+- TODO: enforce that the application logic exposes the endpoints that it is supposed to according to what is defined in the spec
+
+## Approach 3: Endpoints are dynamically exposed and discovered on components
 
 This approach is very similar to the first approach, but we components dynamically expose endpoints. Idea from Julien M.
 
@@ -216,25 +287,9 @@ Notes:
 - Client side parsing and filtering of the annotation may add overhead
 - Honors the API, blocks until we know for sure an endpoint is available on the given component
 
-## Approach 3: Endpoints associated with a component are statically defined on the DGD
 
-This approach is similar to the first approach, but the endpoints and any metadata about them are statically defined on the DGD.
-
-Instead of a pod dynamically adding and updating its own annotations, the operator can define a set of labels on pod start that enable it to be watched by clients.
-
-```yaml
-# Example DGD
-apiVersion: v1
-kind: DGD
-metadata:
-  name: dynamo-dgd-abc123
-  labels:
-    nvidia.com/dynamo-namespace: dynamo
-    nvidia.com/dynamo-component: backend
-    nvidia.com/expose-dynamo-endpoint/generate: true
-    nvidia.com/expose-dynamo-endpoint/generate_tokens: true
-```
-
-Notes:
-- Endpoints of the component are codified in the spec itself
-- TODO: enforce that the application logic exposes the endpoints that it is supposed to according to what is defined in the spec
+feedback:
+- add examples of labels
+- remove mentions to nats transport
+- reorder 3 to 2 in the doc
+- workers have associated configmap that the worker can read/write to
