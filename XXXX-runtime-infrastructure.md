@@ -48,13 +48,27 @@ infrastructure.
 
 ## Deploying Dynamo in Kubernetes
 
-## Deploying Dynamo outside Kubernetes
+## Deploying Dynamo outside Kubernetes (Dev)
+
+### Deploying Dynamo on local single node system (Dev)
 
 # Alternate Solutions
 
 N / A
 
 # Background
+
+## Service Discovery
+
+## Request Routing
+
+## Shared Configuration
+
+## Persistent State
+
+## Events
+
+## Synchronization
 
 ## Where and How Nats and `etcd` are Used in Dynamo
 
@@ -70,7 +84,7 @@ such that keys have a single value and transactions support that can
 for example check for existance and create a key or return an existing
 value.
 
-#### Endpoint Instance Discovery
+#### Endpoint Instance Discovery [Service Discovery]
 
 Dynamo uses `etcd` to register new worker instances with their
 configuration so that the `frontend` and any clients such as the
@@ -92,7 +106,7 @@ b. Get information for how to reach `endpoint instances` via `nats` topics. `nat
 
 ```
 
-#### Model / Worker Discovery
+#### Model / Worker Discovery [Service Discovery] [Shared Configuration]
 
 The frontend additionally:
 
@@ -120,7 +134,7 @@ c. Retrieves the `mdc` which contains additional  prepocessing instructions as w
     "value": "{\"display_name\":\"Qwen/Qwen3-0.6B\",\"slug\":\"qwen_qwen3-0_6b\",\"model_info\":{\"hf_config_json\":\"nats://0.0.0.0:4222/qwen_qwen3-0_6b/config.json\"},\"tokenizer\":{\"hf_tokenizer_json\":\"nats://0.0.0.0:4222/qwen_qwen3-0_6b/tokenizer.json\"},\"prompt_formatter\":{\"hf_tokenizer_config_json\":\"nats://0.0.0.0:4222/qwen_qwen3-0_6b/tokenizer_config.json\"},\"gen_config\":{\"hf_generation_config_json\":\"nats://0.0.0.0:4222/qwen_qwen3-0_6b/generation_config.json\"},\"last_published\":null,\"context_length\":40960,\"kv_cache_block_size\":16,\"migration_limit\":0}"
   }
 ```
-#### Worker Port Conflict Resolution 
+#### Worker Port Conflict Resolution [Shared Configuration] [Synchronization]
 
 Used to ensure unique ports for processes on the same host:
 
@@ -136,7 +150,7 @@ Used to ensure unique ports for processes on the same host:
 
 ```
 
-#### Router State Sharing Synchronization
+#### Router State Sharing Synchronization [Persistent State] [Synchronization]
  
 Used as a distributed lock to snapshot radix tree to nats.
 
@@ -189,19 +203,19 @@ Endpoints operate in a request / response mode.
 
 Responses are passed back over TCP / IP. 
 
-### KV Event Publishing (Jet Stream)
+### KV Event Publishing (Jet Stream) [Events]
 
 Workers publish kv events over ZMQ and these are then forwarded to a
 persistent, durable, stream and then consumed by all `routers` in the
 system.
 
-### KV Radix Tree Storage (Object Store / Jet Stream)
+### KV Radix Tree Storage (Object Store / Jet Stream) [Persistent State]
 
 KV Router periodically persists RADIX tree state into NATS object store. 
 
-### Tokenizer Storage (Object Store / Jet Stream)
+### Tokenizer Storage (Object Store / Jet Stream) [Persistent State]
 
-### Router Sync (Nats Core)
+### Router Sync (Nats Core) [Events]
 
 Router instances sync with each other using component event publishing.
 
@@ -211,10 +225,12 @@ pub const PREFILL_SUBJECT: &str = "prefill_events";
 pub const ACTIVE_SEQUENCES_SUBJECT: &str = "active_sequences_events";
 ```
 
-### Load / Forward Pass Metrics (Nats Core)
+### Load / Forward Pass Metrics (Nats Core) [Events]
 
 Forward pass metrics published over NATS - as well as available via
 `load_metrics` endpoint.
+
+Scraped using `STATS` protocol in `metrics_aggregator.rs` `collect_endpoints`.
 
 ### Service Info
 
