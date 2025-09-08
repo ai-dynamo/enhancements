@@ -30,7 +30,7 @@ The current Dynamo repository structure has several organizational issues that i
 
 1. **Deep nesting complexity**: Each component follows a `components/*/src/dynamo/component_name/` pattern, creating unnecessary directory depth
 2. **Fragmented packaging**: The `pyproject.toml` requires listing 7 separate package paths, making it complex to manage
-3. **Poor editable installß experience**: Developers must navigate through multiple nested directories to find source code
+3. **Poor editable install experience**: Developers must navigate through multiple nested directories to find source code
 4. **Scattered non-source files**: Deployment configs, launch scripts, documentation, and benchmarks are scattered across component directories
 5. **Inconsistent organization**: Similar files (deploy/, launch/, docs/) are duplicated across components with no central organization
 6. **Maintenance overhead**: Adding new components requires updating multiple configuration files and duplicating directory structures
@@ -246,6 +246,19 @@ dynamo/
 └── ... (other root files)
 ```
 
+### Benefits of Comprehensive Restructuring
+
+- **Single source directory**: All Python code in `components/src/dynamo/` for easy navigation
+- **Centralized configs**: All deployment configurations in `configs/` for easy discovery
+- **Organized scripts**: All launch scripts in `scripts/` organized by deployment type
+- **Clear separation**: Source code, configs, scripts, docs, and tests are clearly separated
+- **Easier maintenance**: Similar files are grouped together instead of scattered
+- **Reduced duplication**: Common patterns are consolidated instead of repeated
+- **Simplified packaging**: Single package path in `pyproject.toml`
+- **Consistent structure**: All components follow the same organization pattern
+- **Better documentation**: Component docs organized in `docs/`
+- **Cleaner repository**: No more deep nesting or mixed concerns
+
 # Implementation Details
 
 ## Migration Steps
@@ -295,33 +308,11 @@ To:
 packages = ["components/src/dynamo"]
 ```
 
-## Benefits of Comprehensive Restructuring
-
-### Developer Experience
-- **Single source directory**: All Python code in `components/src/dynamo/` for easy navigation
-- **Preserved metrics**: Rust metrics component stays in `components/metrics/` for consistency
-- **Centralized configs**: All deployment configurations in `configs/` for easy discovery
-- **Organized scripts**: All launch scripts in `scripts/` organized by deployment type
-- **Clear separation**: Source code, configs, scripts, docs, and tests are clearly separated
-
-### Operational Efficiency
-- **Faster deployment setup**: DevOps teams can find all deployment configs in one place
-- **Easier maintenance**: Similar files are grouped together instead of scattered
-- **Better discoverability**: New team members can understand the structure at a glance
-- **Reduced duplication**: Common patterns are consolidated instead of repeated
-
-### Maintainability
-- **Simplified packaging**: Single package path in `pyproject.toml`
-- **Consistent structure**: All components follow the same organization pattern
-- **Better documentation**: Component docs organized in `docs/`
-- **Cleaner repository**: No more deep nesting or mixed concerns
-
 ## Deferred to Implementation
 
 * Specific migration implementation details
 * CI/CD pipeline updates for new structure
 * Documentation updates for development setup
-* IDE configuration updates for new structure
 * Path updates in all configuration files and scripts
 
 # Implementation Phases
