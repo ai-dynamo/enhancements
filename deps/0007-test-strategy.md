@@ -96,7 +96,9 @@ mod tests {
 
 #### Python Unit Tests
 **Location**: `component_module/tests/`
+
 **Purpose**: Test individual Python functions and classes
+
 **Characteristics**: Fast (<10ms), isolated, mocked dependencies
 
 ```python
@@ -159,8 +161,10 @@ async fn test_error_propagation() {
 ```
 
 #### Python Integration Tests
-**Location**: `tests/integration/`
+**Location**: `tests/` directory in each component.
+
 **Purpose**: Test component interactions and Python-Rust bindings
+
 **Characteristics**: Medium speed (<1s), real components, controlled environment
 
 ```python
@@ -193,9 +197,11 @@ def test_multi_component_workflow():
 ### 3. End-to-End Tests
 
 #### Python: System E2E Tests
-**Location**: `tests/e2e/`
-**Purpose**: Validate complete system behavior
-**Characteristics**: Slow (>5s), realistic scenarios, full system
+**Location**: `tests/` in root directory.
+
+**Purpose**: Validate complete system behavior.
+
+**Characteristics**: Slow (>5s), realistic scenarios, full system.
 
 ```python
 @pytest.mark.e2e
@@ -266,7 +272,8 @@ criterion_main!(benches);
 ```
 
 #### Python Performance Tests
-**Location**: `tests/performance/`
+**Location**: `tests/benchamrks/` in root directory
+
 **Purpose**: Validate system performance characteristics
 
 ```python
@@ -307,7 +314,9 @@ def test_sustained_load():
 ### 5. Security Tests
 
 #### Security/OSRB Test Framework
-**Location**: `tests/security/`
+
+**Location**: `tests/security/` in root directory
+
 **Purpose**: Validate security controls and detect OSRB exceptions.
 
 ```python
@@ -326,35 +335,16 @@ def test_input_sanitization():
         assert response.status == "error"
         assert "sanitized" in response.message.lower()
 
-@pytest.mark.security
-@pytest.mark.network
-def test_network_security():
-    """Test network security controls"""
-    # Test TLS enforcement
-    with pytest.raises(ConnectionError):
-        insecure_client = Client(use_tls=False)
-        insecure_client.connect()
-    
-    # Test authentication
-    unauthenticated_client = Client()
-    response = unauthenticated_client.make_request()
-    assert response.status_code == 401
-
-@pytest.mark.security
-def test_resource_limits():
-    """Test resource exhaustion protection"""
-    # Test memory limits
-    large_request = create_large_request(size_mb=1000)
-    response = system.process_request(large_request)
-    assert response.status == "error"
-    assert "resource limit" in response.message.lower()
 ```
 
 ### 6. Fault Tolerance Tests
 
 #### Reliability Testing
-**Location**: `tests/fault_tolerance/`
+
+**Location**: `tests/fault_tolerance/` in root directory
+
 **Purpose**: Validate system behavior under failure conditions
+
 
 ```python
 @pytest.mark.fault_tolerance
