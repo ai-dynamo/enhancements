@@ -1,4 +1,4 @@
-# Comprehensive Test Strategy for Dynamo Inference Framework
+# Test Guideline for Dynamo
 
 ## Summary
 
