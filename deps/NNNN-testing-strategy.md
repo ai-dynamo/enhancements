@@ -2,7 +2,7 @@
 
 **Status**: Draft
 
-**Authors**: nnshah1, harrison, pavitra, biswa
+**Authors**: Harrison, Pavithra, Neelay
 
 **Category**: Architecture 
 
@@ -14,9 +14,9 @@
 
 **Sponsor**: nnshah1
 
-**Required Reviewers**: meenakshi, pavitra, anant, biswa
+**Required Reviewers**: Meenakshi, Neelay, Harrison, Alec
 
-**Review Date**: 2025-05-30 
+**Review Date**: 2025-09-09 
 
 **Pull Request**: TBD
 
@@ -55,6 +55,49 @@ Currently the Dynamo project has a number of different test strategies and imple
 ## Dynamo Testing Strategy (Intro)
 
 Dynamo is a distributed inference serving framework designed for generative AI use cases. Like any project it has a development and release life-cycle with different testing requirements, test types that have a different goal and modules and functionality that require test coverage.
+
+## Test Characteristics
+- **Fast**: Unit tests < 10ms, Integration tests < 1s
+- **Reliable**: No flaky tests, deterministic outcomes
+- **Isolated**: Tests don't affect each other
+- **Clear**: Test intent obvious from name and structure
+- **Maintainable**: Tests updated with code changes
+
+## Code Coverage Requirements
+- **Rust**: Minimum 80% line coverage, 90% for critical paths
+- **Python**: Minimum 85% line coverage, 95% for public APIs
+
+
+## Testing Directory Structure
+
+``` shell
+dynamo/
+├── lib/
+│   ├── runtime/
+│   │   ├── src/
+│   │   │   └── lib.rs          # Rust code + unit tests inside
+│   │   └── tests/              # Optional Rust integration tests specific to runtime
+│   |   └── benches/  
+│   ├── llm/
+│   │   └── src/
+│   │       └── lib.rs          # Unit tests here
+│   │   └── tests/              # Optional Rust integration tests specific to runtime
+│   |   └── benches/  
+│   └── ...
+├── components/
+│   ├── planner/
+│   │   └── tests/              # Python unit and integration tests for planner module
+│   ├── backend/
+│   │   └── tests/              # Python unit and integration  tests for backend module
+│   └── ...
+├── tests/                      # End-to-end tests
+    ├── server
+    ├── kvbm
+    ├── ...                        # Other python end-to-end tests
+    ├── benchmark/
+    └── fault_tolerance/
+```
+
 
 ## Test Types
 We define 6 categories of tests: linting, unit, integration, end-to-end, benchmark, and stress.
@@ -109,21 +152,18 @@ Naming of the test files is normalized for categorization and clarity in the eve
 An example of the proposed folder and file structure for integration tests is shown below.
 
 ``` shell
-# Dynamo top-level folder
-tests/
-└── conftest.py
-
-└── runtime/
-    └── conftest.py
-    └── test_runtime_initialization.py
-    └── runtime_utils.py
-    ...
-└── llm/
-    └── conftest.py
-    └── test_llm_initialization.py
-        ...
-    ...
+dynamo/
+├── ...
+├── components/
+│   ├── planner/
+│   │   └── tests/              # Python unit and integration tests for planner module
+│   ├── backend/
+│   │   └── tests/              # Python unit and integration  tests for backend module
+│   └── ...
+├── ...
 ```
+
+
 #### Test segmentation
 
 Integration tests use the `@pytest.mark.integration` mark, which is required for all integration tests, as well as further classification within the integration test class. The four most prominent use cases are: hardware requirements for operation, classification of the test to a test lifecycle, worker framework type, and execution related. 
@@ -143,7 +183,7 @@ Integration tests use the `@pytest.mark.integration` mark, which is required for
     - `@pytest.mark.sglang`
 - Execution specific marks
     - `@pytest.mark.fast` - Tests that execute quickly, typically using small models
-    - `@pytest.mark.slow` - Tests that take a long time to run
+    - `@pytest.mark.slow` - Tests that take a long time to run (> 10 minutes)
     - `@pytest.mark.skip(reason="Example: KV Manager is under development")` - Skip these tests
     - `@pytest.mark.xfail(reason="Expected to fail because...")` - Tests expected to fail
 
@@ -167,33 +207,81 @@ End-to-end tests are test user flows that are centered on command-line calls usi
 
 #### Structure
 
-End-to-end tests are defined using the [pytest](https://docs.pytest.org/en/stable/) framework and exist in within the top-level`tests` directory in subdirectories mimicking their usage, e.g. tests of `dynamo serve` should exist at `tests/dynamo_serve`.
+End-to-end tests are defined using the [pytest](https://docs.pytest.org/en/stable/) framework and exist in within the top-level`tests` directory in subdirectories mimicking their usage, e.g. tests of `dynamo serve` should exist at `tests/serve`.
 
 #### Test segmentation
 
+##### Python Tests Segmentation (pytest)
+
+We use **pytest markers** to categorize tests by their purpose, requirements, and execution characteristics. This helps selectively run relevant tests during development, CI/CD, and nightly/weekly runs.
 End-to-end tests use the `@pytest.mark.e2e` mark, which is required for all end-to-end tests, as well as further classification within the end-to-end test class. Mirroring integration tests, the four most prominent use cases are: hardware requirements for operation, classification of the test to a test lifecycle, worker framework type, execution related.
 
-- System configuration marks
+- **System configuration marks:**
     - `@pytest.mark.gpus_needed_0`
     - `@pytest.mark.gpus_needed_1`
     - `@pytest.mark.gpus_needed_2`
-- Life-cycle marks
+- **Life-cycle marks:**
     - `@pytest.mark.premerge`
     - `@pytest.mark.postmerge`
     - `@pytest.mark.nightly`
     - `@pytest.mark.release`
-- Worker Framework marks
+- **Worker Framework marks:**
     - `@pytest.mark.vllm`
     - `@pytest.mark.tensorrt_llm`
     - `@pytest.mark.sglang`
-- Execution specific marks
+- **Execution specific marks:**
     - `@pytest.mark.fast` - Tests that execute quickly, typically using small models
     - `@pytest.mark.slow` - Tests that take a long time to run
     - `@pytest.mark.skip(reason="Example: KV Manager is under development")` - Skip these tests
     - `@pytest.mark.xfail(reason="Expected to fail because...")` - Tests expected to fail
-- Deployment target
+- **Deployment target:**
     - `@pytest.mark.k8s` - Tests of `dynamo deploy` that deploy to a Kubernetes instance
     - `@pytest.mark.slurm` - Tests of `dynamo deploy` that deploy to a Slurm instance
+- **Component Specific Marks:**
+  - `@pytest.mark.kvbm` – Tests for KVBM behavior.
+  - `@pytest.mark.planner` – Tests for planner behavior.
+  - `@pytest.mark.router` – Tests for router behavior.
+- **Infrastructure Specific Marks:**
+   - `@pytest.mark.h100` – wideep tests requires to be run on H100 and cannot be run on L40. Also, certain pytorch versions support compute capability 8.0 and require a higher CC. 
+
+##### How to Run Python Tests by Marker
+
+Run all tests with a specific marker:
+
+```bash
+pytest -m <marker_name>
+```
+##### Rust Tests Segmentation using Cargo features
+
+Tests can be conditionally compiled using `#[cfg(feature = "feature_name")]`. For example:
+
+```rust
+#[cfg(feature = "gpu")]
+#[test]
+fn test_gpu_acceleration() {
+    // GPU-specific test code here
+}
+```
+```rust
+#[cfg(feature = "nightly")]
+#[test]
+fn test_nightly_only_feature() {
+    // Nightly-only test code here
+}
+```
+
+##### How to Run Rust Tests by features
+To combine features;
+
+```rust
+#[cfg(all(feature = "gpu", feature = "vllm"))]
+#[test]
+fn test_gpu_and_vllm() {
+    // Test requiring both features
+}
+
+cargo test --features "gpu vllm"
+```
 
 #### Performance Expectations
 
@@ -418,7 +506,7 @@ In contrast to the public infrastructure, the internal infrastructure provides s
 
 Additionally there are kubernetes and slurm testbeds of multiple nodes to more thoroughly evaluate the code for production-like deployments.
 
-#### CI Test Trigger Matrix
+#### CI Test Trigger Matrix 
 
 | Trigger Variable                        | pre-merge | vllm_1-gpu | vllm_multi_gpu | trtllm_1-gpu | trtllm_multi_gpu | vllm_benchmark | trtllm_benchmark | jet | compoundai |
 |-----------------------------------------|:---------:|:----------:|:--------------:|:------------:|:----------------:|:--------------:|:----------------:|:---:|:----------:|
