@@ -440,7 +440,7 @@ We use **pytest markers** to categorize tests by their purpose, requirements, an
 
 - **Execution Specific Marks:**
   - `@pytest.mark.fast` – Quick tests, often small models.
-  - `@pytest.mark.slow` – Tests that take longer time.
+  - `@pytest.mark.slow` – Tests that take longer time >10 minutes.
   - `@pytest.mark.skip(reason="...")` – Skip tests with a reason.
   - `@pytest.mark.xfail(reason="...")` – Expected failing tests.
 
