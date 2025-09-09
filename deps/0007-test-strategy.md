@@ -50,12 +50,9 @@ dynamo/
 │   │   └── tests/              # Python unit tests for backend module
 │   └── ...
 ├── tests/                     # Top-level integration tests (Rust and Python)
-    ├── integration/                   # Python integration tests, organized by component
-    │   ├── planner/
-    │   ├── router/
-    │   └── common/
-    ├── e2e/                          # Python end-to-end tests
-    ├── benahmark/
+
+    ├──                         # Python end-to-end tests
+    ├── benchmark/
     └── fault_tolerance/
 
 ```
@@ -437,6 +434,7 @@ We use **pytest markers** to categorize tests by their purpose, requirements, an
   - `@pytest.mark.vllm`
   - `@pytest.mark.tensorrt_llm`
   - `@pytest.mark.sglang`
+  - `@pytest.mark.dynamo`
 
 - **Execution Specific Marks:**
   - `@pytest.mark.fast` – Quick tests, often small models.
@@ -449,6 +447,10 @@ We use **pytest markers** to categorize tests by their purpose, requirements, an
   - `@pytest.mark.planner` – Tests for planner behavior.
   - `@pytest.mark.router` – Tests for router behavior.
 
+- **Infrastructure Specific Marks:**
+   - `@pytest.mark.h100` – wideep tests requires to be run on H100 and cannot be run on L40. Also, certain pytorch versions support compute capability 8.0 and require a higher CC. 
+
+NOTE: The markers/features will be updated as required.
 
 ### How to Run Python Tests by Marker
 
