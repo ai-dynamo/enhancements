@@ -1,4 +1,4 @@
-# ETCD-less Dynamo in Kubernetes: Endpoint Instance Discovery
+# Service and Model Discovery Interface
 
 ## Background
 
