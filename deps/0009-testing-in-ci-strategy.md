@@ -505,17 +505,6 @@ Pre-requisites:
 
 **Open/Closed Metrics:** All test coverage data should be visible to the internal team only.
 
-TODO: Define critical falures here. These failures can be the gating tests failing in gated branches. Refine the gating tests further here to include performance (?).
-
 ---
-
-
-
-
-
-
-
-
-
 
 
