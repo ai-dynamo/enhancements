@@ -1,4 +1,4 @@
-# Dynamo Testing Strategy
+# Dynamo Testing in CI Strategy
 
 ## Status
 Draft
@@ -74,27 +74,141 @@ By achieving these goals, the Dynamo project aims to ensure high reliability, ra
 
 ---
 
-## Definitions
 
-- **TDD (Test-Driven Development):** A software development process where tests are written before the code they validate. Developers write a failing test, implement the minimal code to pass the test, and then refactor as needed. This approach ensures code is thoroughly tested and requirements are well understood.
-- **BDD (Behavior-Driven Development):** A development methodology that emphasizes designing or specifying the expected behavior of a system or component before implementation. Tests are derived from these designs or behavioral specifications to ensure correctness.
-- **ATDD (Acceptance Test-Driven Development):** A collaborative approach where acceptance criteria are defined as tests before development begins. These tests represent the requirements from the user's perspective and serve as the basis for validating that the system meets business needs.
-- **Gated Branch:** Any branch in the repository that is subject to branch protections and quality controls. This includes main, release, or any other protected branch, such as long-term support (LWS/PB) branches.
-- **control flow graph:** CFG is a graphical representation of all possible execution paths of a program.
-- **Critical Components of the Dynamo System:** Key subsystems or modules whose correct operation is essential for the overall reliability and functionality of Dynamo. Examples include the planner, router, kvbm, and others as identified in the project.
-- **Prime Path (in Testing):** In the context of this strategy, the prime path is defined as the longest happy path through the system, ideally integrating the happy paths of all critical components (e.g., planner, router, kvbm, dynamo serve). This path represents the most comprehensive, non-redundant execution flow and is validated by E2E tests.
+## Test organization and directory Structure 
+
+For the detailed test directory structure and the definitions of all test markers used in the Dynamo project, please refer to the documentation [Dynamo Test Strategy](./0006-testing-strategy.md)
+
+``` shell
+dynamo/
+├── lib/
+│   ├── runtime/
+│   │   ├── src/
+│   │   │   └── lib.rs          # Rust code + unit tests inside
+│   │   └── tests/              # Optional Rust integration tests specific to runtime
+│   |   └── benches/  
+│   ├── llm/
+│   │   └── src/
+│   │       └── lib.rs          # Unit tests here
+│   │   └── tests/              # Optional Rust integration tests specific to runtime
+│   |   └── benches/  
+│   └── ...
+├── components/
+│   ├── planner/
+│   │   └── tests/              # Python unit and integration tests for planner module
+│   ├── backend/
+│   │   └── tests/              # Python unit and integration  tests for backend module
+│   └── ...
+├── tests/                      # End-to-end tests
+    ├── server
+    ├── kvbm
+    ├── ...                     # Other python end-to-end tests
+    ├── benchmark/
+    └── fault_tolerance/
+```
+
+---
+
+## Test Segmentation and Grouping
+
+Dynamo's test suite is segmented by component, h/w requirements, and environment to enable targeted CI runs, clear ownership, and debugging. Pytest markers are used for Python, and module/feature-based grouping is used for Rust.
+
+### Python (pytest) Markers
+
+Markers are used to select, group, and report on tests in CI and local runs. All tests must have the below markers Example markers:
+
+- **Lifecycle:**
+  - pre_commit, pre_merge, nightly, weekly, release
+- **Hardware:** 
+  - Specify the lowest h/w requirement. For example if a test can be run on both cpu and gpu, mark it as gpu_0.
+  - gpu_0, gpu_1, gpu_2, gpu_4, gpu_8
+  - [Optional] h100, gb200, a100, l40
+- **Test Type:**
+  - unit, integration, e2e, stress,
+  - (Others) smoke, performance, scalability, distributed, flaky, security, conformance
+- **Framework/Backend: (if applicable) **
+  - vllm, trtllm, sglang, custom_backend
+
+  Other optional markers :
+- **Component/Feature:**
+  - kv_cache, kvbm, planner, router, api, config, logging, security, data_plane, control_plane
+- **Environment/Infra:**
+  - k8s, slurm, docker, cloud
+
+**pyproject.toml registration example:**
+```
+[pytest]
+markers =
+    pre_merge: marks tests to run before merging
+    nightly: marks tests to run nightly
+    weekly: marks tests to run weekly
+    gpu_0: marks tests to run on CPU
+    gpu_1: marks tests to run on GPU
+    gpu_2: marks tests to run on 2GPUs
+    gpu_4: marks tests to run on 4GPUs
+    gpu_8: marks tests to run on 8GPUs
+    e2e: marks tests as end-to-end tests
+    integration: marks tests as integration tests
+    unit: marks tests as unit tests
+    stress: marks tests as stress tests
+    vllm: marks tests as requiring vllm
+    trtllm: marks tests as requiring trtllm
+    sglang: marks tests as requiring sglang
+    slow: marks tests as known to be slow
+    h100: marks tests to run on H100
+    kvbm: marks tests for KVBM
+    kv_cache: marks tests for key-value cache
+    planner: marks tests for planner 
+    router: marks tests for router
+    api: marks tests for API endpoints
+    config: marks tests for configuration
+    logging: marks tests for logging/metrics
+    security: marks security/auth tests
+    data_plane: marks data path tests
+    control_plane: marks control/config path tests
+    smoke: marks smoke tests
+    regression: marks regression tests
+    flaky: marks known-flaky tests
+    performance: marks performance tests
+    scalability: marks scalability tests
+    distributed: marks distributed/multi-node tests
+    k8s: marks Kubernetes tests
+    slurm: marks Slurm tests
+    docker: marks Dockerized tests
+    cloud: marks cloud-only tests
+    custom_backend: marks custom backend tests
+```
+
+**Usage Example:**
+```python
+@pytest.mark.integration
+@pytest.mark.kvbm
+@pytest.mark.gpu_2
+def test_kv_cache_multi_gpu_behavior():
+    ...
+```
+
+### Rust (cargo test) Segmentation
+
+- By features: Use Cargo features to enable/disable test groups: `cargo test --features planner`
+- By #[ignore]: Mark slow or special-case tests: `#[ignore]`
+- Place all integration tests behind the integration feature gate. These tests will run in CI when using either cargo test --features integration or cargo test --all-features.
 
 
-### Comparison of ATDD, TDD, and BDD
+**Example:**
+```rust
+#[cfg(test)]
+mod kv_cache_tests {
+    #[test]
+    fn test_kv_cache_basic() { /* ... */ }
+    #[test]
+    #[ignore]
+    fn test_kv_cache_long_running() { /* ... */ }
+}
+```
 
-| Aspect        | ATDD (Acceptance Test-Driven Development) | TDD (Test-Driven Development) | BDD (Behavior-Driven Development) |
-|--------------|------------------------------------------|-------------------------------|-----------------------------------|
-| **Focus**     | User and business requirements           | Code functionality at a unit level | Feature behavior from a user's perspective |
-| **Test Scope**| High-level acceptance tests (end-to-end or integration) | Low-level unit tests          | High-level behavioral scenarios   |
-| **Stakeholders** | All stakeholders, including customers | Primarily developers          | Developers, testers, and business stakeholders |
-| **Language**  | Plain, business-readable language        | Programming language-specific test code | Human-readable language (often Gherkin) |
 
-## Vision
+## CI Vision
 
 The Dynamo test strategy and CI/CD pipelines are guided by the following key criteria:
 - **Fail Fast:** Early termination on critical failures, quick lint/syntax checks, and immediate feedback.
@@ -126,13 +240,14 @@ In general
   - Coverage drop >2%: Block merge, alert
   - Performance regression >5%: Alert, block release
 
+---
 
 
-## Triggering Workflows and CI types
+## CI Pipeline Types Overview
 
 Dynamo employs two primary CI systems:
-1. **Public-Facing CI**
-2. **Internal CI**
+1. **Public-Facing Github CI**
+2. **Internal Gitlab CI**
 
 ### Workflows triggering CI
 
@@ -239,14 +354,14 @@ Each subsequent pipeline inherits the tests from the previous pipeline type, wit
 | `Push` | End-to-end_2 | `pytest -m "e2e and gpus_needed_2 and not nightly "` | Runs on a multi GPU machine |
 | `nightly` | Linting | `pre-commit run --all-files` | |
 | `nightly` | Unit | `cargo test` & `pytest -m unit` | |
-| `nightly` | Integration_1 | `pytest -m "integration and (gpus_needed_0 or gpus_needed_1)"`| Runs on a 1GPU machine  |
+| `nightly` | Integration_1 | `cargo test --all-features` & `pytest -m "integration and (gpus_needed_0 or gpus_needed_1)"`| Runs on a 1GPU machine  |
 | `nightly` | Integration_2 | `pytest -m "integration and gpus_needed_2 "`| Runs on a multi GPU machine  |
 | `nightly` | End-to-end_1 | `pytest -m "e2e and (gpus_needed_0 or gpus_needed_1) "`|  Runs on a 1GPU machine  |
 | `nightly` | End-to-end_2 | `pytest -m "e2e and gpus_needed_2 "`|  Runs on a multi GPU machine  |
 | `nightly` | Benchmark | `pytest -m "benchmark and not release"`| Runs on a K8s or slurm cluster |
 | `weekly` | Linting | `pre-commit run --all-files` | |
 | `weekly` | Unit | `cargo test` & `pytest -m unit` | |
-| `weekly` | Integration_1 | `pytest -m "integration and (gpus_needed_0 or gpus_needed_1)"`| Runs on a 1GPU machine  |
+| `weekly` | Integration_1 | `cargo test --all-features` & `pytest -m "integration and (gpus_needed_0 or gpus_needed_1)"`| Runs on a 1GPU machine  |
 | `weekly` | Integration_2 | `pytest -m "integration and gpus_needed_2 "`| Runs on a multi GPU machine  |
 | `weekly` | End-to-end_1 | `pytest -m "e2e and (gpus_needed_0 or gpus_needed_1) "`|  Runs on a 1GPU machine  |
 | `weekly` | End-to-end_2 | `pytest -m "e2e and gpus_needed_2 "`|  Runs on a multi GPU machine  |
@@ -254,14 +369,14 @@ Each subsequent pipeline inherits the tests from the previous pipeline type, wit
 | `weekly` | stress | `pytest -m "stress and not release" ` | Runs on a K8s or slurm cluster |
 | `release` | Linting | `pre-commit run --all-files` | |
 | `release` | Unit | `cargo test` & `pytest -m unit` | |
-| `release` | Integration_1 | `pytest -m "integration and (gpus_needed_0 or gpus_needed_1) "` | Runs on a 1GPU machine  |
+| `release` | Integration_1 | `cargo test --all-features` & `pytest -m "integration and (gpus_needed_0 or gpus_needed_1) "` | Runs on a 1GPU machine  |
 | `release` | Integration_2 | `pytest -m "integration and gpus_needed_2 "` | Runs on a 2GPU machine  |
 | `release` | End-to-end_1 | `pytest -m "e2e and (gpus_needed_0 or gpus_needed_1) "`| Runs on a 1GPU machine  |
 | `release` | End-to-end_2 | `pytest -m "e2e and gpus_needed_2 "`| Runs on a multi GPU machine  |
 | `release` | benchmark | `pytest -m "benchmark" `|
 | `release` | stress | `pytest -m "stress" ` | Runs on a K8s or slurm cluster |
 
-The most important Pytest marks will be the type of test, number of gpus needed, and the framework if applicable. 
+The most important Pytest marks will be the type of test, number of gpus needed, and the framework if applicable.
 
 For a specific framework - The integration test for example vllm will be run as 
 
@@ -275,211 +390,6 @@ Option 2: Rejected because it is harder to maintain.
 | `nightly` | Integration_2 | `pytest -m "integration and gpus_needed_2 and not trtllm and not sglang"`| Runs on a multi GPU machine  |
 
 
-
-
-
----
-
-
-## Directory Structure
-
-Previous directiry structure recommendation is not followed. Dynamo team to review and finalize the structure. 
-
-TODO : Update with final decision. 
-
-``` 
-# Dynamo top-level folder
-tests/
-└── conftest.py
-
-└── router/
-    └── conftest.py
-    └── test_runtime_initialization.py
-    └── runtime_utils.py
-    ...
-└── planner/
-    └── conftest.py
-    └── test_llm_initialization.py
-        ...
-└── utils/
-    └──  ...
-    ...
-```
-
-``` 
-# Dynamo top-level folder
-tests/
-└── conftest.py
-
-└── runtime/
-    └── conftest.py
-    └── test_runtime_initialization.py
-    └── runtime_utils.py
-    ...
-└── llm/
-    └── conftest.py
-    └── test_llm_initialization.py
-        ...
-    ...
-```
-
-```
-tests/
-├── unit/               # Unit tests for individual components
-│   ├── conftest.py     # Unit test fixtures and configuration
-│   └── unittest_utils.py
-├── integration/        # Integration tests between components
-│   ├── conftest.py     # Integration test fixtures and configuration
-│   └── integtest_utils.py
-├── e2e/                # End-to-end system tests
-│   ├── conftest.py     # E2E test fixtures and configuration
-│   └── e2etest_utils.py
-├── conftest.py         # Shared fixtures and configuration
-└── README.md        
-```
-
----
-
-## Trigger Variables
-
-All CI variables must be defined in one place and have the same meaning across all CI systems.
-
-- DYNAMO_TEST_GPU_COUNT
-- DYNAMO_TEST_FRAMEWORK
-- DYNAMO_TEST_MODE
-- CI_FAIL_FAST
-- CI_COVERAGE_THRESHOLD
-- CI_SKIP_SLOW_TESTS
-- DYNAMO_LOG_LEVEL
-- DYNAMO_DEFAULT_FRAMEWORK
-- .... (will continue to update this here or in the CI strategy document).
-
----
-
-## Test Segmentation and Grouping
-
-Dynamo's test suite is segmented by component, h/w requirements, and environment to enable targeted CI runs, clear ownership, and debugging. Pytest markers are used for Python, and module/feature-based grouping is used for Rust.
-
-### Python (pytest) Markers
-
-Markers are used to select, group, and report on tests in CI and local runs. Example markers:
-
-- **Lifecycle:**
-  - pre_commit, pre_merge, nightly, weekly, release
-- **Hardware:**
-  - gpu_0, gpu_1, gpu_2, gpu_4, gpu_8
-  - h100, gb200, a100, l40
-- **Test Type:**
-  - unit, integration, e2e, stress, smoke, performance, scalability, distributed, flaky, slow, security, conformance
-- **Component/Feature:**
-  - kv_cache, kvbm, planner, router, api, config, logging, security, data_plane, control_plane
-- **Framework/Backend:**
-  - vllm, trtllm, sglang, custom_backend
-- **Environment/Infra:**
-  - k8s, slurm, docker, cloud
-
-**pyproject.toml registration example:**
-```
-[pytest]
-markers =
-    pre_merge: marks tests to run before merging
-    nightly: marks tests to run nightly
-    weekly: marks tests to run weekly
-    gpu_0: marks tests to run on CPU
-    gpu_1: marks tests to run on GPU
-    gpu_2: marks tests to run on 2GPUs
-    gpu_4: marks tests to run on 4GPUs
-    gpu_8: marks tests to run on 8GPUs
-    e2e: marks tests as end-to-end tests
-    integration: marks tests as integration tests
-    unit: marks tests as unit tests
-    stress: marks tests as stress tests
-    vllm: marks tests as requiring vllm
-    trtllm: marks tests as requiring trtllm
-    sglang: marks tests as requiring sglang
-    slow: marks tests as known to be slow
-    h100: marks tests to run on H100
-    kvbm: marks tests for KVBM
-    kv_cache: marks tests for key-value cache
-    planner: marks tests for planner 
-    router: marks tests for router
-    api: marks tests for API endpoints
-    config: marks tests for configuration
-    logging: marks tests for logging/metrics
-    security: marks security/auth tests
-    data_plane: marks data path tests
-    control_plane: marks control/config path tests
-    smoke: marks smoke tests
-    regression: marks regression tests
-    flaky: marks known-flaky tests
-    performance: marks performance tests
-    scalability: marks scalability tests
-    distributed: marks distributed/multi-node tests
-    k8s: marks Kubernetes tests
-    slurm: marks Slurm tests
-    docker: marks Dockerized tests
-    cloud: marks cloud-only tests
-    custom_backend: marks custom backend tests
-```
-
-**Usage Example:**
-```python
-@pytest.mark.integration
-@pytest.mark.kvbm
-@pytest.mark.gpu_2
-def test_kv_cache_multi_gpu_behavior():
-    ...
-```
-
-### Rust (cargo test) Segmentation
-
-- By module/file: Place tests in `tests/kv_cache.rs`, `tests/planner.rs`, etc.
-- By function name: Use descriptive names: `test_kv_cache_basic`, `test_router_sharding`
-- By features: Use Cargo features to enable/disable test groups: `cargo test --features planner`
-- By #[ignore]: Mark slow or special-case tests: `#[ignore]`
-- By directory: Organize by component: `server/tests/integration/`, `common/tests/unit/`
-
-**Example:**
-```rust
-#[cfg(test)]
-mod kv_cache_tests {
-    #[test]
-    fn test_kv_cache_basic() { /* ... */ }
-    #[test]
-    #[ignore]
-    fn test_kv_cache_long_running() { /* ... */ }
-}
-```
-
-### CI and Ownership
-
-- CI pipelines use marker expressions to select relevant tests for each stage (e.g., `pytest -m "integration and planner and gpu_2"`).
-- Rust and Python tests are both first-class.
-- Ownership and escalation for each test group/component are documented in the project.
-
-### Component Ownership (PIC) 
-
-| Component | Point of Contact (PIC) |
-|-----------|-----------------------|
-| vllm      |       Alec            |
-| trtllm    |      Tanmay           |
-| sglang    |      Ishan            |
-| kvbm      |       Ryan Oslon      |
-| planner   |       HongKuan        |
-| router    |      (?)              |
-| nixl      |       Adit            |
-
-### CI Area Ownership
-
-| CI Area      | Point of Contact (PIC) |
-|--------------|-----------------------|
-| Test Fail    |      Pavithra         |
-| Infra Fail   |       Meenakshi       |
-| Docker Build |      Tushar           |
-| K8s          |        Dmitry         |
-| Cloud        |       Anant           |
-| Reporting    |     Pavithra          |
-| Security/OSRB|      Dmitry           |
 
 ---
 
@@ -509,7 +419,10 @@ Coverage is measured using multiple criteria, including:
 - Path coverage
 - Loop coverage
 
-The initial goal is to achieve at least 80% (will be reevaluated after a baseline run next week) code coverage on the main branch. This target will evolve as the project matures and as new components are added.
+The initial goal will be to achieve:
+
+- **Rust**: Minimum 80% line coverage, 90% for critical paths
+- **Python**: Minimum 85% line coverage, 95% for public APIs
 
 ### Sources of Test Requirements
 - **Functional (black box, specification-based):** Derived from software specifications
@@ -524,44 +437,39 @@ The initial goal is to achieve at least 80% (will be reevaluated after a baselin
 Choosing the right tool is imortant - pytest-cov for pytests and rust uses a llvm source-code based coverage -> 
 
 
-### Deterministic and Non-Deterministic Testing
-- **Deterministic CFG:** All paths and outcomes are predictable and repeatable
-- **Non-Deterministic CFG:** Some paths or outcomes may vary due to concurrency, randomness, or external state. Does Dynamo have non-determinism in any of the additional components ? Example based on the infarstructure and m/y availabilit do we get different outputs in plnner? Is thsi currently tested?
-- Tests with non-deterministic output should be explicitly marked and handled differently in reporting and analysis
-- Non-deterministic tests are essential for evaluating fault tolerance, robustness, and system behavior under uncertainty
-
-### Fault Tolerance and Robustness
-- Coverage criteria and adequacy should include tests for fault tolerance, such as simulating failures, network partitions, or resource exhaustion
-- Marking and tracking non-deterministic and fault-injection tests supports continuous improvement in system resilience
-
 Coverage metrics, adequacy criteria, and the handling of non-deterministic tests are reviewed regularly to ensure the test suite remains effective as Dynamo evolves. 
 
 More informaton on fault tolerance and testing can be found in #TODO add link here. @Neelay Shah.
 
-## Gating Checks and Prime Path Testing
 
-Gating checks are essential jobs in the CI pipeline that must pass before code can progress to the next stage. These checks ensure that only builds and tests meeting minimum quality and stability standards are allowed to merge or release.
 
-### Prime Path Definition and Role
-- **Prime Path (Project Definition):** The prime path is defined here as the longest happy path through the system, ideally integrating the happy paths of all critical components (e.g., planner, router, kvbm, dynamo serve). This path represents the most comprehensive, non-redundant execution flow.
+## Gating Jobs in CI Pipelines
+
+### Define Gating Checks and Prime Path Testing
+
+**Gating checks** are essential jobs in the CI pipeline that must pass before code can progress to the next stage. These checks ensure that only builds and tests meeting minimum quality and stability standards are allowed to merge or release.
+
+#### Prime Path Definition and Role
+- **Prime Path (Project Definition):** The prime path is defined here as the longest happy path through the system, ideally integrating the happy paths of all critical components (e.g., planner, router, kvbm, frontend). This path represents the most comprehensive, non-redundant execution flow.
 - **E2E as Prime Path:** In this strategy, E2E tests are designed to implement the prime path. These tests validate that the system's core workflows, spanning multiple components, work together as intended.
 - **Gating Role:** Passing the prime path (E2E) tests is required for any code to merge or release. These tests are the main gating (functional sanity) tests in the pipeline.
 
-### Gating Checks = Gating Build + Gating Tests + (more)
+### Gating Checks = Gating Build + Gating Tests 
 - **Gating Build:** All build jobs started in a given pipeline is a gating job. If the build fails, no further tests are executed.
 - **Gating Tests / Sanity Tests:** The primary gating tests are the end-to-end (E2E) tests that exercise the prime path. These serve as sanity checks, ensuring that the most critical workflows function as expected. Define the gating tests for each type of the pipeline run.
 
-### Types of CI Pipelines
+### Gating Jobs in Different CI Pipeline Types
+
 - **[GITHUB] Pull Requests (PRs):**
   - The build job is a gating check for the default or changed framework.
   - Prime path E2E tests for the default or changed framework/component are exercised as the gating test set.
-- **[GITHUB] Push to Protected Branches (main, release, LWs/PB branches):**
+- **[GITHUB] Push to Protected Branches (main, release, LWS/PB branches):**
   - All framework builds on the default platform (e.g., x86) are gating jobs.
   - All prime path E2E tests for all frameworks on the default platform are included as gating tests.
-- **[GITHUB] Nightly Pipelines:**
+- **Nightly Pipelines:**
   - All framework builds on the default platform (e.g., x86) are gating jobs.
   - All prime path E2E tests for all frameworks on the default platform are included as gating tests.
-  - Security checks are also required as gating jobs.
+  - [In Gitlab nightly] Security checks are also required as gating jobs.
 - **Release Pipelines:**
   - All gating checks from nightly (builds, prime path E2E tests, and security checks) are required.
   - Performance gating tests (benchmarking) are added as additional requirements for release.
@@ -570,25 +478,37 @@ Gating checks are essential jobs in the CI pipeline that must pass before code c
 This approach ensures that only code passing the most critical, cross-component workflows is allowed to merge or release, improving overall system reliability and reducing the risk of regressions in production.
 
 
-#### CI Test Trigger Matrix
-
-| Trigger Variable                        | pre-merge | vllm_1-gpu | vllm_multi_gpu | trtllm_1-gpu | trtllm_multi_gpu | vllm_benchmark | trtllm_benchmark | jet | compoundai |
-|-----------------------------------------|:---------:|:----------:|:--------------:|:------------:|:----------------:|:--------------:|:----------------:|:---:|:----------:|
-| `RUN_PRE_MERGE_TESTS=true`              | Yes       | _          | -              | _            | -                | -              | -                | -   | -          |
-| `RUN_VLLM=true`                         | Yes       | Yes        | -             | -            | -                | -              | -                | -   | -          |
-| `RUN_END_TO_END_TESTS=true`             | -         | Yes        | Yes            | Yes          | Yes              | -              | -                | -   | -          |
-| `RUN_TENSORRTLLM=true`                  | -         | -          | -              | Yes          | -               | -              | -                | -   | -          |
-| `RUN_INTEGRATION_TESTS_ON_JET=true`     | -         | -          | -              | -            | -                | -              | -                | Yes | -          |
-| `RUN_SDK_CI=true`                       | -         | -          | -              | -            | -                | -              | -                | -   | Yes        |
-| `RUN_TRTLLM_BENCHMARKS_ON_JET=true`     | -         | -          | -              | -            | -                | -              | Yes              | - | -          |
-| `RUN_VLLM_BENCHMARKS_ON_JET=true`       | -         | -          | -              | -            | -                | Yes            | -                | - | -          |
-| `NIGHTLY_BUILD=true`                    | Yes       | Yes        | Yes            | Yes          | Yes              | Yes            | Yes              | Yes | Yes        |
-
-- **Yes**: Test runs automatically with this trigger.
-- **Manual**: Test can be triggered manually from the pipeline.
-- **-**: Test is not run with this trigger.
-
 ---
+
+
+## CI Test Failure Policy and Ownership
+
+- All tests failing in CI must be investigated and fixed as a priority. PIC table needs to be updated.
+- Clear ownership ensures accountability and fast resolution.
+
+### Component Ownership (PIC)
+
+| Component | Point of Contact (PIC) |
+|-----------|-----------------------|
+| vllm      | Alec                  |
+| trtllm    | Tanmay                |
+| sglang    | Ishan                 |
+| kvbm      | Ryan Oslon            |
+| planner   | HongKuan              |
+| router    | (?)                   |
+| nixl      | Adit                  |
+
+### CI Area Ownership
+
+| CI Area      | Point of Contact (PIC) |
+|--------------|-----------------------|
+| Test Fail    | Pavithra              |
+| Infra Fail   | Meenakshi             |
+| Docker Build | Tushar                |
+| K8s          | Dmitry                |
+| Cloud        | Anant                 |
+| Reporting    | Pavithra              |
+| Security/OSRB| Dmitry                |
 
 ## Additional Suggestions: Logging Improvements
 
