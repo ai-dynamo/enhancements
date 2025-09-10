@@ -129,7 +129,7 @@ Markers are used to select, group, and report on tests in CI and local runs. All
 - **Framework/Backend: (if applicable)**
   - vllm, trtllm, sglang, custom_backend
 
-  Other optional markers :
+**Other optional markers :**
 - **Component/Feature:**
   - kv_cache, kvbm, planner, router, api, config, logging, security, data_plane, control_plane
 - **Environment/Infra:**
