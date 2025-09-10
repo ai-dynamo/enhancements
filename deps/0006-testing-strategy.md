@@ -223,6 +223,61 @@ Each subsequent pipeline inherits the tests from the previous pipeline type, wit
 - **GitLab Weekly:** Nightly tests plus 24-72h stress/chaos, cross-component (using NIXL, aiperf, modelexpress), distributed scale, conformance testing.
 - **GitLab Release:** All tests, all hardware, benchmarks, coverage trend, security
 
+
+| Pipelines | Type | Commands | Notes|
+|------------|------|-----------|-------------------------------------------------------|
+| `pre-commit` | Linting | `pre-commit run --all-files` | |
+| `PR` | Linting | `pre-commit run --all-files` | |
+| `PR` | Unit | `cargo test` & `pytest -m "unit"` | Unit tests are only run in the CPU. | 
+| `PR` | Integration_1 | `cargo test --features integration` & `pytest -m "integration and premerge and (gpus_needed_0 or gpus_needed_1)"`| Runs on a 1GPU machine |
+| `PR` | End-to-end | `pytest -m "e2e and premerge and (gpus_needed_0 or gpus_needed_1)"` | Runs on a 1GPU machine |
+| `Push` | Linting | `pre-commit run --all-files` | |
+| `Push` | Unit | `cargo test` & `pytest -m unit` | |
+| `Push` | Integration_1 | `cargo test --features integration` & `pytest -m "integration and (gpus_needed_0 or gpus_needed_1)"`| Runs on a 1GPU machine |
+| `Push` | Integration_2 |  `pytest -m "integration and gpus_needed_2 "`| Runs on a 2GPU or mutliGPU machine |
+| `Push` | End-to-end_1 | `pytest -m "e2e and (gpus_needed_0 or gpus_needed_1) and not nightly "` | Runs on a 1GPU machine |
+| `Push` | End-to-end_2 | `pytest -m "e2e and gpus_needed_2 and not nightly "` | Runs on a multi GPU machine |
+| `nightly` | Linting | `pre-commit run --all-files` | |
+| `nightly` | Unit | `cargo test` & `pytest -m unit` | |
+| `nightly` | Integration_1 | `pytest -m "integration and (gpus_needed_0 or gpus_needed_1)"`| Runs on a 1GPU machine  |
+| `nightly` | Integration_2 | `pytest -m "integration and gpus_needed_2 "`| Runs on a multi GPU machine  |
+| `nightly` | End-to-end_1 | `pytest -m "e2e and (gpus_needed_0 or gpus_needed_1) "`|  Runs on a 1GPU machine  |
+| `nightly` | End-to-end_2 | `pytest -m "e2e and gpus_needed_2 "`|  Runs on a multi GPU machine  |
+| `nightly` | Benchmark | `pytest -m "benchmark and not release"`| Runs on a K8s or slurm cluster |
+| `weekly` | Linting | `pre-commit run --all-files` | |
+| `weekly` | Unit | `cargo test` & `pytest -m unit` | |
+| `weekly` | Integration_1 | `pytest -m "integration and (gpus_needed_0 or gpus_needed_1)"`| Runs on a 1GPU machine  |
+| `weekly` | Integration_2 | `pytest -m "integration and gpus_needed_2 "`| Runs on a multi GPU machine  |
+| `weekly` | End-to-end_1 | `pytest -m "e2e and (gpus_needed_0 or gpus_needed_1) "`|  Runs on a 1GPU machine  |
+| `weekly` | End-to-end_2 | `pytest -m "e2e and gpus_needed_2 "`|  Runs on a multi GPU machine  |
+| `weekly` | Benchmark | `pytest -m "benchmark and not release"`| Runs on a K8s or slurm cluster |
+| `weekly` | stress | `pytest -m "stress and not release" ` | Runs on a K8s or slurm cluster |
+| `release` | Linting | `pre-commit run --all-files` | |
+| `release` | Unit | `cargo test` & `pytest -m unit` | |
+| `release` | Integration_1 | `pytest -m "integration and (gpus_needed_0 or gpus_needed_1) "` | Runs on a 1GPU machine  |
+| `release` | Integration_2 | `pytest -m "integration and gpus_needed_2 "` | Runs on a 2GPU machine  |
+| `release` | End-to-end_1 | `pytest -m "e2e and (gpus_needed_0 or gpus_needed_1) "`| Runs on a 1GPU machine  |
+| `release` | End-to-end_2 | `pytest -m "e2e and gpus_needed_2 "`| Runs on a multi GPU machine  |
+| `release` | benchmark | `pytest -m "benchmark" `|
+| `release` | stress | `pytest -m "stress" ` | Runs on a K8s or slurm cluster |
+
+The most important Pytest marks will be the type of test, number of gpus needed, and the framework if applicable. 
+
+For a specific framework - The integration test for example vllm will be run as 
+
+Option 1 (Recommended): Filter by inclusion
+| `nightly` | Integration_1 | `pytest -m "integration and (gpus_needed_0 or gpus_needed_1) and vllm"`| Runs on a 1GPU machine  |
+| `nightly` | Integration_2 | `pytest -m "integration and gpus_needed_2 and vllm "`| Runs on a multi GPU machine  |
+
+
+Option 2: Rejected because it is harder to maintain. 
+| `nightly` | Integration_1 | `pytest -m "integration and (gpus_needed_0 or gpus_needed_1) and not trtllm and not sglang"`| Runs on a 1GPU machine  |
+| `nightly` | Integration_2 | `pytest -m "integration and gpus_needed_2 and not trtllm and not sglang"`| Runs on a multi GPU machine  |
+
+
+
+
+
 ---
 
 
