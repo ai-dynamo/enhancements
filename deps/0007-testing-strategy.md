@@ -141,7 +141,7 @@ To meet this performance criteria tests should be thread safe and written with t
 
 Integration tests validate the functionality of a framework module with respect to interactions with external services or between modules. This covers both testing interactions between the Dynamo framework components and a framework component and a third-party dependency, such as NATS. An example of an integration test would be validating runtime framework module initialization which requires [NATS](https://nats.io/) and [etcd](https://etcd.io/) for functionality.
 
-The primary differentiation of integration tests from [unit tests](#unit-tests) is the use of real components and the absence of mocking of response values. Simplistic models are acceptable, e.g. toy LLM models, but they should always operate within fully-functional components of the Dynamo. The primary difference with [end-to-end](#end-to-end-tests) is integration tests are driven through APIs while end-to-end tests describe end-user flows using the the command line such as `dynamo serve`.
+The primary differentiation of integration tests from [unit tests](#unit-tests) is the use of real components and the absence of mocking of response values. Simplistic models are acceptable, e.g. toy LLM models, but they should always operate within fully-functional components of the Dynamo. The primary difference with [end-to-end](#end-to-end-tests) is integration tests are driven through APIs while end-to-end tests describe end-user flows using the command line such as `agg.sh`. Or deployed in K8s.
 
 #### Structure
 
