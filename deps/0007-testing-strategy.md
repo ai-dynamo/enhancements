@@ -145,7 +145,7 @@ The primary differentiation of integration tests from [unit tests](#unit-tests) 
 
 #### Structure
 
-Integration tests are defined in the [pytest](https://docs.pytest.org/en/stable/) framework and exist in within the top-level`tests` directory in subdirectories corresponding to the framework element tested. Use of the [pytest mark](https://docs.pytest.org/en/stable/how-to/mark.html#mark) `@pytest.mark.integration` is required.
+Integration tests are defined in the [pytest](https://docs.pytest.org/en/stable/) framework and are located within the `tests/` directory of the component being tested, alongside the unit tests.. Use of the [pytest mark](https://docs.pytest.org/en/stable/how-to/mark.html#mark) `@pytest.mark.integration` is required.
 
 Naming of the test files is normalized for categorization and clarity in the event of test failures. We use the standard of `test_<component>_<flow>.py`. `component` should be specific to either the framework element being tested or the CLI command which is being invoked. `flow` is left to the discretion of the developer for grouping similar functionality together, e.g. initialization of the component with different parameters. Additionally if there are utilities that are not test fixtures should go in a `<component>_utils.py` file
 
