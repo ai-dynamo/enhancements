@@ -45,21 +45,22 @@ By achieving these goals, the Dynamo project aims to ensure high reliability, ra
 
 ### Unit Tests
 - **Coverage Target:** 85% (Rust), 80% (Python)
-- **Location:** client/common/server/tests/unit/
+- **Pytest Location:** tests/ directory within the respective component
+- **Rust Location:** Co-located with the corresponding src files
 - **Trigger:** Every PR, push to gated branch
 
 ### Integration Tests
-- **Location:** tests/integration/
+- **Location:** tests/ directory within the respective component
 - **Trigger:** PRs, push to gated branch, nightly, weekly, Release
 - **Focus:** Real service interaction, distributed scenarios
 
 ### End-to-End (E2E) Tests
-- **Location:** tests/e2e/
+- **Location:** tests/
 - **Trigger:** PRs, push to gated branch, nightly, weekly, Release
 - **Focus:** User workflows, CLI/API
 
 ### Performance/Benchmark Tests
-- **Location:** benchmark/
+- **Location:** tests/benchmark/
 - **Trigger:** Nightly, weekly, Release
 - **Metrics:** Latency, throughput, resource usage
 
@@ -152,36 +153,15 @@ markers =
     vllm: marks tests as requiring vllm
     trtllm: marks tests as requiring trtllm
     sglang: marks tests as requiring sglang
-    slow: marks tests as known to be slow
     h100: marks tests to run on H100
-    kvbm: marks tests for KVBM
-    kv_cache: marks tests for key-value cache
-    planner: marks tests for planner 
-    router: marks tests for router
-    api: marks tests for API endpoints
-    config: marks tests for configuration
-    logging: marks tests for logging/metrics
-    security: marks security/auth tests
-    data_plane: marks data path tests
-    control_plane: marks control/config path tests
-    smoke: marks smoke tests
-    regression: marks regression tests
-    flaky: marks known-flaky tests
     performance: marks performance tests
-    scalability: marks scalability tests
-    distributed: marks distributed/multi-node tests
-    k8s: marks Kubernetes tests
-    slurm: marks Slurm tests
-    docker: marks Dockerized tests
-    cloud: marks cloud-only tests
-    custom_backend: marks custom backend tests
 ```
 
 **Usage Example:**
 ```python
 @pytest.mark.integration
-@pytest.mark.kvbm
 @pytest.mark.gpu_2
+@pytest.mark.vllm
 def test_kv_cache_multi_gpu_behavior():
     ...
 ```
@@ -361,64 +341,70 @@ graph TD
 Each subsequent pipeline inherits the tests from the previous pipeline type, with additional tests layered on as needed:
 
 - **Pre-commit:** Linting, static analysis
-- **PR:** Lint, unit, integration, E2E (CPU, 1GPU), OSRB checks (if applicable), evaluate coverage
-- **Push to Gated Branch:** Full integration and E2E tests, evaluate coverage
-- **GitHub Nightly:** All tests, all hardware, performance smoke tests, coverage
-- **GitLab Nightly:** All tests, all hardware, benchmarks, coverage trend, security, 
+- **PR:** Lint, build, unit, integration, E2E (CPU, 1GPU), OSRB checks (if applicable), evaluate coverage
+- **Push to Gated Branch:** Lint, build, unit, full integration and E2E tests, evaluate coverage
+- **GitHub Nightly:** All builds, All tests, all hardware, performance smoke tests, coverage
+- **GitLab Nightly:** All builds, All tests, all hardware, benchmarks, coverage trend, security, 
 - **GitLab Weekly:** Nightly tests plus 24-72h stress/chaos, cross-component (using NIXL, aiperf, modelexpress), distributed scale, conformance testing.
-- **GitLab Release:** All tests, all hardware, benchmarks, coverage trend, security
+- **GitLab Release:** All builds, All tests, all hardware, benchmarks, coverage trend, security
 
+Tests will also be run on both x86 and arm64 platforms, if infrastructure is available and support is promised. The platform will be specified at the job definition level in CI, and the pipeline will allocate a runner that supports the appropriate architecture.
 
+Tests that are run inside framework-specific containers must include the corresponding framework name as a Pytest marker (e.g., vllm, trtllm, sglang, etc.). This ensures only relevant tests are executed in each environment.
+**Example: Framework-specific integration tests (vllm)** 
+```
+pytest -m "integration and gpus_needed_1 and vllm"; pytest -m "integration and gpus_needed_0 and vllm" 
+```
+
+For a given framework like vllm, the integration tests would be filtered using both the framework marker and GPU requirements.
 | Pipelines | Type | Commands | Notes|
 |------------|------|-----------|-------------------------------------------------------|
 | `pre-commit` | Linting | `pre-commit run --all-files` | |
 | `PR` | Linting | `pre-commit run --all-files` | |
 | `PR` | Unit | `cargo test` & `pytest -m "unit"` | Unit tests are only run in the CPU. | 
-| `PR` | Integration_1 | `cargo test --features integration` & `pytest -m "integration and premerge and (gpus_needed_0 or gpus_needed_1)"`| Runs on a 1GPU machine |
-| `PR` | End-to-end | `pytest -m "e2e and premerge and (gpus_needed_0 or gpus_needed_1)"` | Runs on a 1GPU machine |
+| `PR` | Integration_0 | `cargo test --features integration` & `pytest -m "integration and premerge and gpus_needed_0"`| Runs on a CPU machine |
+| `PR` | Integration_1 | `pytest -m "integration and premerge and gpus_needed_1"`| Runs on a 1GPU machine |
+| `PR` | End-to-end_0 | `pytest -m "e2e and premerge and gpus_needed_0"` | Runs on a CPU machine |
+| `PR` | End-to-end_1 | `pytest -m "e2e and premerge and gpus_needed_1"` | Runs on a 1GPU machine |
 | `Push` | Linting | `pre-commit run --all-files` | |
 | `Push` | Unit | `cargo test` & `pytest -m unit` | |
-| `Push` | Integration_1 | `cargo test --features integration` & `pytest -m "integration and (gpus_needed_0 or gpus_needed_1)"`| Runs on a 1GPU machine |
+| `Push` | Integration_0 | `cargo test --features integration` & `pytest -m "integration and gpus_needed_0 "`| Runs on a CPU machine |
+| `Push` | Integration_1 | `pytest -m "integration and gpus_needed_1"`| Runs on a 1GPU machine |
 | `Push` | Integration_2 |  `pytest -m "integration and gpus_needed_2 "`| Runs on a 2GPU or mutliGPU machine |
-| `Push` | End-to-end_1 | `pytest -m "e2e and (gpus_needed_0 or gpus_needed_1) and not nightly "` | Runs on a 1GPU machine |
+| `Push` | End-to-end_0 | `pytest -m "e2e and gpus_needed_0 and not nightly "` | Runs on a CPU machine |
+| `Push` | End-to-end_1 | `pytest -m "e2e and  gpus_needed_1 and not nightly "` | Runs on a 1GPU machine |
 | `Push` | End-to-end_2 | `pytest -m "e2e and gpus_needed_2 and not nightly "` | Runs on a multi GPU machine |
 | `nightly` | Linting | `pre-commit run --all-files` | |
 | `nightly` | Unit | `cargo test` & `pytest -m unit` | |
-| `nightly` | Integration_1 | `cargo test --all-features` & `pytest -m "integration and (gpus_needed_0 or gpus_needed_1)"`| Runs on a 1GPU machine  |
+| `nightly` | Integration_0 | `cargo test --all-features` & `pytest -m "integration and gpus_needed_0"`| Runs on a CPU machine  |
+| `nightly` | Integration_1 | `pytest -m "integration and  gpus_needed_1"`| Runs on a 1GPU machine  |
 | `nightly` | Integration_2 | `pytest -m "integration and gpus_needed_2 "`| Runs on a multi GPU machine  |
-| `nightly` | End-to-end_1 | `pytest -m "e2e and (gpus_needed_0 or gpus_needed_1) "`|  Runs on a 1GPU machine  |
+| `nightly` | End-to-end_0 | `pytest -m "e2e and gpus_needed_0  "`|  Runs on a CPU machine  |
+| `nightly` | End-to-end_1 | `pytest -m "e2e and gpus_needed_1 "`|  Runs on a 1GPU machine  |
 | `nightly` | End-to-end_2 | `pytest -m "e2e and gpus_needed_2 "`|  Runs on a multi GPU machine  |
 | `nightly` | Benchmark | `pytest -m "benchmark and not release"`| Runs on a K8s or slurm cluster |
 | `weekly` | Linting | `pre-commit run --all-files` | |
 | `weekly` | Unit | `cargo test` & `pytest -m unit` | |
-| `weekly` | Integration_1 | `cargo test --all-features` & `pytest -m "integration and (gpus_needed_0 or gpus_needed_1)"`| Runs on a 1GPU machine  |
+| `weekly` | Integration_0 | `cargo test --all-features` & `pytest -m "integration and gpus_needed_0 "`| Runs on a CPU machine  |
+| `weekly` | Integration_1 |  `pytest -m "integration and  gpus_needed_1"`| Runs on a 1GPU machine  |
 | `weekly` | Integration_2 | `pytest -m "integration and gpus_needed_2 "`| Runs on a multi GPU machine  |
-| `weekly` | End-to-end_1 | `pytest -m "e2e and (gpus_needed_0 or gpus_needed_1) "`|  Runs on a 1GPU machine  |
+| `weekly` | End-to-end_0 | `pytest -m "e2e and gpus_needed_0  "`|  Runs on a CPU machine  |
+| `weekly` | End-to-end_1 | `pytest -m "e2e and gpus_needed_1 "`|  Runs on a 1GPU machine  |
 | `weekly` | End-to-end_2 | `pytest -m "e2e and gpus_needed_2 "`|  Runs on a multi GPU machine  |
 | `weekly` | Benchmark | `pytest -m "benchmark and not release"`| Runs on a K8s or slurm cluster |
 | `weekly` | stress | `pytest -m "stress and not release" ` | Runs on a K8s or slurm cluster |
 | `release` | Linting | `pre-commit run --all-files` | |
 | `release` | Unit | `cargo test` & `pytest -m unit` | |
-| `release` | Integration_1 | `cargo test --all-features` & `pytest -m "integration and (gpus_needed_0 or gpus_needed_1) "` | Runs on a 1GPU machine  |
+| `release` | Integration_0 | `cargo test --all-features` & `pytest -m "integration and gpus_needed_0  "` | Runs on a CPU machine  |
+| `release` | Integration_1 | `pytest -m "integration and  gpus_needed_1 "` | Runs on a 1GPU machine  |
 | `release` | Integration_2 | `pytest -m "integration and gpus_needed_2 "` | Runs on a 2GPU machine  |
-| `release` | End-to-end_1 | `pytest -m "e2e and (gpus_needed_0 or gpus_needed_1) "`| Runs on a 1GPU machine  |
+| `release` | End-to-end_0 | `pytest -m "e2e and gpus_needed_0 "`| Runs on a 1GPU machine  |
+| `release` | End-to-end_1 | `pytest -m "e2e and  gpus_needed_1 "`| Runs on a 1GPU machine  |
 | `release` | End-to-end_2 | `pytest -m "e2e and gpus_needed_2 "`| Runs on a multi GPU machine  |
 | `release` | benchmark | `pytest -m "benchmark" `|
 | `release` | stress | `pytest -m "stress" ` | Runs on a K8s or slurm cluster |
 
 The most important Pytest marks will be the type of test, number of gpus needed, and the framework if applicable.
-
-For a specific framework - The integration test for example vllm will be run as 
-
-Option 1 (Recommended): Filter by inclusion
-| `nightly` | Integration_1 | `pytest -m "integration and (gpus_needed_0 or gpus_needed_1) and vllm"`| Runs on a 1GPU machine  |
-| `nightly` | Integration_2 | `pytest -m "integration and gpus_needed_2 and vllm "`| Runs on a multi GPU machine  |
-
-
-Option 2: Rejected because it is harder to maintain. 
-| `nightly` | Integration_1 | `pytest -m "integration and (gpus_needed_0 or gpus_needed_1) and not trtllm and not sglang"`| Runs on a 1GPU machine  |
-| `nightly` | Integration_2 | `pytest -m "integration and gpus_needed_2 and not trtllm and not sglang"`| Runs on a multi GPU machine  |
-
 
 
 ---
@@ -476,7 +462,7 @@ This approach ensures that only code passing the most critical, cross-component 
 | sglang    | Ishan                 |
 | kvbm      | Ryan Oslon            |
 | planner   | HongKuan              |
-| router    | (?)                   |
+| router    | Rudy                  |
 | nixl      | Adit                  |
 
 ### CI Area Ownership
