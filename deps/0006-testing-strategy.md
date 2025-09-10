@@ -126,7 +126,7 @@ Markers are used to select, group, and report on tests in CI and local runs. All
 - **Test Type:**
   - unit, integration, e2e, stress,
   - (Others) smoke, performance, scalability, distributed, flaky, security, conformance
-- **Framework/Backend: (if applicable) **
+- **Framework/Backend: (if applicable)**
   - vllm, trtllm, sglang, custom_backend
 
   Other optional markers :
@@ -225,7 +225,39 @@ These criteria ensure robust, efficient, and scalable pipelines that support rap
 
 ## Metric
 
-### Test metric discussed below
+### Test Coverage and Adequacy
+
+Test coverage is a primary metric for assessing the quality and completeness of the Dynamo test suite. The following concepts and criteria are used to define and measure coverage:
+
+- **Test Case:** A set of input values, expected results, and any necessary pre/post conditions to evaluate a s/w unit.
+- **Test Set:** A collection of related test cases.
+- **Test Requirement:** A specific element or behavior of the software that a test case must satisfy or cover.
+- **Coverage Criterion:** A rule or set of rules that impose test requirements on a test set.
+- **Adequacy Criterion:** The set of test requirements that must be satisfied for a test suite to be considered adequate.
+
+A test suite satisfies an adequacy criterion if:
+- All tests succeed.
+- Every test requirement in the criterion is satisfied by at least one test case in the suite. For us, this will be a coverage criterion and the threshold needs to be >80%.
+
+#### Coverage Metrics and Goals
+
+Coverage is measured using multiple criteria, including:
+- Line coverage
+- Statement coverage
+- Function/method coverage
+- Condition/decision coverage
+- Path coverage
+- Loop coverage
+
+The initial goal will be to achieve:
+
+- **Rust**: Minimum 80% line coverage, 90% for critical paths
+- **Python**: Minimum 85% line coverage, 95% for public APIs
+
+Coverage metrics, adequacy criteria, and the handling of non-deterministic tests are reviewed regularly to ensure the test suite remains effective as Dynamo evolves. 
+
+More informaton on fault tolerance and testing can be found in #TODO add link here. @Neelay Shah.
+
 
 ### Quality Gate on Pipeline
 
@@ -392,55 +424,6 @@ Option 2: Rejected because it is harder to maintain.
 
 
 ---
-
-
-
-## Metric : Test Coverage and Adequacy
-
-Test coverage is a primary metric for assessing the quality and completeness of the Dynamo test suite. The following concepts and criteria are used to define and measure coverage:
-
-- **Test Case:** A set of input values, expected results, and any necessary pre/post conditions to evaluate a s/w unit.
-- **Test Set:** A collection of related test cases.
-- **Test Requirement:** A specific element or behavior of the software that a test case must satisfy or cover.
-- **Coverage Criterion:** A rule or set of rules that impose test requirements on a test set.
-- **Adequacy Criterion:** The set of test requirements that must be satisfied for a test suite to be considered adequate.
-
-A test suite satisfies an adequacy criterion if:
-- All tests succeed.
-- Every test requirement in the criterion is satisfied by at least one test case in the suite. For us, this will be a coverage criterion and the threshold needs to be >80%.
-
-### Coverage Metrics and Goals
-
-Coverage is measured using multiple criteria, including:
-- Line coverage
-- Statement coverage
-- Function/method coverage
-- Condition/decision coverage
-- Path coverage
-- Loop coverage
-
-The initial goal will be to achieve:
-
-- **Rust**: Minimum 80% line coverage, 90% for critical paths
-- **Python**: Minimum 85% line coverage, 95% for public APIs
-
-### Sources of Test Requirements
-- **Functional (black box, specification-based):** Derived from software specifications
-- **Fault-based:** Derived from hypothesized faults and common bug patterns
-
-### Control Flow and Reachability
- Ensure the line coverage >80 % for pytest integration tests. Ensure syntactic and semantic reachability of the function in comopnents using the right test case and logic. 
-- **Line Coverage:** Not solely based on lines, but on the control flow graph (CFG) of the code
-- **Syntactic Reachability:** A node is syntactically reachable from another if a path exists in the CFG
-- **Semantic Reachability:** A node is semantically reachable if a path can be executed on some input (undecidable in general)
-- Standard graph algorithms compute syntactic reachability; semantic reachability is not always computable
-Choosing the right tool is imortant - pytest-cov for pytests and rust uses a llvm source-code based coverage -> 
-
-
-Coverage metrics, adequacy criteria, and the handling of non-deterministic tests are reviewed regularly to ensure the test suite remains effective as Dynamo evolves. 
-
-More informaton on fault tolerance and testing can be found in #TODO add link here. @Neelay Shah.
-
 
 
 ## Gating Jobs in CI Pipelines
