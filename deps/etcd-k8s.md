@@ -1,4 +1,4 @@
-# Service and Model Discovery Interface
+# ETCD-less Dynamo in Kubernetes: Endpoint Instance Discovery
 
 ## Background
 
@@ -16,24 +16,55 @@ ETCD usage in Dynamo can be categorized into the following:
 
 To de-couple Dynamo from ETCD, we define a minimal `ServiceDiscovery` interface that can be satisfied by different backends (etcd, kubernetes, etc). In Kubernetes environments, we will use the Kubernetes APIs to implement this interface.
 
-### Methods
-- `create_instance`(namespace: str, component: str, metadata: dict) -> Instance
-    - Creates an instance and persists associated immutable metadata. Does not mark the instance as ready.
-- `list_instances`(namespace: str, component: str) -> List[Instance]
-    - Lists all instances that match the given namespace and component.
-- `get_metadata`(namespace: str, component: str, instance_id: str) -> Instance
-    - Returns the metadata for an instance.
-- `subscribe`(namespace: str, component: str) -> EventStream
-    - Subscribes to events for the set of instances that match (namespace, component). Returns a stream of events giving signals for when instances that match the subscription are created, deleted, or readiness status changes.
-- `set_instance_status`(instance: Instance, status: str)
-    - Marks the instance as ready or not ready for traffic.
-- `get_instance_status`(instance: Instance) -> str
-    - Returns the status of the instance.
-<!-- Useful for MDC entry. Note tied to the instance lifecycle -->
-- `write_kv`(key: str, value: str)
-    - Writes data at a given key. Data not associated with any instance.
-- `read_kv`(key: str)
-    - Reads data at a given key. Data not associated with any instance.
+### Server-Side (ServiceRegistry)
+
+#### Methods
+- `register_instance(namespace: str, component: str) -> InstanceHandle`  
+  - Registers a new instance of the given namespace and component. Returns an InstanceHandle.
+
+- `InstanceHandle.instance_id() -> str`
+  - Returns the instance id. Returns the unique identifier for the instance in the ServiceRegistry.
+
+- `InstanceHandle.set_metadata(metadata: dict) -> None`  
+  - Write the metadata associated with the instance.
+
+- `InstanceHandle.set_ready(status: InstanceStatus) -> None`  
+  - Marks the instance as ready or not ready for traffic.  
+
+
+### Client-Side (ServiceDiscovery)
+
+#### Methods
+- `list_instances(namespace: str, component: str) -> List[Instance]`  
+  - Lists all instances that match the given namespace and component. Returns a list of Instance objects.
+
+- `watch(namespace: str, component: str) -> InstanceEventStream`  
+  - Watches for events for the set of instances that match `(namespace, component)`.  
+  - Returns a stream of events (InstanceAddedEvent, InstanceRemovedEvent)
+
+- `Instance.metadata() -> dict`  
+  - Returns the metadata for a specific instance.
+
+## Where will these APIs be used?
+
+These APIs are intended to be used internally within the Rust codebase where there are currently calls to `etcd_client` for service discovery and model management. 
+
+Some examples of code that will be impacted:
+
+Frontend:
+(How the frontend discovers workers and maintains inventory of model to worker mappings)
+- run_watcher function at [lib/llm/src/entrypoint/input/http.rs](https://github.com/ai-dynamo/dynamo/blob/main/lib/llm/src/entrypoint/input/http.rs)
+- ModelWatcher at [lib/llm/src/discovery/watcher.rs](https://github.com/ai-dynamo/dynamo/blob/main/lib/llm/src/discovery/watcher.rs)
+
+Model registration (register_llm function):
+(Initial worker bootstrapping as part of register_llm)
+- LocalModel.attach at [lib/llm/src/local_model.rs](https://github.com/ai-dynamo/dynamo/blob/main/lib/llm/src/local_model.rs)
+
+Dynamo Runtime:
+(Used for registering on the runtime (Server) and for getting clients to components (Client))
+- client.rs [lib/runtime/src/client.rs](https://github.com/ai-dynamo/dynamo/blob/main/lib/runtime/src/client.rs)
+- endpoint.rs [lib/runtime/src/endpoint.rs](https://github.com/ai-dynamo/dynamo/blob/main/lib/runtime/src/endpoint.rs)
+
 
 ### Overall Flow
 
@@ -48,18 +79,39 @@ Credits: @itay
 
 #### Frontend Discovers Decode Workers
 
-- Decode calls `create_instance("dynamo", "decode", metadata)` and `set_instance_status(decode_worker, "ready")` to register itself with the service discovery backend. Its metadata includes the model it serves.
-- Frontend calls `list_instances("dynamo", "decode")` and `get_metadata` to get all decode workers and the associated model information to bootstrap its cache.
-- Frontend sets up a watch on the decode workers using `subscribe("dynamo", "decode")` to keep its cache up to date.
+##### Decode Worker Set Up
+
+```python
+# Register the instance
+decode_worker = service_registry.register_instance("dynamo", "decode")
+instance_id = decode_worker.instance_id() # Unique identifier for the instance
+
+# Start up NATS listener for the endpoints of this component (or other transport). We may or may not need the instance id to setup the transport.
+comp_transport_details = set_up_nats_listener(instance_id)
+
+# Write metadata associated with the instance
+metadata = {
+    "model": {...}, # Runtime Info
+    "transport": comp_transport_details, # Transport details for this component
+    "mdc": {...}, #  Model Deployment Card
+}
+
+decode_worker.set_metadata(metadata)
+decode_worker.set_ready("ready")
+```
+
+##### Frontend Discovers Decode Workers
 
 ```python
 # Frontend start:
 decode_workers = service_discovery.list_instances("dynamo", "decode")
 for decode_worker in decode_workers:
     # Fetch the associated metadata for the instance to register the model in-memory model registry
-    metadata = service_discovery.get_metadata("dynamo", "decode", decode_worker.instance_id)
+    metadata = decode_worker.metadata()
     model = metadata["Model"]
     # map the instance to the model in the in-memory model registry ...
+
+# Sets up watch to keep cache up to date
 ```
 
 #### Frontend Needs to Know what Model Key -> Instance Mapping
@@ -68,11 +120,11 @@ Addressed above.
 
 #### Frontend Needs to Know Some Model Specifics (like Tokenizer)
 
-- Decode writes a Model Card using the `write_kv` method. Frontend can simply read this entry.
+- Model card is duplicated on each decode worker in the metadata.
 
 #### Decode Worker Needs to Know how to Reach Prefill Workers
 
-- Decode worker does the exact same thing as the frontend, instead listing and subscribing to the "prefill" component.
+- This is done in the exact same way as the way the frontend reaches the decode workers.
 
 
 <!-- ### Simplifications and Assumptions -->
@@ -81,13 +133,30 @@ Addressed above.
 
 This table relates when each method is used in the context of endpoint instance discovery and model / worker management. We will also compare reference impls for each method in etcd and kubernetes.
 
-### create_instance
+### register_instance
 
-This method is used to create an instance and persist associated metadata tied to the life of the instance. Notably, this metadata could capture immutable information associated with the instance such as model information (e.g what is currently stored in ETCD as `models/{uuid}`).
+This method is used to register a new instance of the given namespace and component. Returns an InstanceHandle that can be used to manage the instance.
 
 ```python
-# Example: Registration of a decode worker with associated model information
-# Currently, this is being stored as part of the register_llm function in ETCD as `models/{uuid}`
+# Example: Registration of a decode worker
+# Server-side: Register the instance
+decode_worker = service_registry.register_instance("dynamo", "decode")
+instance_id = decode_worker.instance_id() # Unique identifier for the instance
+```
+
+#### Kubernetes Reference Impl
+- Asserts the pod has namespace and component labels that match up with method args. Fails otherwise.
+- Asserts there is a Kubernetes Service that will select on namespace and component labels. (More on this later)
+- Returns an InstanceHandle object tied to the pod name. This can be used to fetch the unique identifier for the instance.
+
+Note: The instance registration is tied to the pod lifecycle.
+
+### set_metadata
+
+This method is used to write metadata associated with an instance. 
+
+```python
+# Server-side: Set metadata for the instance
 metadata = {
     "Model": {
         "name": "Qwen3-32B",
@@ -97,49 +166,69 @@ metadata = {
             "max_num_seqs": 256,
             "max_num_batched_tokens": 2048
         }
-    }
+    },
+    "Transport": {...}, # Transport details for this component
+    "MDC": {...}, # Model Deployment Card
 }
-decode_worker = service_discovery.create_instance(namespace, component, metadata)
+decode_worker.set_metadata(metadata)
+```
+
+#### Implementation Details
+- Updates an in-memory struct within the component process
+- Exposes the metadata via a `/metadata` HTTP endpoint on the component
+- Metadata is available immediately after being set, no external storage required
+
+### set_ready
+
+This method is used to mark the instance as ready or not ready for traffic.
+
+```python
+# Context: decode worker has finished loading the model
+# Register the instance
+decode_worker = service_registry.register_instance("dynamo", "decode")
+await start_http_server()
+decode_worker.set_metadata(metadata)
+# When the server is ready to serve, mark the instance as ready for discovery.
+decode_worker.set_ready("ready")
 ```
 
 #### Kubernetes Reference Impl
-- Asserts the pod has namespace and component labels that match up with method args. Fails otherwise.
-- Asserts there is a Kubernetes Service that will select on namespace and component labels. (More on this later)
-- Writes a ConfigMap with the attached metadata. ConfigMap name is a function of the pod name. Returns an Instance object.
+- The readiness probe of the pod will proxy the result of the instance's readiness status. When the instance is ready for traffic, the readiness probe will return 200 and EndpointSlices will be updated to include the instance.
+- Components that have called `watch` on this component will be notified when the instance is ready for traffic. They can use this instance to route traffic to using their transport.
 
-Note: There are many ways to persist and access this immutable metadata. We can use ConfigMaps, a PVC with ReadWriteMany access, etc.
 
-### get_metadata
+### list_instances
 
-This method is to fetch the metadata associated with an instance. For instance, the frontend can use this method to fetch the model information associated with an instance when it receives an event that a new worker is ready.
+This method is used to list all instances that match the given namespace and component. Returns a list of Instance objects.
 
 ```python
-# Context: frontend has watch setup on decode workers
-stream = service_discovery.subscribe("dynamo", "decode")
-for event in stream:
-    switch event:
-        case NewReadyInstanceEvent:
-            # Fetch the associated metadata for the instance to register the model in-memory model registry
-            metadata = service_discovery.get_metadata("dynamo", "decode", instance_id)
-            model = metadata["Model"]
+# Context: frontend startup - discover existing decode workers
+decode_workers = service_discovery.list_instances("dynamo", "decode")
+for decode_worker in decode_workers:
+    # Fetch the associated metadata for the instance
+    metadata = decode_worker.metadata()
+    model = metadata["Model"]
+    # register the model in-memory model registry
+    # map the instance to the model
 ```
 
 #### Kubernetes Reference Impl
-- Fetches the associated ConfigMap with the attached metadata.
+- Queries EndpointSlices for the Service that selects on the namespace and component labels.
+- Returns a list of Instance objects for all ready endpoints.
 
-Note: There are many ways to persist and access this immutable metadata. We can use ConfigMaps, a PVC with ReadWriteMany access, etc.
 
-### subscribe
+### watch
 
-This method is to subscribe to events for the set of instances that match (namespace, component). Returns a stream of events giving signals for when instances that match the subscription are created, deleted, or readiness status changes. This can be used by the frontend to maintain its inventory of ready decode workers. It can be used by decode workers to maintain its inventory of ready prefill workers.
+This method is used to watch for events for the set of instances that match (namespace, component). Returns a stream of events (InstanceAddedEvent, InstanceRemovedEvent) giving signals for when instances that match the subscription are created, deleted, or readiness status changes.
 
 ```python
 # Context: frontend has watch setup on decode workers
-stream = service_discovery.subscribe("dynamo", "decode")
+stream = service_discovery.watch("dynamo", "decode")
 for event in stream:
     switch event:
-        case NewReadyInstanceEvent:
-            metadata = service_discovery.get_metadata("dynamo", "decode", instance_id)
+        case InstanceAddedEvent:
+            # Fetch the associated metadata for the instance
+            metadata = event.instance.metadata()
             model = metadata["Model"]
             # register the model in-memory model registry
             # map the instance to the model
@@ -149,45 +238,25 @@ for event in stream:
 - Sets up a kubectl watch for EndpointSlices corresponding to the Service that selects on the namespace and component labels.
 - Returns a stream of events that inform us when a READY pod matching the namespace and component is up.
 
-### set_instance_status / get_instance_status
+### Instance.metadata()
 
-This method is to mark the instance as ready or not ready for traffic.
-
-```python
-# Context: decode worker has finished loading the model
-metadata = {
-    "Model": {
-        "name": "Qwen3-32B",
-        "type": "Completions",
-        "runtime_config": {
-            "total_kv_blocks": 24064,
-            "max_num_seqs": 256,
-            "max_num_batched_tokens": 2048
-        }
-    }
-}
-decode_worker = service_discovery.create_instance(namespace, component, metadata)
-# Set up endpoints/transport. This can be http/grpc/nats. When the underlying transport is ready to serve, mark the instance as ready for discovery.
-await start_http_server()
-# When the server is ready to serve, mark the instance as ready for discovery.
-service_discovery.set_instance_status(decode_worker, "ready")
-```
-
-#### Kubernetes Reference Impl
-- The readiness probe of the pod will proxy the result of `get_instance_status`. When the instance will be ready for traffic, the readiness probe will return 200 and EndpointSlices will be updated to include the instance.
-- Components that have called `subscribe` on this component will be notified when the instance is ready for traffic. They can use this instance to route traffic to using their transport.
-
-### write_kv / read_kv
-
-This method is to write and read data at a given key. This is a useful place to store the model card (e.g `mdc/{model-slug}`) and other model specific information.
+This method is used to fetch the metadata associated with a specific instance. It makes an HTTP request to the instance's `/metadata` endpoint.
 
 ```python
-# Context: decode worker is registering the MDC before it marks itself as ready
-service_discovery.write_kv("mdc/Qwen3-32B", mdc)
+# Client-side: Get metadata from a specific instance
+decode_workers = service_discovery.list_instances("dynamo", "decode")
+for decode_worker in decode_workers:
+    # Fetch the associated metadata for the instance
+    metadata = decode_worker.metadata()
+    model = metadata["Model"]
+    # register the model in-memory model registry
+    # map the instance to the model
 ```
 
-#### Kubernetes Reference Impl
-- Writes a ConfigMap with the attached data. ConfigMap name is a function of the key.
+#### Implementation Details
+- Makes an HTTP GET request to `/metadata` on the instance
+- Returns the metadata payload stored in the component's in-memory struct
+- No external storage lookup required - direct communication with the instance
 
 ## Kubernetes EndpointSlice Discovery Mechanism
 
@@ -264,32 +333,33 @@ ports:
 
 ### Discovery Flow
 
-1. **Instance Registration**: When `create_instance()` is called, the pod creates a ConfigMap with instance metadata
-2. **Readiness Signaling**: When `set_instance_status(instance, "ready")` is called, the pod's readiness probe starts returning 200
-3. **EndpointSlice Update**: Kubernetes automatically updates the EndpointSlice to mark the endpoint as ready
-4. **Event Propagation**: Clients watching EndpointSlices receive events about the ready instance
+1. **Instance Registration**: When `register_instance()` is called, the InstanceHandle is created and tied to the pod
+2. **Metadata Setup**: When `set_metadata()` is called, the metadata is stored in-memory and exposed via `/metadata` endpoint
+3. **Readiness Signaling**: When `set_ready("ready")` is called, the pod's readiness probe starts returning 200
+4. **EndpointSlice Update**: Kubernetes automatically updates the EndpointSlice to mark the endpoint as ready
+5. **Event Propagation**: Clients watching EndpointSlices receive events about the ready instance
 
 ### Event Mapping
 
-The `subscribe()` method maps EndpointSlice events to ServiceDiscovery events:
+The `watch()` method maps EndpointSlice events to ServiceDiscovery events:
 
 | EndpointSlice Event | ServiceDiscovery Event | Description |
 |---------------------|------------------------|-------------|
-| Endpoint added with `ready: true` | `NewReadyInstanceEvent` | New instance is ready for traffic |
-| Endpoint condition changes to `ready: true` | `InstanceReadyEvent` | Existing instance becomes ready |
-| Endpoint condition changes to `ready: false` | `InstanceNotReadyEvent` | Instance becomes unavailable |
-| Endpoint removed from slice | `InstanceDeletedEvent` | Instance is terminated |
+| Endpoint added with `ready: true` | `InstanceAddedEvent` | New instance is ready for traffic |
+| Endpoint condition changes to `ready: true` | `InstanceAddedEvent` | Existing instance becomes ready |
+| Endpoint condition changes to `ready: false` | `InstanceRemovedEvent` | Instance becomes unavailable |
+| Endpoint removed from slice | `InstanceRemovedEvent` | Instance is terminated |
 
 ### Implementation Details
 
 #### Instance ID Resolution
 - **Instance ID**: Pod name (e.g., `dynamo-decode-pod-abc123`)
 - **EndpointSlice Reference**: `targetRef.name` points to the pod name
-- **Metadata Lookup**: ConfigMap name derived from pod name for `get_metadata()`
+- **Metadata Lookup**: HTTP request to `{instance_address}/metadata` for `Instance.metadata()`
 
 #### Watch Implementation
 ```python
-# Kubernetes watch setup for subscribe()
+# Kubernetes watch setup for watch()
 watch_filter = {
     "labelSelector": f"kubernetes.io/service-name=dynamo-{component}-service"
 }
@@ -299,7 +369,7 @@ for event in endpoint_slice_watch:
     if event.type == "MODIFIED":
         for endpoint in event.object.endpoints:
             if endpoint.conditions.ready:
-                emit_event(NewReadyInstanceEvent(
+                emit_event(InstanceAddedEvent(
                     instance_id=endpoint.targetRef.name,
                     address=endpoint.addresses[0]
                 ))
