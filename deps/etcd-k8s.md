@@ -45,15 +45,6 @@ To de-couple Dynamo from ETCD, we define a `ServiceDiscovery` interface that can
 - `Instance.metadata() -> dict`  
   - Returns the metadata for a specific instance.
 
-## Breakdown of the Implementation
-- Remove ETCD* from top level APIs
-- Define ServiceDiscovery interfaces in Rust
-- Implementations:
-    - Kubernetes
-    - Existing impl for ETCD needs to be moved behind interface
-    - TODO: Local/file system
-- Re-factor existing code to use new interfaces ([See Where will these APIs be used?](#where-will-these-apis-be-used))
-
 ## Where will these APIs be used?
 
 These APIs are intended to be used internally within the Rust codebase where there are currently calls to `etcd_client` for service discovery and model management. 
@@ -389,3 +380,12 @@ for event in endpoint_slice_watch:
 3. **Scalability**: EndpointSlices handle large numbers of endpoints efficiently
 4. **Consistency**: Kubernetes ensures eventual consistency across the cluster
 5. **Health Integration**: Readiness probes directly control traffic eligibility
+
+## Breakdown of the Implementation
+- Remove ETCD* from top level APIs
+- Define ServiceDiscovery interfaces in Rust
+- Implementations:
+    - Kubernetes
+    - Existing impl for ETCD needs to be moved behind interface
+    - TODO: Local/file system
+- Re-factor existing code to use new interfaces ([See Where will these APIs be used?](#where-will-these-apis-be-used))
