@@ -12,9 +12,18 @@ ETCD usage in Dynamo can be categorized into the following:
 - Worker Port Conflict Resolution
 - Router State Sharing Synchronization
 
+## Breakdown of the Implementation
+- Remove ETCD* from top level APIs
+- Define ServiceDiscovery/ServiceRegistry interfaces in Rust
+- Implementations:
+    - Kubernetes
+    - Existing impl for ETCD needs to be moved behind interface
+    - TODO: Local/file system
+- 
+
 ## ServiceDiscovery Interface
 
-To de-couple Dynamo from ETCD, we define a minimal `ServiceDiscovery` interface that can be satisfied by different backends (etcd, kubernetes, etc). In Kubernetes environments, we will use the Kubernetes APIs to implement this interface.
+To de-couple Dynamo from ETCD, we define `ServiceDiscovery` and `ServiceRegistry` interfaces that can be satisfied by different backends (etcd, kubernetes, etc). In Kubernetes environments, we will use the Kubernetes APIs to implement this interface.
 
 ### Server-Side (ServiceRegistry)
 
@@ -47,11 +56,11 @@ To de-couple Dynamo from ETCD, we define a minimal `ServiceDiscovery` interface 
 
 ## Where will these APIs be used?
 
-These APIs are intended to be used internally within the Rust codebase where there are currently calls to `etcd_client` for service discovery and model management. 
+These APIs are intended to be used internally within the Rust codebase where there are currently calls to `etcd_client` for service discovery and model management. We might have to adjust top level APIs to use 
 
 Some examples of code that will be impacted:
 
-Frontend:
+Frontend Worker Discovery:
 (How the frontend discovers workers and maintains inventory of model to worker mappings)
 - run_watcher function at [lib/llm/src/entrypoint/input/http.rs](https://github.com/ai-dynamo/dynamo/blob/main/lib/llm/src/entrypoint/input/http.rs)
 - ModelWatcher at [lib/llm/src/discovery/watcher.rs](https://github.com/ai-dynamo/dynamo/blob/main/lib/llm/src/discovery/watcher.rs)
@@ -64,7 +73,6 @@ Dynamo Runtime:
 (Used for registering on the runtime (Server) and for getting clients to components (Client))
 - client.rs [lib/runtime/src/client.rs](https://github.com/ai-dynamo/dynamo/blob/main/lib/runtime/src/client.rs)
 - endpoint.rs [lib/runtime/src/endpoint.rs](https://github.com/ai-dynamo/dynamo/blob/main/lib/runtime/src/endpoint.rs)
-
 
 ### Overall Flow
 
