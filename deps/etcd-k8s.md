@@ -12,27 +12,18 @@ ETCD usage in Dynamo can be categorized into the following:
 - Worker Port Conflict Resolution
 - Router State Sharing Synchronization
 
-## Breakdown of the Implementation
-- Remove ETCD* from top level APIs
-- Define ServiceDiscovery/ServiceRegistry interfaces in Rust
-- Implementations:
-    - Kubernetes
-    - Existing impl for ETCD needs to be moved behind interface
-    - TODO: Local/file system
-- 
-
 ## ServiceDiscovery Interface
 
-To de-couple Dynamo from ETCD, we define `ServiceDiscovery` and `ServiceRegistry` interfaces that can be satisfied by different backends (etcd, kubernetes, etc). In Kubernetes environments, we will use the Kubernetes APIs to implement this interface.
+To de-couple Dynamo from ETCD, we define a `ServiceDiscovery` interface that can be satisfied by different backends (etcd, kubernetes, etc). In Kubernetes environments, we will use the Kubernetes APIs to implement this interface.
 
-### Server-Side (ServiceRegistry)
+### Server-Side (Service Registry)
 
 #### Methods
 - `register_instance(namespace: str, component: str) -> InstanceHandle`  
   - Registers a new instance of the given namespace and component. Returns an InstanceHandle.
 
 - `InstanceHandle.instance_id() -> str`
-  - Returns the instance id. Returns the unique identifier for the instance in the ServiceRegistry.
+  - Returns a unique identifier for the instance. (Similar to the primary lease id in ETCD)
 
 - `InstanceHandle.set_metadata(metadata: dict) -> None`  
   - Write the metadata associated with the instance.
@@ -41,7 +32,7 @@ To de-couple Dynamo from ETCD, we define `ServiceDiscovery` and `ServiceRegistry
   - Marks the instance as ready or not ready for traffic.  
 
 
-### Client-Side (ServiceDiscovery)
+### Client-Side (Service Discovery)
 
 #### Methods
 - `list_instances(namespace: str, component: str) -> List[Instance]`  
@@ -54,9 +45,18 @@ To de-couple Dynamo from ETCD, we define `ServiceDiscovery` and `ServiceRegistry
 - `Instance.metadata() -> dict`  
   - Returns the metadata for a specific instance.
 
+## Breakdown of the Implementation
+- Remove ETCD* from top level APIs
+- Define ServiceDiscovery interfaces in Rust
+- Implementations:
+    - Kubernetes
+    - Existing impl for ETCD needs to be moved behind interface
+    - TODO: Local/file system
+- Re-factor existing code to use new interfaces ([See Where will these APIs be used?](#where-will-these-apis-be-used))
+
 ## Where will these APIs be used?
 
-These APIs are intended to be used internally within the Rust codebase where there are currently calls to `etcd_client` for service discovery and model management. We might have to adjust top level APIs to use 
+These APIs are intended to be used internally within the Rust codebase where there are currently calls to `etcd_client` for service discovery and model management. 
 
 Some examples of code that will be impacted:
 
@@ -76,7 +76,7 @@ Dynamo Runtime:
 
 ### Overall Flow
 
-At a high level, these are the service discovery requirements in a given disaggregated inference setup:
+At a high level, these are the service discovery requirements in a given disaggregated inference setup. We note how the APIs defined above can be used to achieve this.
 
 Credits: @itay
 
@@ -139,8 +139,6 @@ Addressed above.
 
 ## API Reference
 
-This table relates when each method is used in the context of endpoint instance discovery and model / worker management. We will also compare reference impls for each method in etcd and kubernetes.
-
 ### register_instance
 
 This method is used to register a new instance of the given namespace and component. Returns an InstanceHandle that can be used to manage the instance.
@@ -155,18 +153,18 @@ instance_id = decode_worker.instance_id() # Unique identifier for the instance
 #### Kubernetes Reference Impl
 - Asserts the pod has namespace and component labels that match up with method args. Fails otherwise.
 - Asserts there is a Kubernetes Service that will select on namespace and component labels. (More on this later)
-- Returns an InstanceHandle object tied to the pod name. This can be used to fetch the unique identifier for the instance.
+- Returns an InstanceHandle object tied to the pod name. This can be used to fetch the unique identifier for the instance which can be used in setting up the transport.
 
 Note: The instance registration is tied to the pod lifecycle.
 
 ### set_metadata
 
-This method is used to write metadata associated with an instance. 
+This method is used to set metadata associated with an instance. 
 
 ```python
 # Server-side: Set metadata for the instance
 metadata = {
-    "Model": {
+    "model": {
         "name": "Qwen3-32B",
         "type": "Completions",
         "runtime_config": {
@@ -175,16 +173,16 @@ metadata = {
             "max_num_batched_tokens": 2048
         }
     },
-    "Transport": {...}, # Transport details for this component
-    "MDC": {...}, # Model Deployment Card
+    "transport": {...}, # Transport details for this component
+    "mdc": {...}, # Model Deployment Card
 }
 decode_worker.set_metadata(metadata)
 ```
 
 #### Implementation Details
-- Updates an in-memory struct within the component process
+- Updates an in-memory struct within the instance process
 - Exposes the metadata via a `/metadata` HTTP endpoint on the component
-- Metadata is available immediately after being set, no external storage required
+- No external storage required.
 
 ### set_ready
 
@@ -192,10 +190,12 @@ This method is used to mark the instance as ready or not ready for traffic.
 
 ```python
 # Context: decode worker has finished loading the model
-# Register the instance
+
 decode_worker = service_registry.register_instance("dynamo", "decode")
-await start_http_server()
+
+# Setup handlers for the decode component, then setup transport.
 decode_worker.set_metadata(metadata)
+
 # When the server is ready to serve, mark the instance as ready for discovery.
 decode_worker.set_ready("ready")
 ```
@@ -223,7 +223,6 @@ for decode_worker in decode_workers:
 #### Kubernetes Reference Impl
 - Queries EndpointSlices for the Service that selects on the namespace and component labels.
 - Returns a list of Instance objects for all ready endpoints.
-
 
 ### watch
 
