@@ -77,7 +77,7 @@ By achieving these goals, the Dynamo project aims to ensure high reliability, ra
 
 ## Test organization and directory Structure 
 
-For the detailed test directory structure and the definitions of all test markers used in the Dynamo project, please refer to the documentation [Dynamo Test Strategy](./0006-testing-strategy.md)
+For the detailed test directory structure and the definitions of all test markers used in the Dynamo project, please refer to the documentation [Dynamo Test Strategy](./0008-testing-strategy.md)
 
 ``` shell
 dynamo/
