@@ -1,6 +1,6 @@
 # Dynamo Components Directory Restructure
 
-**Status**: Draft
+**Status**: Approved
 
 **Authors**: @anants
 
@@ -12,9 +12,9 @@
 
 **Sponsor**: @nnshah1, @grahamking
 
-**Required Reviewers**: @nnshah1, @grahamking, @athreesh, @nealvaidya, @ishandhanani, @rmccorm4, @biswapanda, @alec-flowers ,@ai-dynamo/DevOps
+**Required Reviewers**: @nnshah1, @grahamking, @athreesh, @nealvaidya, @ai-dynamo/DevOps
 
-**Review Date**: TBD
+**Review Date**: 09/10/2025
 
 **Pull Request**: TBD
 
