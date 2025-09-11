@@ -121,6 +121,12 @@ Add calls to existing C-bindings and invoke them from Go (`cgo → extern "C" Ru
 - Expose a C-compatible FFI layer using `#[no_mangle] extern "C" fn`.  
 - Build the crate into a `.so` / `.a` / `.dll` and call it from Go via `cgo`.  
 - See [Draft PR #2786](https://github.com/ai-dynamo/dynamo/pull/2786) for a reference implementation.  
+- The EPP go code will instantiate the Dynamo Router with the namespace (i.e. vllm-agg) and component (i.e. backend).  The router will read the model card by searching in etcd for the matching entry and read the kv cache block size. During the call `callDynamoRouter` the router will return the best worker id in the standard manner. 
+- The Dynamo Plugin will expose the standard router configuration values through env vars
+    - has_overlap_score_weight: bool,
+    - overlap_score_weight: f64,
+    - as_router_temperature: bool,
+    - router_temperature: f64,
 
 This approach has **higher maintenance overhead** but offers **lower latency**:  
 - Avoids process boundary overhead (no syscalls, no kernel, no sockets).  
