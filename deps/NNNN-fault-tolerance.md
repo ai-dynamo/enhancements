@@ -254,73 +254,81 @@ the system can be.
 ```mermaid
 graph LR
     Client["Client"]
-    Frontend["Frontend"]
-    Router["Router"]
-    Processor["Processor"]
-    PrefillQueue["Remote Prefill Queue"]
+
+    subgraph Frontend["Frontend (Tokenizer & Router)"]
+        direction TB
+        Tokenizer["Tokenizer"]
+        Router["KV Router"]
+        Tokenizer --> Router
+    end
 
     Client --> Frontend
-    Frontend --> Processor
-    Processor <--> Router
 
-    %% Prefill Worker Pool (horizontal layout)
+    %% Prefill Worker Pool with Expert Parallelism
     subgraph PrefillPool["Prefill Worker Pool"]
         direction LR
-        subgraph Prefill1["Prefill 1"]
+        subgraph Prefill1["Prefill Worker 1"]
             direction TB
-            P1GPU0["GPU 0"]
-            P1GPU1["GPU 1"]
+            subgraph P1Experts["Expert Parallel Groups"]
+                P1E1["Expert 1-4<br/>GPU 0"]
+                P1E2["Expert 5-8<br/>GPU 1"]
+            end
         end
-        subgraph Prefill2["Prefill 2"]
+        subgraph Prefill2["Prefill Worker 2"]
             direction TB
-            P2GPU0["GPU 0"]
-            P2GPU1["GPU 1"]
+            subgraph P2Experts["Expert Parallel Groups"]
+                P2E1["Expert 1-4<br/>GPU 0"]
+                P2E2["Expert 5-8<br/>GPU 1"]
+            end
         end
-        subgraph Prefill3["Prefill 3"]
+        subgraph Prefill3["Prefill Worker 3"]
             direction TB
-            P3GPU0["GPU 0"]
-            P3GPU1["GPU 1"]
+            subgraph P3Experts["Expert Parallel Groups"]
+                P3E1["Expert 1-4<br/>GPU 0"]
+                P3E2["Expert 5-8<br/>GPU 1"]
+            end
         end
     end
 
-    %% Decode Worker Pool (vertical layout)
+    %% Decode Worker Pool with Expert Parallelism
     subgraph DecodePool["Decode Worker Pool"]
         direction TB
-        subgraph Decode1["Decode 1"]
+        subgraph Decode1["Decode Worker 1"]
             direction TB
-            D1GPU0["GPU 0"]
-            D1GPU1["GPU 1"]
-            D1GPU2["GPU 2"]
-            D1GPU3["GPU 3"]
+            subgraph D1Experts["Expert Parallel Groups"]
+                D1E1["Expert 1-2<br/>GPU 0"]
+                D1E2["Expert 3-4<br/>GPU 1"]
+                D1E3["Expert 5-6<br/>GPU 2"]
+                D1E4["Expert 7-8<br/>GPU 3"]
+            end
         end
-        subgraph Decode2["Decode 2"]
+        subgraph Decode2["Decode Worker 2"]
             direction TB
-            D2GPU0["GPU 0"]
-            D2GPU1["GPU 1"]
-            D2GPU2["GPU 2"]
-            D2GPU3["GPU 3"]
+            subgraph D2Experts["Expert Parallel Groups"]
+                D2E1["Expert 1-2<br/>GPU 0"]
+                D2E2["Expert 3-4<br/>GPU 1"]
+                D2E3["Expert 5-6<br/>GPU 2"]
+                D2E4["Expert 7-8<br/>GPU 3"]
+            end
         end
-        subgraph Decode3["Decode 3"]
+        subgraph Decode3["Decode Worker 3"]
             direction TB
-            D3GPU0["GPU 0"]
-            D3GPU1["GPU 1"]
-            D3GPU2["GPU 2"]
-            D3GPU3["GPU 3"]
+            subgraph D3Experts["Expert Parallel Groups"]
+                D3E1["Expert 1-2<br/>GPU 0"]
+                D3E2["Expert 3-4<br/>GPU 1"]
+                D3E3["Expert 5-6<br/>GPU 2"]
+                D3E4["Expert 7-8<br/>GPU 3"]
+            end
         end
     end
 
     %% Connections
-    Processor --> Decode1
-    Processor --> Decode2
-	Processor --> Decode3
-	
-
-	PrefillQueue --> PrefillPool
-    DecodePool --> PrefillQueue
+    Frontend --> PrefillPool
+    Frontend --> DecodePool
     PrefillPool -.-> DecodePool
-	
 
     %% Styling
+    style Frontend stroke:#008000,stroke-width:3px
     style PrefillPool stroke:#0066cc,stroke-width:2px
     style DecodePool stroke:#000,stroke-width:2px
 ```
