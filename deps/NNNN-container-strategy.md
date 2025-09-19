@@ -101,7 +101,7 @@ In order to address the requirements, we propose the following changes to the Dy
 
 The base container will be a pre-built container that will be used by the backends to build the final container image. This build base container will contain a Dynamo build for all backends to use for their framework-specific build. The base image will leverage a manylinux base image to enable support for multiple distributions (U22, U24, etc). The container will also include a NIXL build since this is common across all backends. This will be a new Dockerfile in the /containers directory. Multi-arch support is also a P0 Also, the base container can be used as a drop-in replacement for the current devel container used in public CI. This would significantly reduce public CI build times and enable faster validation of changes. 
 
-## Use-case of build stages along with relationship between stages (base, runtime, devel, ci_minimum)
+## Use-case of build stages along with relationship between stages (base, runtime, dev)
 
 Each backend-specific Dockerfile should follow a specific format. The backend-specific Dockerfiles should be divided up into multiple stages, with each stage inheriting artifacts/leveraging the previous stage as the base container. The following stages should be defined in the backend-specific Dockerfile: 
 
