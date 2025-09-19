@@ -24,7 +24,7 @@
 
 This document outlines a container build process optimization strategy for Dynamo to enhance the developer experience by re-organizing Dockerfiles along with defining a clear and maintainable structure for our Dockerfiles. 
 
-One of the goals for this document is to define a clear and maintainable structure for our Dockerfiles. Specifically, to determine how many Dockerfiles we need and clarify the relationships between base, runtime, development, and CI images. The aim is to ensure each environment's Dockerfile builds upon the previous (as supersets), maximizing environment consistency and coverage during daily development and testing. 
+One of the goals for this document is to define a clear and maintainable structure for our Dockerfiles. Specifically, to determine how many Dockerfiles we need and clarify the relationships between base, runtime, and development images. The aim is to ensure each environment's Dockerfile builds upon the previous (as supersets), maximizing environment consistency and coverage during daily development and testing. 
 
 To achieve this goal, this document proposes certain optimizations to improve the current build process:
 - Restructuring the build process to provide a base container with a pre-built version of Dynamo + NIXL available on all distributions, enabling splitting of specific backends from the dynamo build process.
@@ -53,7 +53,7 @@ This document proposes solutions to the build process challenges, aiming to impr
 
 This base image should operate as a single base container which can then be used as base containers for backend-specific images. By leveraging a base container, We can reduce the redundant code across Dockerfiles and establish a single-source of truth for all Dynamo-builds. This would also enable us to replace the current devel container with the base container for local development/public CI for faster validation of changes.
 
-* Define the relationships between base, runtime, development, and CI images for each Dockerfile and provide a structure/template to follow for Dockerfiles. 
+* Define the relationships between base, runtime, and development images for each Dockerfile and provide a structure/template to follow for Dockerfiles. 
 
 * Reduce build flakiness by pinning/fixing dependencies in the base image from package managers and squashing/reducing layers as necessary
 
@@ -115,10 +115,10 @@ Each backend-specific Dockerfile should follow a specific format. The backend-sp
 - Base Image: Cuda base runtime image
 - Functionality: Minimal image with only the dependencies required to deploy and run Dynamo w/backend from the backend build stage; intended for production deployments. Copies dynamo artifacts from base image and backend artifacts from backend build image.
 
-**CI Stage:**
+**Development Stage:**
 - Targeted User: Developers/Internal CI Pipelines/Local Debugging
 - Base Image: Runtime image
-- Functionality: Adds CI-specific tools, QA test scripts, internal models, and other dependencies needed for automated testing.
+- Functionality: Adds development-specific tools, QA test scripts, internal models, and other dependencies needed for developers. We also want to integrate dev container features into this stage.
 
 The CUDA base images will be used from the [NVIDIA CUDA Container Registry](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/cuda). Please refer to the Pros and Cons section for more details on why we chose to use the cuda runtime image instead of the Deep Learning CUDA image.
 
@@ -141,7 +141,7 @@ flowchart TD
     M[pip install dynamo + Backend && NIXL]
     N[Backend Runtime Image]
     O[Install CI/Test/Dev dependencies]
-    P[CI Minimum image]
+    P[Development image]
 
     %% Main build flow (left)
     A --> B
@@ -171,7 +171,7 @@ The diagram above illustrates the proposed container build strategy showing the 
 - Build Base Container with common dependencies
 - Backend-specific development containers
 - Runtime containers
-- CI containers
+- Development containers
 
 This layered approach ensures consistent builds, reduces duplication, and improves maintainability across all backend implementations.
 
@@ -190,9 +190,9 @@ FROM nvcr.io/nvidia/cuda:XX.YY-runtime-ubuntuXX.XX as runtime
 # Copy backend artifacts from backend-build stage
 # Install runtime dependencies only
 
-# CI Stage
-FROM runtime as ci
-# Add CI-specific tools and test dependencies
+# Development Stage
+FROM runtime as dev
+# Add development-specific tools and test dependencies
 ```
 
 ## Dependency Management
