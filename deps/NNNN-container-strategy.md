@@ -61,7 +61,7 @@ Pinning/Fixing dependencies will ensure a unified build environment reducing "it
 
 * Minimize effort for providing multi-arch support across various backends for Dynamo by leveraging manylinux to build for multiple distributions
 
-* Implement remote compiler caching to dramatically reduce build times across development and CI/CD environments
+* Implement remote compiler caching strategies to dramatically reduce build times across development and CI/CD environments
 
 By integrating tools like sccache for remote compilation caching, we can avoid redundant compilation work across builds, significantly speeding up the container build process for both developers and CI pipelines.
 
@@ -204,9 +204,9 @@ FROM runtime as dev
 
 ## Build Caching Strategy (Phase 3)
 
-To further optimize build times after the initial Dockerfile restructuring, We will explore remote compiler caching (further optimizations to be added in future):
+To further optimize build times after the initial Dockerfile restructuring, We will explore remote compiler caching strategies (further optimizations to be added in future):
 
-### Remote Compiler Caching
+### Remote Compiler Caching Strategies
 - **Compiler cache Integration**: Leverage compiler cache service like [sccache](https://github.com/mozilla/sccache) in the build-base container to cache compilation results for Dynamo, NIXL, and backend dependencies.
 - **Remote Cache Storage**: Use a remote cache storage service to store the cached compilation results in CI/CD pipelines.
 - **Cache Size Management**: Configure appropriate cache size limits and cleanup policies to balance storage usage with build performance.
