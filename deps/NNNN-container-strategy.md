@@ -217,9 +217,6 @@ To further optimize build times after the initial Dockerfile restructuring, We w
 - **Monitoring**: Add build time metrics to measure cache effectiveness and identify optimization opportunities
 - **CI Integration**: Configure CI/CD pipelines to properly utilize remote caching storage.
 
-## Deferred to Implementation
-
-TBD
 
 # Implementation Phases
 
