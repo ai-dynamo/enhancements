@@ -2,28 +2,48 @@
 
 ## Overview
 
-The goal is to decouple the NATs transport from the pipeline.
+The goal is to decouple the NATs transport from the dynamo runtime. 
+Introduce abstractions for current NATs usages (e.g. KV router, event plane, request plane & object store, etc) which can be used to plug different implementations.
 
 ## Requirements
-
 - Ability to deliver messages across dynamo instances with at least once delivery guarantee.
+  Ensure serialized bytes can be reliably delivered in p2p and broadcast modes.
+
 - Ability to switch between transports at runtime.
 
+### Event Plane
+- KV events needs to be delivered with at least once delivery guarantee. Currently KV events are handled in idempotent manner and redelivered messages are ignored.
 
-##  Durability guarantees
+#### Metrics 
 
-### At least once delivery
+### Object Store
+
+### Request Plane
+- need protocol for request context and control messages for request cancellation
+
+### Message Delivery Guarantees
+
+#### At least once delivery (preferred)
 - No message loss is possible.
 - Message is delivered at least once to the consumers
+- consumers should be idempotent and be able to handle duplicate messages.
 
-### Exactly once delivery
-- needs ack/nack coordination and stateful tracking of messages to ensure once delivery.
+#### Exactly once delivery
+- needs stateful tracking of messages and ack/nack coordination to ensure exactly once delivery.
 
-### At most once delivery
+#### At most once delivery
 - Message loss is possible.
 
-
 ## Current NATs use cases
+
+## NATs use cases
+
+### 1. NatsQueue python binding
+- **Location**: `lib/bindings/python/rust/llm/nats.rs` (`NatsQueue`)
+- **Functionality**:
+- Deprecated: We don't use `NatsQueue` python binding anymore. We use `NatsQueue` rust binding instead.
+- We can remove the python binding and the associated tests to simplify the codebase.
+
 #### 2. JetStream-backed Queue/Event Bus
 - **Location**: `lib/runtime/src/transports/nats.rs` (`NatsQueue`)
 - **Functionality**:
@@ -65,25 +85,63 @@ The goal is to decouple the NATs transport from the pipeline.
   - Each service responds once to stats queries
 
 ## Proposal
+
 - Use named message bus to publish and subscribe to messages.
-- Generalize ingress/egress components to support different transports 
+- Support different transports (e.g. Raw TCP, Nats) for request/reply pattern.
+- Introduce abstractions for each NATs usage (e.g. KV router, Jet stream, object store, etc).
+
+### Implementation 
+- Phase 1
+	* degraded feature set
+		* not use KV router if they want. Best effort 
+	* nats
+		* No HA guarantees for router
+		* Operate without high availability w/ single router
+- Phase 2
+   * explore transports (QUIC, Multicast)
+	 * durability
+	 * exactly once delivery
 
 
-## Alternative solutions
+## Generic Messaging Protocol
+Decouple messaging protocol from the underlying transport like Raw TCP, ZMQ or (HTTP, GRPC, and UCX active message).
 
-### Message queue transports
- - ZeroMQ
- - Redis
- - Kafka
- - SQS
- - GCP PubSub
- - Azure Service Bus
+Phase approach: start with ZMQ and Nats. Later, incrementally expand to support more advanced transports, ensuring that the protocol remains adaptable to requirements.
 
-### Object store
- - S3
- - Redis
- - Shared filesystem 
+## Handshake and Closure Protocols: 
+Robust handshake and closure protocols, including the use of sentinels or envelope structures to signal the end of streams or requests.
+A common semantic for closing requests and handling errors, will be generalized across different transports.
 
-### Ideas
+## Multipart Message Structure
+Use a multipart message structure, inspired by ZMQ's native multipart support, to encapsulate headers, body, and control signals (such as closure control signals or error notifications). 
 
-1. Use RocksDB / local storage to persist messages on producer side to guarantee at least once delivery.
+Extend existing two-part message structure to support N-part messages, making the protocol more flexible and expressive.
+
+handshake protocols and message flows for key transports (Raw TCP, HTTP SSE, ZMQ, GRPC, UCX), distilling a protocol that works across all. They emphasized the value of starting with simple transports and expanding to more complex ones, ensuring the protocol can accommodate future needs and additional transports.
+
+## Python-Rust Interoperability and Data Class Generation
+Strategies for improving Python-Rust interoperability, focusing on auto-generating Python data classes from Rust structs using Pydantic, and aligning message schemas to reduce manual coding and serialization errors.
+
+### Support transports
+ - Raw TCP
+ - ZMQ
+ - HTTP SSE
+ - GRPC
+ - UCX active messaging
+ - Nats
+
+## Milestones
+1. Implement abstractions for each NATs usage
+
+2. Implement different transports for request/reply pattern
+a. Interface for Request Plane
+b. sending requests over direct ZMQ 
+
+3. Implement different transports for KV router
+
+4. Implement different transports for event bus
+
+5. Object store:
+  a. interface for object store
+  b. object store implementation using shared filesystem
+  c. object store implementation using model express
