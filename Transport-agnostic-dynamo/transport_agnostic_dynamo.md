@@ -1,11 +1,11 @@
 # Dynamo runtime: Transport Agnostic Dynamo Pipelines
 Status: Draft
 
-Authors: (biswapanda)[https://github.com/biswapanda]
+Authors: [biswapanda](https://github.com/biswapanda)
 
 Category: Architecture
 
-Reviewers: Ryan Olson, Neelay Shah, Graham King, Maksim Khadkevich
+Reviewers: [Ryan Olson](https://github.com/ryanolson), [Neelay Shah](https://github.com/nnshah1), [Graham King](https://github.com/grahamking), [Maksim Khadkevich](https://github.com/hutm), [Rudy Pei](https://github.com/PeaBrane), [Kyle kranen](https://github.com/kkranen)
 
 
 ## Overview
@@ -66,6 +66,7 @@ More details in [NATs use cases](#nats-use-cases)
 
 
 ## Proposal
+![alt text](./dyn_entities.png)
 
 ![alt text](./comm.png)
 
@@ -146,8 +147,6 @@ subscriber_entity: DynamoEntity{
     metadata: {"k1": "v2"}
 }
 ```
-
-![alt text](./dyn_entities.png)
 
 #### DynamoEntity
 
