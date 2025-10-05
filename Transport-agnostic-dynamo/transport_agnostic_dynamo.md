@@ -102,7 +102,49 @@ subscribe(topic: &str,
           entity: &DynamoEntity) -> Result<(), Error>
 
 
-request(topic: &str, message: InputType, entity_id: u128, ) -> Future<Result<OutputType, Error>>
+request(topic: &str, message: InputType, entity_id: u128) -> Future<Result<OutputType, Error>>
+```
+
+### PubSub interface:
+Event plane will use pubsub interface to publish and subscribe to events.
+
+#### topics
+Topics are used to group events of same nature for example: "kv_events", "metrics" etc.
+
+#### dynamo entity based filtering / scoping
+Guiding principle: "flat is better than nested".
+Inspired by Kubernetes experience (selectors and labels) and mongo document filter usage.
+
+DynamoEntity can be used to as filtering criteria for events publishing and subscribing. This matching will be done at the network layer and is transparent to the application layer.
+
+For example,  an event published by publisher_entity will be delivered to subscriber_entity if the subscriber_entity's metadata matches (is a subset of) the publisher_entity's metadata.
+
+- metadata is fetched from service discovery layer and wire protocol does not (de)serialize metadata.
+
+- dynamo entity is used as a filter to identify the target entities to publish/subscribe so we can do this in absense of a dedicated broker service. This can be done in network manager layer. 
+
+- perf: matching logic can be cached in network manager layer to avoid re-matching for each message. Service discovery watch can be used to invalidate the cache when the metadata changes.
+
+
+```
+publisher_entity: DynamoEntity{
+    metadata: {"k1": "v1", "k2": "v2"}
+}
+
+// matches: {"k2": "v2"} is subset of publisher_entity's metadata {"k1": "v1", "k2": "v2"}
+subscriber_entity: DynamoEntity{
+    metadata: {"k2": "v2"}
+}
+
+// matches: {"k1": "v1"} is subset of publisher_entity's metadata {"k1": "v1", "k2": "v2"}
+subscriber_entity: DynamoEntity{
+    metadata: {"k1": "v1"}
+}
+
+// does not match
+subscriber_entity: DynamoEntity{
+    metadata: {"k1": "v2"}
+}
 ```
 
 ![alt text](./dyn_entities.png)
