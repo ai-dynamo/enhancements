@@ -1,10 +1,18 @@
 # Dynamo runtime: Transport Agnostic Dynamo Pipelines
+Status: Draft
+
+Authors: (biswapanda)[https://github.com/biswapanda]
+
+Category: Architecture
+
+Reviewers: Ryan Olson, Neelay Shah, Graham King, Maksim Khadkevich
+
 
 ## Overview
 
-High level goal is to decouple the NATs transport from the dynamo runtime. 
+High level goal is to decouple the NATs (transport and object store) from the dynamo runtime. 
 
-- introduce abstractions for current NATs usages (e.g. KV router, event plane, request plane & object store, etc) which can be used to plug different implementations.
+- introduce abstractions for current NATs usages (e.g. event plane, request plane & object store, etc) which can be used to plug different implementations.
 
 - deprecate NATs object store and reduce dependencies on NATs.
 
@@ -19,19 +27,20 @@ Dynamo communication primitives needs to support:
 - peer-to-peer (req/reply: request plane) and scoped broadcasts (event plane)
 - communication regimes: single process, single node (multi process) and multi-node
 - transport options: NATs, Raw TCP, ZMQ, HTTP SSE, GRPC, UCX active messaging
+- cancelation support for request/reply pattern
+- events does not require response back
 
 ### Deprecate NATs Object store usage
  - Router snapshots are stored in NATs object store.
  - Model files are stored in NATs object store.
 
-### Long term architectural goals: 
-Support:
+### Long term architectural goal support: 
 
 - separation of Frontend (3-in-1 across in-process, same node or remote node)
 
 - HTTP based endpoint for one off usage of a component (KV router, etc)
 
-- batching/muxing messages for Req/Responses:
+- batching/pipelining messages for Req/Responses:
   - we can see a perf benefit by batching multiple requests together over a network round-trip.
 
 - Simplify `dynamo namespace` usage and process heirarchy (namespace, component, etc)
@@ -64,50 +73,66 @@ More details in [NATs use cases](#nats-use-cases)
 
 Use unique identifiers to identify the target entity.
 
-`DynamoEntityID`: a unique address for each dynamo process.
+`DynamoEntity`: uniquely addessible compute unit (engine, instance, component), etc.
+  - dynamo application will use communication primitives: (publish, subscribe, request) will  use Entity to route messages to the target in transport agnostic manner.
   - An Opaque `u128` identifier that uniquely identifies a single instance or collection of instances (component, namespace, etc)
-  - each dynamo process has a unique DynamoEntityID and can be used to communicate with other dynamo processes.
+  - each dynamo entity has a unique ID and can be used to communicate with other dynamo entities.
   - can be used to identify the target and establish connection by `DynamoNetworkManager`.
   - discovery service api can be used to find participating dynamo entities.
-  - dynamo application will use communication primitives: (publish, subscribe, request) and this ID to route messages to the target in transport agnostic manner.
 
-`DynamoNetworkManager`: manages communication between dynamo processes.
+`DynamoNetworkManager`: manages communication between dynamo entities.
  - manages listening ports and client connections to remote peers
  - responsible for serializing and deserializing messages for different transports
  - responsible for handling timeout error, retry and cancellation for request/reply pattern
  - responsible for sending and receiving messages
  - Handles remote peer connections: in-process, local host or remote host
 
-High level`DynamoNetworkManager` API:
-
-```
-
-publish(id: DynamoEntityID, topic: str, message: InputType) -> Result<(), Error>
-
-subscribe(id: DynamoEntityID, topic: str, handler: fn(message: InputType) -> Result<(), Error>) -> Result<(), Error>
-
-request(id: DynamoEntityID, topic: str, message: InputType) -> Future<Result<OutputType, Error>>
-```
-
-
 ![alt text](./net_manager.png)
 
-#### DynamoEntityID
 
-Inspired by inode and ProcessID from Operating System and Grove concepts.
+High level `DynamoNetworkManager` API:
 
-Uniquely identify a single instance or collection of instances (component, namespace, etc)
+Following high level network manager interface will be available to dynamo application layer to be used by component authors.
 
+```
+publish(topic: &str, message: InputType, entity: &DynamoEntity) -> Result<(), Error>
+
+subscribe(topic: &str, 
+          handler: fn(message: InputType) -> Result<(), Error>, 
+          entity: &DynamoEntity) -> Result<(), Error>
+
+
+request(topic: &str, message: InputType, entity_id: u128, ) -> Future<Result<OutputType, Error>>
+```
+
+![alt text](./dyn_entities.png)
+
+#### DynamoEntity
+
+Inspired by inodes and ProcessID from Operating System and Grove concepts.
+
+Uniquely identify a single instance or collection of instances (component, namespace, etc) across a deployment.
+
+Collection entity type are useful and can be mapped to [grove heirarchy](https://github.com/NVIDIA/grove/blob/bcc412140323d5d781c2d16c9828befa2e965bb8/docs/assets/multinode-disaggregated.excalidraw.png) like PodClique/PodCliqueSet/PodCliqueSet.
+
+- Namespace: 
+  maps to a PodCliqueSet
+  it's children are components (PodClique)
+
+- Component:
+  maps to a PodClique
+  children are instances (Pod)
 
 ```rust
-pub struct DynamoEntityId {
+pub struct DynamoEntity {
     pub id: u128,
     pub entity_type: EntityType,
-    pub name: Option<Arc<String>>, // Optional human-readable name for debugging and logging
-    pub children: Vec<DynamoEntityId>, // Optional children for collection of instances
+    pub name: Option<Arc<String>>,     // (Optional) human-readable name
+    pub children: Vec<DynamoEntity>, // (Optional) children for collection
+    pub metadata: HashMap<String, String>, // (Optional) metadata for matching
 }
 
-impl DynamoEntityId {
+impl DynamoEntity {
     /// Create from name with automatic hashing
     pub fn from_name(name: &str, entity_type: EntityType) -> Self {
         Self {
@@ -115,6 +140,7 @@ impl DynamoEntityId {
             name: Some(Arc::new(name.to_string())),
             entity_type: entity_type,
             children: Vec::new(),
+            metadata: HashMap::new(),
         }
     }
 }
@@ -132,12 +158,6 @@ enum EntityType {
 - Configuration files (YAML/JSON)
 - Command-line interfaces
 - Logging and observability
-
-
-TODO: 
-- map these ids cleanly to grove concepts like PodClique/PodCliqueSet/PodCliqueSet
-- show a diagram of the entity hierarchy
-
 
 ### Object Store Interface
 
