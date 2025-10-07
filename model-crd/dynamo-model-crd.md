@@ -227,7 +227,7 @@ spec:
     spec:
       containers:
         - name: download-model
-          image: model-express-downloader:latest
+          image: huggingface-downloader:latest
           env:
             - name: MODEL_PATH
               value: /models/llama-3-70b-instruct-v1
