@@ -206,6 +206,7 @@ The existing DynamoGraphDeployment controller needs modifications:
 
 
 # Model download job flow
+Dynmao Operator will launch a job with the following env variables:
 - `MODEL_PATH` set to the model's mount path 
 - `MODEL_NAME` set to the model's name
 - `MODEL_VERSION` set to the model's version
