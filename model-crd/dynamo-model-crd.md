@@ -211,11 +211,31 @@ Dynmao Operator will launch a job with the following env variables:
 - `MODEL_NAME` set to the model's name
 - `MODEL_VERSION` set to the model's version
 
+#### Dynamo model CR
+```yaml
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoModel
+metadata:
+  name: llama-3-70b-instruct-v1
+  namespace: dynamo-system
+spec:
+  # Model identification
+  modelName: meta-llama/Llama-3.3-70B-Instruct
+  version: 8a4556b53a7d81d7e07db15eafb5af5dcd321b33  # HuggingFace commit SHA
+  # Source configuration
+  source:
+    uri: hf://meta-llama/Llama-3.3-70B-Instruct
+    secretRef:
+      name: huggingface-token
+      key: token
+```
+
 ##  Model Express disabled
-Operator will launch a job with huggingface hub client image.
+Operator will launch a job with huggingface hub client image with huggingface token from `spec.source.secretRef` name and key.
 - `HF_TOKEN` set to the huggingface token
 
-### Example: Model Download Job Spec
+
+#### Model Download Job Spec
 ```yaml
 apiVersion: batch/v1
 kind: Job
