@@ -268,7 +268,7 @@ spec:
 
 ##  Model Express enabled
 When Model express is enabled, operator will launch a job with model express image with additional env variable:
-- `MODEL_EXPRESS_URL` set to the model express server url
+- `MODEL_EXPRESS_URL` set to the model express server url (cluster internal url)
 
 ### Example: Model Download Job Spec
 
