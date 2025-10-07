@@ -211,11 +211,11 @@ Dynmao Operator will launch a job with the following env variables:
 - `MODEL_NAME` set to the model's name
 - `MODEL_VERSION` set to the model's version
 
-#  Model Express disabled flow
+##  Model Express disabled
 Operator will launch a job with huggingface hub client image.
 - `HF_TOKEN` set to the huggingface token
 
-# Integration with Model Express
+##  Model Express enabled
 When Model express is enabled, operator will launch a job with model express image with additional env variable:
 - `MODEL_EXPRESS_URL` set to the model express server url
 
