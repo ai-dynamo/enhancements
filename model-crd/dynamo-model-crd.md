@@ -215,9 +215,72 @@ Dynmao Operator will launch a job with the following env variables:
 Operator will launch a job with huggingface hub client image.
 - `HF_TOKEN` set to the huggingface token
 
+### Example: Model Download Job Spec
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: download-model-job
+  namespace: <namespace>
+spec:
+  template:
+    spec:
+      containers:
+        - name: download-model
+          image: model-express-downloader:latest
+          env:
+            - name: MODEL_PATH
+              value: /models/llama-3-70b-instruct-v1
+            - name: MODEL_NAME
+              value: llama-3-70b-instruct-v1
+            - name: MODEL_VERSION
+              value: 8a4556b53a7d81d7e07db15eafb5af5dcd321b33
+            - name: HF_TOKEN
+              value: <huggingface-token>
+          volumeMounts:
+            - name: model-pvc
+              mountPath: /models
+      volumes:
+        - name: model-pvc
+          persistentVolumeClaim:
+            claimName: llama-3-70b-instruct-v1-pvc
+```
+
 ##  Model Express enabled
 When Model express is enabled, operator will launch a job with model express image with additional env variable:
 - `MODEL_EXPRESS_URL` set to the model express server url
+
+### Example: Model Download Job Spec
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: download-model-job
+  namespace: <namespace>
+spec:
+  template:
+    spec:
+      containers:
+        - name: download-model
+          image: model-express-downloader:latest
+          env:
+            - name: MODEL_PATH
+              value: /models/llama-3-70b-instruct-v1
+            - name: MODEL_NAME
+              value: llama-3-70b-instruct-v1
+            - name: MODEL_VERSION
+              value: 8a4556b53a7d81d7e07db15eafb5af5dcd321b33
+            - name: MODEL_EXPRESS_URL
+              value: http://model-express.<namespace>.svc.cluster.local
+          volumeMounts:
+            - name: model-pvc
+              mountPath: /models
+      volumes:
+        - name: model-pvc
+          persistentVolumeClaim:
+            claimName: llama-3-70b-instruct-v1-pvc
+```
 
 # Benefits
 
@@ -228,7 +291,7 @@ When Model express is enabled, operator will launch a job with model express ima
 - Extensible to multiple sources (HF/S3/NGC/File) and future features (LoRA, air-gapped deployments from private model registries)
 
 
-# Additional Considerations
+# Additional Features
 
 - Model verification:
   - We can add verification of the entire folder (sorted by file path)
