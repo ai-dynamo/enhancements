@@ -204,6 +204,20 @@ The existing DynamoGraphDeployment controller needs modifications:
 6. **Watch Events**: Watch for DynamoModel status changes to trigger DGD reconciliation
 
 
+
+# Model download job flow
+- `MODEL_PATH` set to the model's mount path 
+- `MODEL_NAME` set to the model's name
+- `MODEL_VERSION` set to the model's version
+
+#  Model Express disabled flow
+Operator will launch a job with huggingface hub client image.
+- `HF_TOKEN` set to the huggingface token
+
+# Integration with Model Express
+When Model express is enabled, operator will launch a job with model express image with additional env variable:
+- `MODEL_EXPRESS_URL` set to the model express server url
+
 # Benefits
 
 - Eliminates boilerplate (PVC/Job init) by centralizing model operations in the operator
@@ -213,7 +227,7 @@ The existing DynamoGraphDeployment controller needs modifications:
 - Extensible to multiple sources (HF/S3/NGC/File) and future features (LoRA, air-gapped deployments from private model registries)
 
 
-## Additional Considerations
+# Additional Considerations
 
 - Model verification:
   - We can add verification of the entire folder (sorted by file path)
