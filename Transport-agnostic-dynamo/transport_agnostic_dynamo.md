@@ -197,7 +197,7 @@ Corresponding json serialized dynamo entity:
 
 Router can query the discovery service to find the prefill leader workers.
 Query `DynamoEntity` in serialized form:
-```json
+```rust
 // Create a dynamo entity to get all prefill leader workers
 prefill_leaders = DynamoEntity::from_name("prefill_leaders", EntityType::Collection, {
     "deployment": "deepseek",
