@@ -182,7 +182,7 @@ Corresponding json serialized dynamo entity:
 {
     "id": "123",
     "entity_type": "instance",
-    "name": "router",
+    "name": "<prefill-pod-name>",
     "metadata": {
         "deployment": "deepseek",
         "model": "deepseek-r1-671b",
