@@ -148,20 +148,86 @@ subscriber_entity: DynamoEntity{
 }
 ```
 
-#### DynamoEntity
+### DynamoEntity
 
-Inspired by inodes and ProcessID from Operating System and Grove concepts.
+#### Current problems: dynamo namespace and heirarchy based addressing scheme
 
-Uniquely identify a single instance or collection of instances (component, namespace, etc) across a deployment.
+- we can't support multiple models in a single dynamo namespace.
+Currently we use `dynamo_namespace.component.endpoint` as addressing scheme to orchestrate communication (p2p/ pubsub) across pods. This can cause cross-model communication because of lack of scoping.
+
+- current 3 level heirarchy (namespace, component, endpoint) is not capable of addressing pods with Grove.
+  We need extensible way to address specific pods within [grove heirarchy](https://github.com/NVIDIA/grove/blob/bcc412140323d5d781c2d16c9828befa2e965bb8/docs/assets/multinode-disaggregated.excalidraw.png)
+
+- Identify specific instance or a collection of instances within a deployment based on a query / selector.
+
+
+#### Solution
+
+Improve addressing scheme for communication (p2p/ pubsub).
+
+Use proven data model to identify and query entities:
+- Kubernetes labels and selectors 
+- SQL WHERE clause and ORMs (SQLAlchemy, Django, etc)
+- MongoDB document filter
+- Inspired by inodes and (parent) ProcessID from Operating System to represent heirarchy.
+
+DynamoEntity uniquely identifies a single instance or collection of instances (currently component, namespace, etc) across a deployment using a selector. 
+
+1. Each dynamo process registers itself with the discovery service and advertises its metadata (similar to kubernetes labels).
+
+For example, a prefill worker in a deepseek deployment with model deepseek-r1-671b:
+
+Corresponding json serialized dynamo entity:
+```json
+{
+    "id": "123",
+    "entity_type": "instance",
+    "name": "router",
+    "metadata": {
+        "deployment": "deepseek",
+        "model": "deepseek-r1-671b",
+        "component": "prefill",
+        "grove_pod_clique": "deepseek-r1-671b-prefill",
+        "grove_pod_clique_role": "leader",
+        "grove_pod_clique_index": "0",
+        "rank": "0",
+    }
+}
+```
+
+Router can query the discovery service to find the prefill leader workers.
+Query `DynamoEntity` in serialized form:
+```json
+// Create a dynamo entity to get all prefill leader workers
+prefill_leaders = DynamoEntity::from_name("prefill_leaders", EntityType::Collection, {
+    "deployment": "deepseek",
+    "model": "deepseek-r1-671b",
+    "component": "prefill",
+    "grove_pod_clique_role": "leader",
+})
+```
+
+Decode can publish KV events to All router workers by specifying the collection entity:
+```rust
+// Create a dynamo entity to get all router workers
+routers = DynamoEntity::from_name("router", EntityType::Collection, {
+    "deployment": "deepseek",
+    "model": "deepseek-r1-671b",
+    "component": "router",
+})
+
+// Publish KV events to All router workers
+publish("kv_events", kv_block_removed_event, routers)
+
+```
+![alt text](./dynamo-entity.png)
 
 Collection entity type are useful and can be mapped to [grove heirarchy](https://github.com/NVIDIA/grove/blob/bcc412140323d5d781c2d16c9828befa2e965bb8/docs/assets/multinode-disaggregated.excalidraw.png) like PodClique/PodCliqueSet/PodCliqueSet.
 
-- Namespace: 
-  maps to a PodCliqueSet
+- current `dynamo_namespace`: maps to a PodCliqueSet
   it's children are components (PodClique)
 
-- Component:
-  maps to a PodClique
+- current `component`: maps to a PodClique
   children are instances (Pod)
 
 ```rust
