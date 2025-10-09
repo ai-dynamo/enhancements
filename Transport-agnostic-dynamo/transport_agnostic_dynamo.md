@@ -72,6 +72,8 @@ More details in [NATs use cases](#nats-use-cases)
 
 ### Transport Agnostic API
 
+![alt text](./generic_event_req.jpg)
+
 Use unique identifiers to identify the target entity.
 
 `DynamoEntity`: uniquely addessible compute unit (engine, instance, component), etc.
@@ -184,12 +186,10 @@ Corresponding json serialized dynamo entity:
     "entity_type": "instance",
     "name": "<prefill-pod-name>",
     "metadata": {
-        "deployment": "deepseek",
-        "model": "deepseek-r1-671b",
+        "deployment_name": "deepseek",
+        "model_name": "deepseek-r1-671b",
         "component": "prefill",
-        "grove_pod_clique": "deepseek-r1-671b-prefill",
-        "grove_pod_clique_role": "leader",
-        "grove_pod_clique_index": "0",
+        "role": "leader",
         "rank": "0",
     }
 }
@@ -199,20 +199,20 @@ Router can query the discovery service to find the prefill leader workers.
 Query `DynamoEntity` in serialized form:
 ```rust
 // Create a dynamo entity to get all prefill leader workers
-prefill_leaders = DynamoEntity::from_name("prefill_leaders", EntityType::Collection, {
-    "deployment": "deepseek",
-    "model": "deepseek-r1-671b",
+prefill_leaders = DynamoEntity::from_selector({
+    "deployment_name": "deepseek",
+    "model_name": "deepseek-r1-671b",
     "component": "prefill",
-    "grove_pod_clique_role": "leader",
+    "role": "leader",
 })
 ```
 
 Decode can publish KV events to All router workers by specifying the collection entity:
 ```rust
 // Create a dynamo entity to get all router workers
-routers = DynamoEntity::from_name("router", EntityType::Collection, {
-    "deployment": "deepseek",
-    "model": "deepseek-r1-671b",
+routers = DynamoEntity::from_selector({
+    "deployment_name": "deepseek",
+    "model_name": "deepseek-r1-671b",
     "component": "router",
 })
 
