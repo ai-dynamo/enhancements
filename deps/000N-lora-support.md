@@ -160,3 +160,12 @@ vllm serve model --enable-lora --max-lora-rank 64
 ### TensorRT-LLM LoRA Support
 
 todo
+
+
+## Implementation phases
+
+### Phase 1: Basic Support for LoRA models in Dynamo
+Focus on infrastructure to support LoRA model serving in Dynamo.
+
+### Phase 2: Smart LoRA model serving
+Load balancing and fault tolerance for LoRA model serving in Dynamo.
