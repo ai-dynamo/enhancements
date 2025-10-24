@@ -1,8 +1,18 @@
 # LoRA Support for Dynamo
 
-This document outlines the support for LoRA models in Dynamo.
+**Status**: Draft
+
+**Authors**: Biswa Panda
+
+**Category**: Architecture 
+
+**Required Reviewers**: Neelay Shah, Alec, Ryan McCormick, Ishaan
+
+**Sponsor**: Anish, Harry
+
 
 ## Overview
+This document outlines the support for LoRA models in Dynamo.
 
 Each LoRA Model will have a unique identifier and a corresponding `Model Deployment Card` in Dynamo with additional lora specific metadata (max_rank, module_names, etc.). We can use most of the code path (routing, preprocessing, etc.) for base model for LoRA models in frontend.
 
@@ -80,13 +90,13 @@ class LoraDownloaderBase(abc.ABC):
         pass
 
 # Dynamo's default concrete LoRA downloader implementation
-# this will downlowd LoRA models from huggingface to local disk 
+# this will downlowd LoRA models from huggingface to local disk
 class HuggingFaceDownloader(LoraDownloaderBase):
     ...
 
 ```
 
-## LLM Backends 
+## LLM Backends
 
 LLM backend frameworks will be responsible for:
 - Downloading LoRA models from upstream LoRA repository to local disk
@@ -105,28 +115,48 @@ python -m dynamo.vllm  \
     --lora-downloader-plugin="my-org.lora.downloader.CustomDownloader"
 ```
 
-## Dataflow for LoRA model requests
+## Life of a LoRA Request
 
-When a request comes in, Frontend will identify it as a LoRA request and set `is_lora` flag to True in dynamo pre-procesed request object.
-
-Backend can 
-1. reuse existing chat/completion endpoint for LoRA models (Preffered)
-2. or use dedicated LoRA specific chat/completion endpoints for LoRA models
-
-In Backend layer we can convert the pre-processed request object to LoRA specific request object for the framework (vllm, sglang, tensorrt-llm, etc.)
+1. Http ingress: Fronend identifies model as a LoRA model and sets `is_lora` flag to True in dynamo pre-processed request object.
+2. Frontend Processing: Preprocessor converts the request object to pre-processed request object (tokenize, applies chat template, etc.)
+3. Routing Decision: LoRA model specific KV Router is used to determine which backend worker can handle this specific request.
+4. Backend Processing: The backend converts the pre-processed request object to the LoRA Request format needed by the underlying framework (vLLM, SGLang, etc.)
+5. Model Execution: The request is processed using the base model + LoRA adapter
+6. Response: The customized response is sent back to the frontend
 
 ## KV routing with LoRA models
 
-LoRA enabled Router (in Frontend) will discover all the LoRA models using service discovery mechanism. 
+### KV Router per LoRA model
+LoRA enabled Router (in Frontend) will discover all the LoRA models using service discovery mechanism.
 Each active LoRA model will have dedicated KV router to handle the request for the LoRA model. It will function similar to existing KV router for base model.
 
 Backend requests will generate KV event stream and Frontend router will consume them to build its Radix Tree.
 
-## Framework Support for multiple concurrent LoRA model serving
+### Alterntive : Single KV Router per base model
+In this approach, we create a single KV Router per base model.
+This approach will need to use lora identifier (lora name or id) to compute the KV block hashes for request consistently across Backend LLM workers and frontend router.
+
+ Pros:
+- No need to shard the KV Router by LoRA model
+
+Cons:
+- Complexity increases as we need to change the block hash computation logic to include the lora identifier
+- Changes need to be made in KV routing path in both frontend and backend to support this.
+
+#  Framework Support for multiple concurrent LoRA model serving
 
 ### vLLM LoRA Support
 todo: need to ensure that vLLM is built with punica kernels support for serving multiple LoRA models concurrently.
 
+[Dynamically serving LoRA Adapters](https://docs.vllm.ai/en/stable/features/lora.html#dynamically-serving-lora-adapters)
+
+```bash
+vllm serve model --enable-lora --max-lora-rank 64
+```
 ### sglang LoRA Support
 
+[Dynamic LoRA loading](https://docs.sglang.ai/advanced_features/lora.html#Dynamic-LoRA-loading)
+
 ### TensorRT-LLM LoRA Support
+
+todo
