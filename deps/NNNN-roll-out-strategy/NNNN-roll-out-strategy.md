@@ -2,8 +2,8 @@
 
 This enhancement proposal is meant to address two things:
 
-1. Building on @biswapanda [Dynamo namespaces based isolation DEP](https://github.com/ai-dynamo/enhancements/pull/28) to propose DynamoGraphDeployment (DGD) CRD strict coupling of model <> (frontend/set of workers) and how the DGD specification creates addressable services.
-2. Proposing solutions for outlined roll out scenarios given 1.
+1. Building on @biswapanda [Dynamo namespaces based isolation DEP](https://github.com/ai-dynamo/enhancements/pull/28) to propose a model worker group isolation mechanism within a DynamoGraphDeployment (DGD).
+2. Proposing enhancements to Dynamo/Grove's roll out scenario/strategy support for DGDs.
 
 ## Model Deployment Cards (MDC)
 
@@ -27,7 +27,7 @@ The CRD spec contains a list of services which define the components that make u
 
 ## Model Deployment Roll Outs
 
-A model deployment roll out is the process of how the deployment of a model is updated in production. Different roll out scenarios are listed below. For the purposes of this proposal, we will only focus on how these out scenarios occur via updates to a DGD.
+A model deployment roll out is the process in which the deployment of a model is updated in production. Different roll out scenarios are listed below. For the purposes of this proposal, we will only focus on how these out scenarios occur via updates to a DGD.
 
 ### Common Roll Out Scenarios
 
@@ -59,7 +59,7 @@ Same use cases, example and expected behavior as **Update Dynamo Worker Version*
 
 #### Different MDC Checksums during Roll Out
 
-As explained in the **Model Deployment Cards (MDC)** section above, the MDC is published from the model worker on startup. A DGD does not directly specify an MDC (not apparent to Operator/User how changes to `extraPodSpec` updates the MDC).
+As explained in the **Model Deployment Cards (MDC)** section above, the MDC is published from the model worker on startup. A DGD does not directly specify an MDC (not directly apparent to Operator/User how changes to `extraPodSpec` updates the MDC - would have to look at KvStore).
 
 For any of the following use cases listed below, a user would want to update their model deployment via their DGD manifest.
 
@@ -180,7 +180,7 @@ Because the `PC` controller is recreating each Pod index, to ensure up time for 
 
 [Multi-Node Deployment Grove Example](./dynamo-grove-multi-node.png)
 
-For the Multi-Node case, there will be a `PodCliqueScalingGroup` (`PCSG`) for each set of worker - in the example above one for the Decode workers and one for the Prefill workers. When a `PC` is managed by a `PCSG`, the `PCSG` controller is responsible for performing the rolling update instead of the `PC` controller (different than single-node case).
+For the Multi-Node case, there will be a `PodCliqueScalingGroup` (`PCSG`) for each set of workers - in the example above one for the Decode workers and one for the Prefill workers. When a `PC` is managed by a `PCSG`, the `PCSG` controller is responsible for performing the rolling update instead of the `PC` controller (different than single-node case).
 
 The `PCSG` controller updates `PCSG` replicas one at a time in ascending ordinal order (0 -> 1 -> 2 -> ...). Within a `PCSG` replica, all `PC`s are deleted and recreated concurrently. Having multiple `PCSG` replicas ensures availability for the set of workers.
 
@@ -192,6 +192,8 @@ The `PCSG` controller updates `PCSG` replicas one at a time in ascending ordinal
 # Issues
 
 ## Model Crosstalk
+
+**Diagram here**
 
 When deploying two DGDs for two different models, say **llama3.1-70B** and **Qwen3-0.6B**, if the DGDs are deployed in the same namespace (both have the same `dynamoNamespace` field values), the workers will register under the same `EndpointId`. In the vllm `disagg.yaml` example above, both workers for **llama3.1-70B** and **Qwen3-0.6B** will register under the `EndpointId` `{dynamoNamespace}/backend/generate`. Because the `Client` for both model engines is watching the same prefix `v1/instance/{dynamoNamespace}/backend/generate`, each `Client` will discover instances from both models, resulting in the `PushRouter` routing engine for **llama3.1-70B** for example sending requests to both sets of model workers.
 
@@ -207,9 +209,9 @@ _Assumes multiple worker replicas are deployed given Grove's default rolling upg
 
 Has been tested but does not work as desired:
 
-1. User updates the DGD manifest to use a new image for the `Prefill` and `Decode` services (or single worker service in aggregrated deployment).
+1. User updates the vllm `disagg.yaml` to use a new image for the `VllmPrefillWorker` and `VllmDecodeWorker` services (or single worker service in aggregrated deployment).
 2. User patches the DGD using a `kubectl apply -f`
-3. The `Prefill` and `Decode` `PodClique` will terminate an old `Prefill` and `Decode` `Pod` and create a new `Prefill` and `Decode` `Pod` concurrently.
+3. The `Prefill` and `Decode` `PodClique`s will terminate an old `Prefill` and `Decode` `Pod` and create a new `Prefill` and `Decode` `Pod` concurrently.
 4. The old worker `Pod`s receives a SIGTERM triggering a graceful shutdown by draining in-flight requests then cancelling the primary token which will remove the instance and MDC registration from the KvStore. However, from testing (backend specific), it's found that there is a period where the worker `Pod`s still have a KvStore registration but aren't listening on the `EndpointId` anymore -> results in request errors.
 5. The new worker `Pod`s will start up, and once registered in the KvStore -> new requests can now be routed to the new worker `Pod`s.
 6. In period during 4. and 5., the extra worker replicas will continue to serve new requests.
@@ -226,7 +228,7 @@ _Assumes multiple frontend replicas are deployed given Grove's default rolling u
 
 Has been tested and does work as desired:
 
-1. User updates the DGD manifest to use a new image for the `Frontend` service.
+1. User updates the vllm `disagg.yaml` to use a new image for the `Frontend` service.
 2. User patches the DGD using a `kubectl apply -f`
 3. The Frontend `PodClique` will terminate an old Frontend `Pod` and create a new Frontend `Pod` concurrently.
 4. The old Frontend `Pod` receives a SIGTERM. The old Frontend Pod will no longer be `Ready`, so the Kubernetes `Service` will remove the old Frontend `Pod` from the endpoint list -> new requests will no longer be routed to the old Frontend `Pod`. While in `Terminating` state, the Frontend process will gracefully shutdown by draining in-flight requests before exiting.
@@ -275,7 +277,7 @@ Same as **Different MDC Checksum** from 1-5
 
 # Solution
 
-## Dynamo Namespace Isolation at DGD Level
+## Model Worker Group Isolation at DGD Level
 
 Building on top of the [Dynamo namespaces based isolation DEP](https://github.com/ai-dynamo/enhancements/pull/28) from @biswapanda, here is what has been implemented so far to date:
 
@@ -410,7 +412,7 @@ spec:
 ##### Pros:
 
 - Easy to visualize the current state of the deployment like in the case of a canary roll out.
-- You can have N number of worker groups. Might be desired for Hierarchical Planner if you have > 2 use cases with corresponding worker groups.
+- Supports the [Hierachical Planner proposal](https://github.com/ai-dynamo/enhancements/pull/46/files?short_path=09e8f0f#diff-09e8f0f98b689bb0d0f4d26f6a32f85b27c554cb38341f40faab0ef1232442f4) where multiple models can be deployed in the same DGD
 
 ##### Cons:
 
@@ -505,6 +507,11 @@ Here, the partition indicates that only the 10th replica (0-indexed) is updated 
 ##### Cons:
 
 - Relies on the `ControllerRevision` resource to store updates to the DGD spec.
+- Does not enable deploying multiple models within the same DGD - required for Hierarchical Planner.
+
+#### Suggested Hash Solution
+
+- Solution 1 as it can enable deploying multiple models within the same DGD (Hierachical Planner) and the explicit `workerGroupName` makes the worker grouping clear
 
 ### DGD/Operator Updates
 
@@ -517,34 +524,221 @@ Here, the partition indicates that only the 10th replica (0-indexed) is updated 
 - `ModelWatcher.watch` can now filter based on namespace prefix match instead of exact match (e.g. frontend matching for `vllm-agg-*` where `vllm-agg-a1b2c3d4` and `vllm-agg-e5f6g7h8` are the two worker groups).
 - `ModelManager` updated to support multiple `Client`s per model engine. Allow `PushRouter` to load balance traffic between multiple sets of workers. Round-robin and random case seem simple (each Client will have an instance count) but KV-Router case is more complex. Do we do weighted selection of worker group and then worker selection based on kv instance radix tree?
 
+### Solves Issues
+
+- **Model Crosstalk** - since namespace is now the DGD name and DGD name is unique, model crosstalk will not occur.
+- **Different MDC Checksum** - in a RollingUpdate scenario or with a canary roll out using worker groups, set A and set B will have hashes appended to isolate them. This assumes the Core Dynamo Lib can be updated to support multiple `Client`s per model engine and load balance traffic across.
+- **Incompatible KV Cach Transfer** - similar to **Different MDC Checksum**, set A and set B will have different namespaces, so communication between set A and set B will not occur.
+
+### Adds Functionality
+
+- If using `workerGroupName` solution, a DGD can support the Hierarchical Planner proposal where multiple configurations of the same model can be deployed in the same DGD (do note that the SLO routing logic is not specified - would need to be solved).
+- Adds support for a canary roll out strategy where a user can deploy X% of new model workers within a DGD and monitor SLOs for the new workers before gradually scaling down old set/scaling up new set.
+- Does not **prohibit**:
+  - The `Shared Frontend` pattern
+  - A `Blue/Green` roll out strategy can still be performed at a layer above the DGD using traditional k8s tooling (Ingress traffic splitting, etc.)
+
+## Additions to Grove's Default Rolling Update Strategy
+
+To give the user more fine-grained control over Grove's default rolling update strategy and to support similar semantics to `Deployment`, `StatefulSet` and `LeaderWorkerSet`, we propose adding:
+
+- `maxUnavailable` field for `PC` and `PCSG` to specify the maximum number of replicas that can be unavailable during the update. This controls the speed of the roll out (you can delete/recreate `maxUnavailable` replicas at a time). The default would be 1 (current behavior). Note that there is already a `minAvailable` field for `PC` and `PCSG` which is used for gang scheduling/termination semantics - 1) min number of replicas that are guaranteed to be scheduled together and 2) if the number of available replicas is less then `minAvailable`, then after `terminationDelay` period, the gang will be terminated.
+- `maxSurge` field for `PC` and `PCSG` to specify the maximum number of replicas that can be created above the desired number of replicas. This can enable more availability during the roll out process (can have replica 1 but have maxSurge of 1, maxUnavailable of 0 - ensures that the new replica is ready before the old replica is terminated).
+  - However, supporting `maxSurge` becomes a lot more tricky because the surge replica indices would be > desired replicas. It also creates issues with the gang scheduling/termination semantics. Does a surge replica count towards `minAvailable`? This also can consume a lot of resources if done at the PCSG level where you are scheduling multiple PCs at a time.
+
+Support for both `maxUnavailable` and `maxSurge` could look like the following for a `DGD`:
+
+```yaml
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-disagg
+spec:
+  services:
+    Frontend:
+      componentType: frontend
+      replicas: 1 # with a single frontend replica, maxSurge 1 and maxUnavailable 0 ensures that the new frontend replica is ready before the old frontend replica is terminated
+      rollingUpdate:
+        maxSurge: 1
+        maxUnavailable: 0
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:my-tag
+    VllmDecodeWorker:
+      componentType: worker
+      subComponentType: decode
+      replicas: 4 # will delete/recreate 2 replicas at a time
+      rollingUpdate:
+        maxUnavailable: 2
+      resources:
+        limits:
+          gpu: "1"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:my-tag
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - python3
+            - -m
+            - dynamo.vllm
+          args:
+            - --model
+            - Qwen/Qwen3-0.6B
+    VllmPrefillWorker:
+      componentType: worker
+      subComponentType: prefill
+      replicas: 2 # follows default of maxSurge 0 and maxUnavailable 1 (1 replica deleted/recreated at a time)
+      resources:
+        limits:
+          gpu: "1"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:my-tag
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - python3
+            - -m
+            - dynamo.vllm
+          args:
+            - --model
+            - Qwen/Qwen3-0.6B
+            - --is-prefill-worker
+```
+
+_Note that the `maxUnavailable` and `maxSurge` field is supported at the `DGD` service spec level since the Frontend will be a standalone `PC` and the Prefill/Decode workers will be a `PC` for single-node case or multiple `PC`s managed by a `PCSG` in the multi-node case._
+
+# Guidance on a Single Model vs. Multiple Models per DGD
+
+The proposed solution would allow for both. You can have **llama3.1-70B** and **Qwen3-0.6B** deployed within the same DGD like so:
+
+```yaml
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-agg
+spec:
+  services:
+    Frontend:
+      componentType: frontend
+      replicas: 1
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:my-tag
+    QwenWorker:
+      componentType: worker
+      workerGroupName: qwen
+      replicas: 1
+      resources:
+        limits:
+          gpu: "1"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:my-tag
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - python3
+            - -m
+            - dynamo.vllm
+          args:
+            - --model
+            - Qwen/Qwen3-0.6B
+    LlamaWorker:
+      componentType: worker
+      workerGroupName: llama
+      replicas: 1
+      resources:
+        limits:
+          gpu: "1"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:my-tag
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - python3
+            - -m
+            - dynamo.vllm
+          args:
+            - --model
+            - llama/Llama3.1-70B
+```
+
+This would work. You can also have a separate DGD for each model. This also applies to having the same model with different configurations deployed in the same DGD (new roll out or hierarchical planner).
+
+### Single Model per DGD
+
+**Pros**:
+
+- Clearer separation of concerns. DGD == a singular model.
+- Lifecycle of the single Model being served is tied to the lifecyle of the DGD.
+- Higher level Gateway/Ingress routing is simple - singular DGD Service is tied to a single model. No need for dynamic discovery of what models are being served.
+
+**Cons**:
+
+- Deploying a Frontend per Model. (This can be cirumvented with the shared frontend pattern)
+
+### Multiple Models per DGD
+
+**Pros**:
+
+- More flexibility for advanced use cases - speculative decoding with a draft model, hierarchical planner, etc.
+
+**Cons**:
+
+- Lifecycle of multiple models is tied to the lifecycle of the DGD
+- Gang scheduling/termination semantics are at the level of a DGD
+- More complex Gateway/Ingress routing - a DGD Service can be serving multiple models.
+
+# Alternatives Considered
+
+## DGD Updates are Not Supported
+
+In this case, the DGD operator would not support updating the DGD spec once deployed. This means that in order for the user to perform any roll out, they would need to deploy another DGD and leverage a higher level Gateway/Ingress routing to load balance traffic between the two DGDs during the roll out process.
+
+**Pros**:
+
+- Keeps the Dynamo Core Lib logic simple and focused on serving a single Model/MDC
+- Work to make DGD immutable is simple. No other work would be needed
+
+**Cons**:
+
+- Requires the user to develop/find their own solution for performing roll outs
+- Not consistent with roll out strategies supported by alternative solutions
+- Two DGDs == two units of gang scheduling/termination and topology awareness
+
+## Only Enable Version Updates for DGD Spec
+
+In this case, we would limit the subset of things a user can update on the DGD spec to only be the image tag of the service. This would enable a `RollingUpdate` strategy in the scenario of **Worker Version Update** and **Frontend Version Update**.
+
+**Pros**:
+
+- Enables in-place roll out strategy for **Worker Version Update** and **Frontend Version Update**
+- **Frontend Version Update** is currently supported, **Worker Version Update** would require work to ensure requests during roll out do not error.
+- Still keeps the Dynamo Core Lib logic simple and focused on serving a single Model/MDC
+
+**Cons**:
+
+- In the case of **Incompatible KV Cache Transfer Mechanisms** or **Different MDC Checksums**, the user would need to perform a roll out at a higher level than Dynamo DGD (blue/green with Ingress traffic splitting)
+- Two DGDs == two units of gang scheduling/termination and topology awareness
+
+## Enable Multiple MDCs per Model (No Support for Worker Group Isolation)
+
+In this case, a user can make any update to the DGD spec in order to perform a roll out. The Dynamo Core Lib would be updated to support multiple MDCs per model engine. This would solve for **Worker Version Update**, **Frontend Version Update** and **Different MDC Checksums**.
+
+However, this would not solve for **Incompatible KV Cache Transfer Mechanisms** as their is no worker group isolation (all workers new/old in the same namespace). Also, it is not clear to the user what would make KV cache transfer incompatible.
+
+**Pros**:
+
+- Enables in-place roll out strategy for **Worker Version Update**, **Frontend Version Update** and **Different MDC Checksums**
+
+**Cons**:
+
+- Makes the Dynamo Core Lib more complex as it needs to support multiple MDCs per model engine.
+- Does not solve for **Incompatible KV Cache Transfer Mechanisms** case
+
 **TODOS**:
 
-- Shared frontend is still supported?
-- DGD should be thought of as a singular model deployment - frontend, sets of workers
-- Section on alternatives
-  - Enable image updates for DGD but prevent other spec changes --> rolling update strategies in those cases would be done at a higher level than Dynamo DGD (blue/green with Ingress traffic splitting)
-  - Enable any update to DGD spec and support for multiple MDCs per engine -> case where worker communication isolation is needed would have to be handled at a higher level
-- Include section on how current frameworks support roll out strategies
 - if the user updates the served model name, this results in a different model key. Should we support this? What would happen in the current solution?
 - LORA support?
-- Hierarchical Planner support?
-- Default roll out strategy expectations - how can I rollback?
-- For the workerGroupName solution, how is the operator/Grove deleting old replicas and creating new ones?
-- Supporting a notion of different update stategies and maxSurge/maxUnavailable
-- Implications on kv router?
 
 - Issues should be clear and clear how proposed solution(s) addresses them
 - ## Follow DEP outline structure:
-
-**NOTES**:
-
-- could have a top level field for worker componentType `modelName` that becomes the served model name by way of injecting env var. Can then support multiple models within a single DGD.
-
-- spec dec requiring target and draft model
-
-- node maintenance - is this in scope?
-
-### Understanding of componentType and subComponentType
-
-- **componentType**: can be `frontend`, `planner`, `worker` or `*` (anything else or not provided). Should be enforced as enum at kube API level
-- **subComponentType**: can be `*` (any value or not provided). Has no affect on operator but used by Planner to determine if what services are prefill and decode.
