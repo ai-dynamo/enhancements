@@ -15,7 +15,7 @@ The Frontend has a `ModelWatcher` that watches the KvStore PUT events for keys w
 
 The `ModelWatcher.watch` method first determines if the [Frontend should process the MDC or discard it](https://github.com/ai-dynamo/dynamo/blob/6deeecb1d6a9f4eb1770b4272bfa85a4b6226e0a/lib/llm/src/discovery/watcher.rs#L138). If the frontend is deployed in the global namespace (`dynamo`), then all MDCs observed will be processed. If the Frontend is deployed in a non-global namespace, than only MDCs with keys that match the namespace will be processed (`v1/mdc/{namespace}.*`)
 
-If the MDC should be processed, `ModelWatcher` will extrace the model name (display name) from the MDC and check if the `ModelManager` already contains an engine for that model. If there is an engine that exists but the MDC checksum (generated from select MDC fields) does not match, [the `ModelWatcher` will discard the instance and log an error](https://github.com/ai-dynamo/dynamo/blob/6deeecb1d6a9f4eb1770b4272bfa85a4b6226e0a/lib/llm/src/discovery/watcher.rs#L156). Currently, the worker with discarded MDC will continue to run and actually receives traffic (registered under the same `EndpointId`) but frontend pre-processing will use the old MDC (undesirable). If there is no engine for that model, an engine is created and stored on the `ModelManager`.
+If the MDC should be processed, `ModelWatcher` will extract the model name (display name) from the MDC and check if the `ModelManager` already contains an engine for that model. If there is an engine that exists but the MDC checksum (generated from select MDC fields) does not match, [the `ModelWatcher` will discard the instance and log an error](https://github.com/ai-dynamo/dynamo/blob/6deeecb1d6a9f4eb1770b4272bfa85a4b6226e0a/lib/llm/src/discovery/watcher.rs#L156). Currently, the worker with discarded MDC will continue to run and actually receives traffic (registered under the same `EndpointId`) but frontend pre-processing will use the old MDC (undesirable). If there is no engine for that model, an engine is created and stored on the `ModelManager`.
 
 The model engine contains a `Client` constructed for the MDC `EndpointId`. The MDC `EndpointId` is extracted from the MDC key (`{namespace}.{component}.{endpoint}`), which is the address of the model worker. This `Client` will watch the KvStore PUT events for keys with the prefix `v1/instance/{namespace}/{component}/{endpoint}`. When a PUT event is received, the `Client` will update the instance list.
 
@@ -108,17 +108,59 @@ An example of a how a user would update the vllm `disagg.yaml` DGD manifest to s
 
 #### Deployments
 
+The core Kubernetes `Deployment` resource has [two strategies for rolling out updates:](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy) `RollingUpdate` and `Recreate`.
+
+- `RollingUpdate` is the default strategy where Pods are updated by gradually scaling down the old `ReplicaSet` and scaling up the new `ReplicaSet`.
+  - Optional field `maxUnavailable` specifies the maximum number of Pods that can be unavailable during the update.
+  - Optional field `maxSurge` specifies the maximum number of Pods that can be created above the desired number of Pods.
+- `Recreate` strategy will delete all existing Pods before the new ones are created.
+
 #### StatefulSets
+
+The core [Kubernetes `StatefulSet` resource](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/stateful-set-v1/) has two `updateStrategy` options: `RollingUpdate` and `OnDelete`.
+
+- `RollingUpdate` is the default strategy where Pods are updated in sequence (highest index -> lowest index) one Pod at a time.
+  - Optional field `maxUnavailable` specifies the maximum number of Pods that can be unavailable during the update (default is 1).
+  - Optional field `partition` indicates the ordinal at which the StatefulSet should be paritioned for updates (default is 0 - all Pods are updated).
+- `OnDelete` is the legacy behavior where Pods are only updated when they are manually deleted.
+
+_Note that there is no `maxSurge` for `RollingUpdate` strategy as stable Pod identity (index) is important for exclusive PVCs and deterministic startup/shutdown ordering_
 
 #### LeaderWorkerSet
 
-#### Inference Gateway Extension
+The `LeaderWorkerSet` resource has a single [`RolloutStrategy` `RollingUpdate`](https://github.com/kubernetes-sigs/lws/blob/main/api/leaderworkerset/v1/leaderworkerset_types.go)
+
+- Optional field `partition` behaves the same as StatefulSet `RollingUpdate` `partition` field.
+- Optional field `maxUnavailable` behaves the same as StatefulSet `RollingUpdate` `maxUnavailable` field.
+- Optional field `maxSurge` behaves the same as Deployment `RollingUpdate` `maxSurge` field.
+
+_Note that LWS does support `maxSurge`. Example of how it works [here](https://lws.sigs.k8s.io/docs/concepts/rollout-strategy/)_
+
+#### Gateway API Inference Extension
+
+The Gateway API Inference Extension (GAIE) does not control the `Model Server` itself (the piece that is actually running the model inference). Example of a [vllm Model Server Deployment](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/main/config/manifests/vllm/gpu-deployment.yaml)
+
+Since GAIE is just a Gateway that is routing between `InferencePool`s (`Model Server` grouping for a single model), they [expect the user to create another `Model Server` Deployment themselves and use an `HTTPRoute` to split traffic between the new and old `InferencePool`](https://gateway-api-inference-extension.sigs.k8s.io/guides/inferencepool-rollout/). This enables canary or blue/green roll out strategies but the way the `Model Server` is rolled out for updates is on the user.
+
+_Note that llm-d uses GAIE and Deployment (single-node) and LeaderWorkerSet (multi-node) for model serving so it inherits both of their roll out strategies._
 
 #### CentML Platform
+
+The CentML Platform leverages [`Argo Rollouts`](https://argo-rollouts.readthedocs.io/en/stable/) to enable an [automated canary roll out strategy](https://github.com/CentML/platform/blob/main/catalog/src/catalog/inference_deployment_v3/templates/rollout.yaml).
+
+Argo Rollouts are designed to be a drop in replacement of `Deployment` where the PodSpec is the same but the `.spec.strategy` has more powerful capabilities.
+
+- An example is a canary style roll out where you can define an [`Analysis`](https://argo-rollouts.readthedocs.io/en/stable/features/analysis/) that can query custom metrics and define success/failure conditions, the step size, traffic weighting and roll out speed
+
+_Future inspiration for how a user can perform a canary roll out that monitors SLOs (TTFT, ITL) of new set of workers during roll out._
 
 #### AIBrix
 
 #### OME
+
+#### Canary Roll Out
+
+#### Blue/Green Roll Out
 
 ### Grove Rolling Update Strategy
 
@@ -182,7 +224,7 @@ Has been tested but does not work as desired:
 
 _Assumes multiple frontend replicas are deployed given Grove's default rolling upgrade strategy._
 
-Has been tested and does not work as desired:
+Has been tested and does work as desired:
 
 1. User updates the DGD manifest to use a new image for the `Frontend` service.
 2. User patches the DGD using a `kubectl apply -f`
@@ -480,15 +522,19 @@ Here, the partition indicates that only the 10th replica (0-indexed) is updated 
 - Shared frontend is still supported?
 - DGD should be thought of as a singular model deployment - frontend, sets of workers
 - Section on alternatives
+  - Enable image updates for DGD but prevent other spec changes --> rolling update strategies in those cases would be done at a higher level than Dynamo DGD (blue/green with Ingress traffic splitting)
+  - Enable any update to DGD spec and support for multiple MDCs per engine -> case where worker communication isolation is needed would have to be handled at a higher level
 - Include section on how current frameworks support roll out strategies
 - if the user updates the served model name, this results in a different model key. Should we support this? What would happen in the current solution?
 - LORA support?
 - Hierarchical Planner support?
-- Fill in KV cache transfer section
 - Default roll out strategy expectations - how can I rollback?
 - For the workerGroupName solution, how is the operator/Grove deleting old replicas and creating new ones?
 - Supporting a notion of different update stategies and maxSurge/maxUnavailable
 - Implications on kv router?
+
+- Issues should be clear and clear how proposed solution(s) addresses them
+- ## Follow DEP outline structure:
 
 **NOTES**:
 
