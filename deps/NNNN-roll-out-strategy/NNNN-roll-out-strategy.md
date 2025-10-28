@@ -1,9 +1,31 @@
-# Background
+# Roll Out Support for DynamoGraphDeployments (DGDs)
+
+**Status**: Under Review
+
+**Authors**: Thomas Montfort
+
+**Category**: Architecture
+
+**Required Reviewers**: Biswa Panda, Neelay Shah, Graham King, Maksim Khadkevich, Julien Mancuso
+
+**Review Date**: October 29, 2025
+
+**Pull Request**: https://github.com/ai-dynamo/enhancements/pull/49
+
+**Implementation PR / Tracking Issue**: [Link to Pull Request or Tracking Issue for Implementation]
+
+# Summary
 
 This enhancement proposal is meant to address two things:
 
 1. Building on @biswapanda [Dynamo namespaces based isolation DEP](https://github.com/ai-dynamo/enhancements/pull/28) to propose a model worker group isolation mechanism within a DynamoGraphDeployment (DGD).
 2. Proposing enhancements to Dynamo/Grove's roll out scenario/strategy support for DGDs.
+
+# Background
+
+The background section serves to provide context on how the **Model Deployment Card** works at the core Dynamo library level, how a **DGD** interacts with the **MDC**, common model roll out scenarios and how other solutions providing similar offerings to Dynamo implement roll out strategies.
+
+If you have familiarity with the above, feel free to skip to the [Issues](#issues) section.
 
 ## Model Deployment Cards (MDC)
 
@@ -189,11 +211,11 @@ The `PCSG` controller updates `PCSG` replicas one at a time in ascending ordinal
 - This is the default rolling update strategy for Grove. There currently is no way to configure the rolling update strategy for a `PCSG` for things like `maxSurge`, `maxUnavailable`. Discussion [here](https://github.com/ai-dynamo/grove/issues/212) on supporting additional rolling update strategies.
 - Grove's roll out strategy would be the same as `Deployment` `RollingUpdate` where `maxSurge` is 0 and `maxUnavailable` is 1.
 
-# Issues
+# Motivation
+
+The Motivation section highlights the current issues faced with the **DGD** and **MDC** relationship and current support for roll out scenarios.
 
 ## Model Crosstalk
-
-**Diagram here**
 
 When deploying two DGDs for two different models, say **llama3.1-70B** and **Qwen3-0.6B**, if the DGDs are deployed in the same namespace (both have the same `dynamoNamespace` field values), the workers will register under the same `EndpointId`. In the vllm `disagg.yaml` example above, both workers for **llama3.1-70B** and **Qwen3-0.6B** will register under the `EndpointId` `{dynamoNamespace}/backend/generate`. Because the `Client` for both model engines is watching the same prefix `v1/instance/{dynamoNamespace}/backend/generate`, each `Client` will discover instances from both models, resulting in the `PushRouter` routing engine for **llama3.1-70B** for example sending requests to both sets of model workers.
 
@@ -201,7 +223,7 @@ When deploying two DGDs for two different models, say **llama3.1-70B** and **Qwe
 
 As a current solution, if a user wants to deploy two DGDs for two different models, they can either deploy their DGDs in different namespace or use a shared frontend. An example of a shared frontend is shown [here](https://github.com/ai-dynamo/dynamo/tree/main/examples/basics/kubernetes/shared_frontend). It involves deploying a DGD for the frontend in the global namespace `dynamo` and then deploying two DGDs for the workers in different namespaces.
 
-## Rolling Update Scenarios
+## Roll Out Scenarios
 
 ### Worker Version Upgrade
 
@@ -275,7 +297,14 @@ Same as **Different MDC Checksum** from 1-5
 
 - Some requests during rolling update error (not desired)
 
-# Solution
+# Goals
+
+- There is a clear supported path with desired behavior for the roll out scenarios outlined in the [Roll Out Scenarios](#roll-out-scenarios) section.
+- The roll out strategies support for a **DGD** are consistent with other solution offerings similar to Dynamo and Dynamo's Kubernetes Deployment stack.
+- The **Model Crosstalk** issue is resolved.
+- Advanced use cases like hierarchical planner, speculative decoding and LoRA support are supported.
+
+# Proposal
 
 ## Model Worker Group Isolation at DGD Level
 
@@ -513,17 +542,6 @@ Here, the partition indicates that only the 10th replica (0-indexed) is updated 
 
 - Solution 1 as it can enable deploying multiple models within the same DGD (Hierachical Planner) and the explicit `workerGroupName` makes the worker grouping clear
 
-### DGD/Operator Updates
-
-- Remove `dynamoNamespace` field from DGD service spec and inject DGD name as `DYN_NAMESPACE` env var.
-- If Solution 1 is chosen, add a new field to the DGD service spec called `workerGroupName` with logic in operator to generate hashes per worker group and append to `DYN_NAMESPACE` env var.
-- If Solution 2 is chosen, add a new field to the DGD service spec called `partition` with logic in operator to create a `ControllerRevision` resource for every DGD update and inject `DYN_NAMESPACE` env var with the correct revision hash.
-
-### Core Dynamo Lib Updates
-
-- `ModelWatcher.watch` can now filter based on namespace prefix match instead of exact match (e.g. frontend matching for `vllm-agg-*` where `vllm-agg-a1b2c3d4` and `vllm-agg-e5f6g7h8` are the two worker groups).
-- `ModelManager` updated to support multiple `Client`s per model engine. Allow `PushRouter` to load balance traffic between multiple sets of workers. Round-robin and random case seem simple (each Client will have an instance count) but KV-Router case is more complex. Do we do weighted selection of worker group and then worker selection based on kv instance radix tree?
-
 ### Solves Issues
 
 - **Model Crosstalk** - since namespace is now the DGD name and DGD name is unique, model crosstalk will not occur.
@@ -688,7 +706,26 @@ This would work. You can also have a separate DGD for each model. This also appl
 - Gang scheduling/termination semantics are at the level of a DGD
 - More complex Gateway/Ingress routing - a DGD Service can be serving multiple models.
 
-# Alternatives Considered
+# Implementation Details
+
+**TODO: update with Grove/Dynamo additional rolling update configuration support**
+
+### DGD/Operator Updates
+
+- Remove `dynamoNamespace` field from DGD service spec and inject DGD name as `DYN_NAMESPACE` env var.
+- If Solution 1 is chosen, add a new field to the DGD service spec called `workerGroupName` with logic in operator to generate hashes per worker group and append to `DYN_NAMESPACE` env var.
+- If Solution 2 is chosen, add a new field to the DGD service spec called `partition` with logic in operator to create a `ControllerRevision` resource for every DGD update and inject `DYN_NAMESPACE` env var with the correct revision hash.
+
+### Core Dynamo Lib Updates
+
+- `ModelWatcher.watch` can now filter based on namespace prefix match instead of exact match (e.g. frontend matching for `vllm-agg-*` where `vllm-agg-a1b2c3d4` and `vllm-agg-e5f6g7h8` are the two worker groups).
+- `ModelManager` updated to support multiple `Client`s per model engine. Allow `PushRouter` to load balance traffic between multiple sets of workers. Round-robin and random case seem simple (each Client will have an instance count) but KV-Router case is more complex. Do we do weighted selection of worker group and then worker selection based on kv instance radix tree?
+
+# Implementation Phases
+
+**TODO**
+
+# Alternative Solutions
 
 ## DGD Updates are Not Supported
 
@@ -737,8 +774,13 @@ However, this would not solve for **Incompatible KV Cache Transfer Mechanisms** 
 
 **TODOS**:
 
+- Following DEP format
+- Ensuring consistent terminology
+- Ensuring that the proposal has a clear flow -> this is the neccessary background -> these are the current issues/feature gaps -> these are the proposed solutions and how they address the issues/feature gaps -> these are the alternatives that were considered.
+- Fixing any grammatical/spelling errors
+- Add diagrams for sections
 - if the user updates the served model name, this results in a different model key. Should we support this? What would happen in the current solution?
 - LORA support?
 
 - Issues should be clear and clear how proposed solution(s) addresses them
-- ## Follow DEP outline structure:
+- Follow DEP outline structure:
