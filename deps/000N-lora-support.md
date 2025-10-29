@@ -26,8 +26,8 @@ In the frontend, LoRA models can leverage the same code paths used for base mode
 
 ## Design Principles
 
-Sticky LoRA scheduling: 
-- LoRAs should  be sticky to the same worker if possible. Avoid re-scheduling to different worker if possible.
+Sticky LoRA scheduling: (Similar to KV cache indexing)
+- LoRAs should  be sticky to the same worker if possible. Avoid re-scheduling to different worker to avoid cache thrashing.
 - LoRA replica scheduling will be dynamic (but avoid re-scheduling) based on load balancing policy.
 
 Backend
@@ -54,16 +54,6 @@ LLM Manager in backend frameworks will be responsible for:
 - Loading LoRA models to llm engine
 - Unloading LoRA models from llm engine
 - Downloading LoRA models from upstream LoRA repository to local disk
-
-### LoRA Controller
-
-The LoRA controller in frontend is responsible for:
-- Finding all backend workers that support LoRA operations and getting their lora status
-- Map of {Lora model name -> list of backend workers} for all loaded LoRA models in the frontend
-- Exposing HTTP endpoints for LoRA management
-- Distributing LoRA load/unload requests to all relevant workers based on LoRA model
-
-The controller uses the distributed runtime to communicate with backend workers via internal dynamo endpoints.
 
 ### LoRA loading/unloading logic
 - explicit: Backend workers expose internal system endpoints to manage LoRA models. The frontend controller discovers workers and distributes LoRA management requests to them.
@@ -104,6 +94,63 @@ POST /v1/unload_lora
   - GET `/v1/loras`: get list of loaded LoRA adapters
 
 We want to expose similar api from backend workers as well and dynamo rpc calls dont use http verbs like POST, DELETE, GET, etc.
+
+### LoRA Controller
+
+The LoRA controller in frontend is responsible for:
+
+Phase 1: LoRA discovery data layer
+- Finding all backend workers that support LoRA operations and getting their lora status
+- Map of {Lora model name -> list of backend workers} for all loaded LoRA models in the frontend
+
+Phase 2: LoRA management scheduling layer
+- Distributing LoRA load/unload requests to all relevant workers based on LoRA model
+
+The controller uses the distributed runtime to communicate with backend workers via internal dynamo endpoints.
+
+## Frontend LoRA controller
+
+Frotnend exposes HTTP endpoints for LoRA management
+
+## K8s bsed LoRA controller
+
+More details in DEP for Dynamo Model
+
+```yaml
+# Base model
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoModel
+metadata:
+  name: llama-3-70b-instruct-v1
+  namespace: dynamo-system
+spec:
+  modelName: meta-llama/Llama-3.3-70B-Instruct
+  version: 8a4556b53a7d81d7e07db15eafb5af5dcd321b33 
+
+---
+# LoRA model CR
+kind: DynamoModel
+metadata:
+  name: secAlign-70B-lora
+spec:
+  model_type: lora
+  name: facebook/Meta-SecAlign-70B                   # served model name
+  version: 7db15e                                    # huggingface-sha 
+  base_model_ref: llama-3-70b-instruct-v1            # Base model described above
+#   traffic_weight: 0.4
+
+---
+# Deployment CR
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-disagg
+  namespace: dynamo-system
+spec:
+  services:
+    VllmPrefillWorker:
+      modelRef:
+        name: llama-3-70b-instruct-v1                # base model
+```
 
 ### Directory Structure for LoRA models
 ```
@@ -212,45 +259,6 @@ considerations
 ## Frontend LoRA controller
 Discussed above in the Architecture section.
 
-## K8s bsed LoRA controller
-
-More details in DEP for Dynamo Model
-
-```yaml
-# Base model
-apiVersion: nvidia.com/v1alpha1
-kind: DynamoModel
-metadata:
-  name: llama-3-70b-instruct-v1
-  namespace: dynamo-system
-spec:
-  modelName: meta-llama/Llama-3.3-70B-Instruct
-  version: 8a4556b53a7d81d7e07db15eafb5af5dcd321b33 
-
----
-# LoRA model CR
-kind: DynamoModel
-metadata:
-  name: secAlign-70B-lora
-spec:
-  model_type: lora
-  name: facebook/Meta-SecAlign-70B                   # served model name
-  version: 7db15e                                    # huggingface-sha 
-  base_model_ref: llama-3-70b-instruct-v1            # Base model described above
-#   traffic_weight: 0.4
-
----
-# Deployment CR
-kind: DynamoGraphDeployment
-metadata:
-  name: vllm-disagg
-  namespace: dynamo-system
-spec:
-  services:
-    VllmPrefillWorker:
-      modelRef:
-        name: llama-3-70b-instruct-v1                # base model
-```
 
 #  Framework Support for multiple concurrent LoRA model serving
 
