@@ -23,116 +23,68 @@ This enhancement proposal is meant to address two things:
 
 # 2. Background
 
-## 2.1 Overview of Model Deployment Card (MDC) and DynamoGraphDeployment (DGD)
+### 2.1 Model Deployment Cards (MDC)
 
-### 2.1.1 Model Deployment Cards (MDC)
+In Dynamo, each model is represented by a [`MDC`](https://github.com/ai-dynamo/dynamo/blob/0028cdf43dd583356139669f33aecbb743fd13be/lib/llm/src/model_card.rs#L165) that comprises of the model name (display name), tokenizer config, context length, model input/type specification and other fields that defines the model inference behavior.
 
-**TODO: make section more concise**
+When a model worker starts up it publishes its MDC to the `KvStore` with the key `v1/mdc/{namespace}.{component}.{endpoint}/{instance_id}`.
 
-In Dynamo, each model is represented by a [`MDC`](https://github.com/ai-dynamo/dynamo/blob/0028cdf43dd583356139669f33aecbb743fd13be/lib/llm/src/model_card.rs#L165). The `MDC` comprises of the model name (display name), tokenizer config, context length, model input/type specification, among other fields that defines the model inference behavior.
+If the Frontend is deployed in the global namespace (`dynamo`), all `MDC`s are accepted but if in any other namespace, only `MDC`s with keys that match the namespace will be accepted (`v1/mdc/{namespace}.*`).
 
-When a model worker starts up, it publishes its MDC to the KvStore with the key `v1/mdc/{namespace}.{component}.{endpoint}/{instance_id}`.
+A `Client` will be constructed for the model that will watch for all instances with `{namespace}.{component}.{endpoint}`, regardless of the worker `MDC`.
 
-The Frontend has a `ModelWatcher` that watches the KvStore PUT events for keys with the prefix `v1/mdc`.
-
-The `ModelWatcher.watch` method first determines if the [Frontend should process the MDC or discard it](https://github.com/ai-dynamo/dynamo/blob/6deeecb1d6a9f4eb1770b4272bfa85a4b6226e0a/lib/llm/src/discovery/watcher.rs#L138). If the Frontend is deployed in the global namespace (`dynamo`), then all MDCs observed will be processed. If the Frontend is deployed in a non-global namespace, then only MDCs with keys that match the namespace will be processed (`v1/mdc/{namespace}.*`)
-
-If the MDC should be processed, `ModelWatcher` will extract the model name (display name) from the MDC and check if the `ModelManager` already contains an engine for that model. If there is an engine that exists but the MDC checksum (generated from select MDC fields) does not match, [the `ModelWatcher` will discard the instance and log an error](https://github.com/ai-dynamo/dynamo/blob/6deeecb1d6a9f4eb1770b4272bfa85a4b6226e0a/lib/llm/src/discovery/watcher.rs#L156). Currently, the worker with the discarded MDC will continue to run and actually receive traffic (registered under the same `EndpointId`) but Frontend pre-processing will use the old MDC (undesirable). If there is no engine for that model, an engine is created and stored on the `ModelManager`.
-
-The model engine contains a `Client` constructed for the MDC `EndpointId`. The MDC `EndpointId` is extracted from the MDC key (`{namespace}.{component}.{endpoint}`), which is the address of the model worker. This `Client` will watch the KvStore PUT events for keys with the prefix `v1/instance/{namespace}/{component}/{endpoint}`. When a PUT event is received, the `Client` will update the instance list.
-
-### 2.1.2 DynamoGraphDeployment (DGD) Interaction with MDC
+### 2.2 DynamoGraphDeployment (DGD)
 
 A `DynamoGraphDeployment` (`DGD`), is the Dynamo Kubernetes CRD for deploying a distributed inference graph using the Dynamo distributed runtime and pre-built components.
 
-The CRD spec contains a list of services which define the components that make up an inference graph. For instance, in the [vllm `disagg.yaml` file](https://github.com/ai-dynamo/dynamo/blob/main/components/backends/vllm/deploy/disagg.yaml), the services are: `Frontend`, `VllmDecodeWorker`, and `VllmPrefillWorker`. Each component has a field `dynamoNamespace` which defines the `namespace` the component will be logically grouped in. The `component` and `endpoint` parts of the worker `EndpointId` are not derived from the `DGD` but rather statically defined within the backend component itself. For instance, the `VllmDecodeWorker` component `EndpointId` has `component` part `backend` and `endpoint` part `generate`. `VllmPrefillWorker` component `EndpointId` has `component` part `prefill` and `endpoint` part `generate`.
+The namespace for the `DGD` is defined by the `dynamoNamespace` field in the `DGD` service spec.
 
-## 2.2 Rollout Strategies in K8s AI Model Deployment Ecosystem
+```yaml
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-agg
+spec:
+  services:
+    Frontend:
+      dynamoNamespace: vllm-agg
+      componentType: frontend
+      ...
+    VllmDecodeWorker:
+      dynamoNamespace: vllm-agg
+      componentType: worker
+      ...
+```
 
-### 2.2.1 Deployments
-
-The core Kubernetes `Deployment` resource has [two strategies for rolling out updates:](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy) `RollingUpdate` and `Recreate`.
-
-- `RollingUpdate` is the default strategy where Pods are updated by gradually scaling down the old `ReplicaSet` and scaling up the new `ReplicaSet`.
-  - Optional field `maxUnavailable` specifies the maximum number of Pods that can be unavailable during the update.
-  - Optional field `maxSurge` specifies the maximum number of Pods that can be created above the desired number of Pods.
-- `Recreate` strategy will delete all existing Pods before the new ones are created.
-
-### 2.2.2 StatefulSets
-
-The core [Kubernetes `StatefulSet` resource](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/stateful-set-v1/) has two `updateStrategy` options: `RollingUpdate` and `OnDelete`.
-
-- `RollingUpdate` is the default strategy where Pods are updated in sequence (highest index -> lowest index) one Pod at a time.
-  - Optional field `maxUnavailable` specifies the maximum number of Pods that can be unavailable during the update (default is 1).
-  - Optional field `partition` indicates the ordinal at which the StatefulSet should be paritioned for updates (default is 0 - all Pods are updated).
-- `OnDelete` is the legacy behavior where Pods are only updated when they are manually deleted.
-
-_Note that there is no `maxSurge` for `RollingUpdate` strategy as stable Pod identity (index) is important for exclusive PVCs and deterministic startup/shutdown ordering_
-
-### 2.2.3 LeaderWorkerSet
-
-The `LeaderWorkerSet` resource has a single [`RolloutStrategy` `RollingUpdate`](https://github.com/kubernetes-sigs/lws/blob/main/api/leaderworkerset/v1/leaderworkerset_types.go)
-
-- Optional field `partition` behaves the same as StatefulSet `RollingUpdate` `partition` field.
-- Optional field `maxUnavailable` behaves the same as StatefulSet `RollingUpdate` `maxUnavailable` field.
-- Optional field `maxSurge` behaves the same as Deployment `RollingUpdate` `maxSurge` field.
-
-_Note that LWS does support `maxSurge`. Example of how it works [here](https://lws.sigs.k8s.io/docs/concepts/rollout-strategy/)_
-
-### 2.2.4 Gateway API Inference Extension
-
-The Gateway API Inference Extension (GAIE) does not control the `Model Server` itself (the piece that is actually running the model inference). Example of a [vllm Model Server Deployment](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/main/config/manifests/vllm/gpu-deployment.yaml)
-
-Since GAIE is just a Gateway that is routing between `InferencePool`s (`Model Server` grouping for a single model), they [expect the user to create another `Model Server` Deployment themselves and use an `HTTPRoute` to split traffic between the new and old `InferencePool`](https://gateway-api-inference-extension.sigs.k8s.io/guides/inferencepool-rollout/). This enables canary or blue/green rollout strategies but the way the `Model Server` is rolled out for updates is on the user.
-
-_Note that llm-d uses GAIE and Deployment (single-node) and LeaderWorkerSet (multi-node) for model serving so it inherits both of their rollout strategies._
-
-### 2.2.5 CentML Platform
-
-The CentML Platform leverages [`Argo Rollouts`](https://argo-rollouts.readthedocs.io/en/stable/) to enable an [automated canary rollout strategy](https://github.com/CentML/platform/blob/main/catalog/src/catalog/inference_deployment_v3/templates/rollout.yaml).
-
-Argo Rollouts are designed to be a drop in replacement of `Deployment` where the PodSpec is the same but the `.spec.strategy` has more powerful capabilities.
-
-- An example is a canary style rollout where you can define an [`Analysis`](https://argo-rollouts.readthedocs.io/en/stable/features/analysis/) that can query custom metrics and define success/failure conditions, the step size, traffic weighting and rollout speed
-
-_Future inspiration for how a user can perform a canary rollout that monitors SLOs (TTFT, ITL) of new set of workers during rollout._
-
-### 2.2.6 AIBrix
-
-### 2.2.7 OME
-
-### 2.2.8 Canary Rollout
-
-### 2.2.9 Blue/Green Rollout
+Here the `dynamoNamespace` is `vllm-agg`.
 
 ## 2.3 Grove Rolling Update Strategy
 
-The Dynamo Kubernetes Operator leverages the [Grove API](https://github.com/ai-dynamo/grove/tree/main) for gang-scheduling and topology awareness. While the Dynamo Operator has support for using traditional Kubernetes Deployments/Services for single-node and LeaderWorkerSet resource for multi-node cases, the Grove API resources are the supported path going forward for single-node and multi-node deployments. Given this is the case, this proposal will only consider the impacts of Groves rolling update strategy on `DGD` resources.
+The Dynamo Kubernetes Operator leverages the [Grove API](https://github.com/ai-dynamo/grove/tree/main) for gang-scheduling and topology awareness. It relies on Grove for the underlying rollout mechanism of `DGD` resources.
 
 ### 2.3.1 Single-Node Deployment
 
 [Single-Node Deployment Grove Example](./dynamo-grove-single-node.png)
 
-In Grove, when a rolling update is performed, the `PodCliqueSet` controller will perform the update one `PCS` replica at time. Currently, a `DGD` only creates a single `PCS` replica. Within the `PCS` replica, there is a `PodClique` (`PC`) for each service in the `DGD` - in the example above one for the Frontend, one for the Decode worker and one for the Prefill worker.
-
-For each `PC` concurrently, the `PC` controller will handle one Pod at a time, concurrently deleting an old Pod replica and creating a new Pod replica. The controller will wait for the new Pod replica to be Ready and then proceed to the next replica.
-
-Because the `PC` controller is recreating each Pod index, to ensure uptime for a Frontend or set of workers, you need > 1 `PC` replicas for availability.
+- `Frontend`, `Decode` and `Prefill` workers are each `PodClique` (`PC`) resources.
+- Each `PC` follows a `RollingUpdate` rollout strategy, where it deletes a `Pod` index and recreates, waits until the new `Pod` is `Ready` before proceeding to the next `Pod` index.
 
 ### 2.3.2 Multi-Node Deployment
 
 [Multi-Node Deployment Grove Example](./dynamo-grove-multi-node.png)
 
-For the Multi-Node case, there will be a `PodCliqueScalingGroup` (`PCSG`) for each set of workers - in the example above one for the Decode workers and one for the Prefill workers. When a `PC` is managed by a `PCSG`, the `PCSG` controller is responsible for performing the rolling update instead of the `PC` controller (different than single-node case).
-
-The `PCSG` controller updates `PCSG` replicas one at a time in ascending ordinal order (0 -> 1 -> 2 -> ...). Within a `PCSG` replica, all `PC`s are deleted and recreated concurrently. Having multiple `PCSG` replicas ensures availability for the set of workers.
+- `Frontend` is a `PC`, and `Decode` and `Prefill` workers are multiple `PC` resources managed by a `PodCliqueScalingGroup` (`PCSG`) (similar to `LeadeWorkerSet` group of Pods).
+- Each `PCSG` also follows a `RollingUpdate` rollout strategy, where instead of deleting/recreating a single `Pod` it's deleting/recreating a single `PCSG` replica
 
 **Notes**:
 
-- This is the default rolling update strategy for Grove. There currently is no way to configure the rolling update strategy for a `PCSG` for things like `maxSurge`, `maxUnavailable`. Discussion [here](https://github.com/ai-dynamo/grove/issues/212) on supporting additional rolling update strategies.
+- This is the default rolling update strategy for Grove. There currently is no way to configure the rolling update strategy for a `PCSG` for things like `maxSurge`, `maxUnavailable`. Discussion [here](https://github.com/ai-dynamo/grove/issues/212) on supporting additional rolling update configuration/strategies.
 - Grove's rollout strategy would be the same as `Deployment` `RollingUpdate` where `maxSurge` is 0 and `maxUnavailable` is 1.
+- Need multiple replicas for standalone `PC` or `PCSG` to ensure availability during the rollout process.
 
 # 3. Rollout Scenarios
+
+Different scenarios in which a Dynamo user would rollout a new version of their `DGD` (model)
 
 ## 3.1 Update Dynamo Worker Version
 
@@ -150,11 +102,6 @@ An example of a how a user would update the Dynamo framework runtime version fro
 1. User has already deployed the initial vllm `disagg.yaml` `DGD` manifest with the image for each service set to `nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0`.
 2. The user updates the `DGD` manifest to use the image `nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0` for `VllmDecodeWorker` and `VllmPrefillWorker`.
 3. User applies the updated `DGD` manifest.
-
-### Expected Behavior
-
-- In-flight requests will be properly served (through graceful shutdown or request migration)
-- Complete uptime of the model inference deployment is maintained
 
 ## 3.2 Update Frontend Worker Version
 
@@ -184,14 +131,11 @@ An example of a how a user would update the vllm `disagg.yaml` in a `DGD` manife
 3. User applies the updated `DGD` manifest.
 4. The new Worker Pods will publish the new MDC with the updated `block_size` configuration, resulting in a different MDC checksum than the old Workers.
 
-### Expected Behavior
-
-- In-flight requests will be properly served (through graceful shutdown or request migration)
-- Complete uptime of the model inference deployment is maintained
-
 ## 3.4 Incompatible KV Cache Transfer during Rollout
 
-Another scenario a user might encounter is with a disaggregated deployment where the user wants to update their prefill/decode worker configurations that results in incompatible KV cache transfer between new/old sets of workers. For instance, the user might want to switch from NIXL to LMCache. _It's important to note that KV cache transfer configuration is not tracked as a part of the MDC checksum._
+Another scenario a user might encounter is with a disaggregated deployment where the user wants to update their prefill/decode worker configurations that results in incompatible KV cache transfer between new/old sets of workers. For instance, the user might want to switch from NIXL to LMCache.
+
+_It's important to note that KV cache transfer configuration is not tracked as a part of the MDC checksum._
 
 ### Example
 
@@ -202,7 +146,7 @@ An example of a how a user would update the vllm `disagg.yaml` `DGD` manifest to
 3. User applies the updated `DGD` manifest.
 4. The new Worker Pods will use the LMCache connector, while the old Worker Pods will continue to use the NIXL connector.
 
-### Expected Behavior
+## 3.5 Expected Behavior For All Scenarios
 
 - In-flight requests will be properly served (through graceful shutdown or request migration)
 - Complete uptime of the model inference deployment is maintained
@@ -211,7 +155,9 @@ An example of a how a user would update the vllm `disagg.yaml` `DGD` manifest to
 
 ## 4.1 Model Crosstalk
 
-When deploying two `DGD`s for two different models, say **llama3.1-70B** and **Qwen3-0.6B**, if the `DGD`s are deployed in the same namespace (both have the same `dynamoNamespace` field values), the workers will register under the same `EndpointId`. In the vllm `disagg.yaml` example above, both workers for **llama3.1-70B** and **Qwen3-0.6B** will register under the `EndpointId` `{dynamoNamespace}/backend/generate`. Because the `Client` for both model engines is watching the same prefix `v1/instance/{dynamoNamespace}/backend/generate`, each `Client` will discover instances from both models, resulting in the `PushRouter` routing engine for **llama3.1-70B** for example sending requests to both sets of model workers.
+- User deploys two `DGD`s for a **Model A** and **Model B** with the vllm runtime, each specified with the same `dynamoNamespace` `vllm-agg`
+- Both model workers will register their MDC under `v1/mdc/vllm-agg.backend.generate/{instance_id}`
+- User sends request for **Model A** but it's `Client` routes pre-processed request to **Model B** workers due to the same `EndpointId`
 
 ### 4.1.1 Shared Frontend
 
@@ -221,18 +167,17 @@ As a current solution, if a user wants to deploy two `DGD`s for two different mo
 
 ### 4.2.1 Worker Version Upgrade
 
-_Assumes multiple worker replicas are deployed given Grove's default rolling upgrade strategy._
+**FAILED**
 
-Has been tested but does not work as desired:
-
-1. User updates the vllm `disagg.yaml` to use a new image for the `VllmPrefillWorker` and `VllmDecodeWorker` services (or single worker service in aggregrated deployment).
-2. User patches the DGD using a `kubectl apply -f`
+1. User applies the initial [vllm `disagg.yaml`](https://github.com/ai-dynamo/dynamo/blob/main/components/backends/vllm/deploy/disagg.yaml)
+2. User updates the vllm `disagg.yaml` to use a new image for the `VllmPrefillWorker` and `VllmDecodeWorker` services and applies update.
 3. The `Prefill` and `Decode` `PodClique`s will terminate an old `Prefill` and `Decode` `Pod` and create a new `Prefill` and `Decode` `Pod` concurrently.
-4. The old worker `Pod`s receives a SIGTERM triggering a graceful shutdown by draining in-flight requests then cancelling the primary token which will remove the instance and MDC registration from the KvStore. However, from testing (backend specific), it's found that there is a period where the worker `Pod`s still have a KvStore registration but aren't listening on the `EndpointId` anymore -> results in request errors.
-5. The new worker `Pod`s will start up, and once registered in the KvStore -> new requests can now be routed to the new worker `Pod`s.
-6. In period during 4. and 5., the extra worker replicas will continue to serve new requests.
-7. Grove will wait until new worker `Pod`s are `Ready` before proceeding to the next set of worker `Pod`s.
-8. Grove will continue through the rolling update process for the `PodClique` until only new worker `Pod`s are running.
+4. The old worker `Pod`s receives a SIGTERM triggering a graceful shutdown by draining in-flight requests then cancelling the primary token which will remove the instance and MDC registration from the KvStore.
+5. From testing, it's found that there is a period where the worker `Pod`s still have a KvStore registration but aren't listening on the `EndpointId` anymore -> results in request errors.
+6. The new worker `Pod`s will start up, and once registered in the KvStore -> new requests can now be routed to the new worker `Pod`s.
+7. In period during 4. and 5., the extra worker replicas will continue to serve new requests.
+8. Grove will wait until new worker `Pod`s are `Ready` before proceeding to the next set of worker `Pod`s.
+9. Grove will continue through the rolling update process for the `PodClique` until only new worker `Pod`s are running.
 
 #### Results:
 
@@ -240,12 +185,10 @@ Has been tested but does not work as desired:
 
 ### 4.2.2 Frontend Version Upgrade
 
-_Assumes multiple frontend replicas are deployed given Grove's default rolling upgrade strategy._
+**SUCCEEDED**
 
-Has been tested and does work as desired:
-
-1. User updates the vllm `disagg.yaml` to use a new image for the `Frontend` service.
-2. User patches the DGD using a `kubectl apply -f`
+1. User applies the initial [vllm `disagg.yaml`](https://github.com/ai-dynamo/dynamo/blob/main/components/backends/vllm/deploy/disagg.yaml)
+2. User updates the vllm `disagg.yaml` to use a new image for the `Frontend` service and applies update.
 3. The Frontend `PodClique` will terminate an old Frontend `Pod` and create a new Frontend `Pod` concurrently.
 4. The old Frontend `Pod` receives a SIGTERM. The old Frontend Pod will no longer be `Ready`, so the Kubernetes `Service` will remove the old Frontend `Pod` from the endpoint list -> new requests will no longer be routed to the old Frontend `Pod`. While in `Terminating` state, the Frontend process will gracefully shutdown by draining in-flight requests before exiting.
 5. The new Frontend `Pod` will start up, and once in `Ready` state, the Kubernetes `Service` will add the new Frontend `Pod` to the endpoint list -> new requests can now be routed to the new Frontend `Pod`.
@@ -255,31 +198,32 @@ Has been tested and does work as desired:
 
 #### Results:
 
-- **SUCCESS**: In-flight requests will be properly served (through graceful shutdown or request migration)
-- **SUCCESS**: All requests during rolling update will be served successfully
+- **SUCCESS**: All requests during rollout are served successfully through graceful shutdown
 
 ### 4.2.3 Different MDC Checksums
 
+**FAILED**
+
 In the scenario where a user would like to update the KV cache block size as an example, currently here is what happens:
 
-1. User patches the DGD CRD using a `kubectl apply -f`
-2. The Dynamo Operator will update the Grove `PodCliqueSet` `PodCliqueSetTemplateSpec`.
-3. Grove Operator for each `PodClique` with updated template hash will perform a rolling update of the `PodClique`. Per `PodClique`:
-4. A Worker `Pod` in the old set will be terminated concurrently with a Worker `Pod` in the new set being started.
-5. The old Worker `Pod` receives a SIGTERM. The Worker process itself will gracefully shutdown by draining in-flight requests then cancelling the primary token which will remove the instance and MDC registration from the KvStore. The worker instance will then be removed from the `Client` instance list.
-6. The new Worker `Pod` process will start up, in which it creates a KvStore lease and attempts to register the MDC.
-7. At this point in time the Frontend will see that for Model A that an engine already exists but that the MDC checksum differs from the MDC of the new Worker Pod. The new worker MDC will be discarded, however the worker instance has the same `EndpointId` so it'll appear on the `Client` instance list.
-8. The new Worker instance will start to receive traffic as it's registered on the `Client` instance list.
-9. Grove will continue through the rolling update process for the `PodClique` until only new Worker Pods are running.
-10. Despite the old Worker Pods being terminated, the `ModelManager` will have the MDC from the old Worker Pods because the `Client` instance list was never empty. This can result in unexpected behavior - for example a new worker can attempt to change the tokenizer config, but since the `ModelManager` engine is using the old MDC, the request preprocessing will still use the old tokenizer config.
+1. User applies the initial [vllm `disagg.yaml`](https://github.com/ai-dynamo/dynamo/blob/main/components/backends/vllm/deploy/disagg.yaml)
+1. User updates the `disagg.yaml` `VllmPrefillWorker` and `VllmDecodeWorker` `extraPodSpec` to add the flag `--block-size 32` in the `args` array.
+1. A Worker `Pod` in the old set will be terminated concurrently with a Worker `Pod` in the new set being started.
+1. The old Worker `Pod` receives a SIGTERM. The Worker process itself will gracefully shutdown by draining in-flight requests then cancelling the primary token which will remove the instance and MDC registration from the KvStore. The worker instance will then be removed from the `Client` instance list.
+1. The new Worker `Pod` process will start up, in which it creates a KvStore lease and attempts to register the MDC.
+1. At this point in time the Frontend will see that for Model A that an engine already exists but that the MDC checksum differs from the MDC of the new Worker Pod. The new worker MDC will be discarded, however the worker instance has the same `EndpointId` so it'll appear on the `Client` instance list.
+1. The new Worker instance will start to receive traffic as it's registered on the `Client` instance list.
+1. Grove will continue through the rolling update process for the `PodClique` until only new Worker Pods are running.
+1. Despite the old Worker Pods being terminated, the `ModelManager` will have the MDC from the old Worker Pods because the `Client` instance list was never empty. This can result in unexpected behavior - for example a new worker can attempt to change the tokenizer config, but since the `ModelManager` engine is using the old MDC, the request preprocessing will still use the old tokenizer config.
 
 #### Results:
 
+- **FAILED** Some request during rollout error (due to same reason as [Worker Version Upgrade](#worker-version-upgrade) scenario)
 - **FAILED**: New workers are using old MDC that can result in incorrect pre-processing behavior.
 
 ### 4.2.4 Incompatible KV Cache Transfer
 
-_Assume initial processed request is first sent to Decode then from Decode to Prefill._
+**FAILED**
 
 Same as [Different MDC Checksums during Roll Out](#different-mdc-checksums-during-roll-out) from 1-5
 
@@ -293,10 +237,15 @@ Same as [Different MDC Checksums during Roll Out](#different-mdc-checksums-durin
 
 # 5. Goals
 
-- The outlined rollout scenarios in [Rollout Scenarios](#rollout-scenarios) section are supported with the desired behavior.
-- The rollout strategies support for a **DGD** are consistent with other solution offerings similar to Dynamo and Dynamo's Kubernetes Deployment stack.
+- The outlined [Rollout Scenarios](#rollout-scenarios) are supported with the expected behavior.
 - The [Model Crosstalk](#model-crosstalk) issue is resolved.
-- Advanced use cases like hierarchical planner, speculative decoding and LoRA support are supported.
+- Dynamo users have the same rollout functionality as other solutions in the [K8s AI model deployment ecosystem](#1-rollout-strategies-in-k8s-ai-model-deployment-ecosystem).
+  - Canary rollout strategy is supported where a small subset of new workers are deployed and monitored alongside the old set of workers with appropriate traffic splitting.
+  - Blue/green rollout strategy is supported
+  - Clear guidance for each rollout scenario on how to perform the rollout. (We should make it difficult/impossible to perform a rollout incorrectly)
+- Advanced use cases like [Hierarchical Planner](https://github.com/ai-dynamo/enhancements/pull/46), Speculative Decoding and [LoRA support](https://github.com/ai-dynamo/enhancements/pull/48) are supported.
+  - **Hierarchical Planner** proposal proposes having multiple model configurations within a single `DGD`
+  - **LoRA** support proposal proposes having an `MDC` for each LoRA adapter
 
 # 6. Proposal
 
@@ -329,9 +278,9 @@ spec:
       replicas: 1
 ```
 
-In this example, the `VllmDecodeWorker` `EndpointId` would be `vllm-llama3-70b/backend/{endpoint}`, where `{endpoint}` would be dictated by the endpoint created by the component runtime itself. For example the `VllmDecodeWorker` `generate` endpoint would be `vllm-llama3-70b/backend/generate` and the `VllmDecodeWorker` `clear_kv_blocks` endpoint would be `vllm-llama3-70b/backend/clear_kv_blocks`.
+In this example, the model worker would register MDC under `v1/mdc/vllm-llama3-70b/backend/{endpoint}`.
 
-Using the DGD name as the namespace, we would have:
+Using the `DGD` name as the namespace, we would have:
 
 ```yaml
 apiVersion: nvidia.com/v1alpha1
@@ -349,22 +298,26 @@ spec:
       replicas: 1
 ```
 
-In this case, the `VllmDecodeWorker` `EndpointId` would be `vllm-agg/backend/{endpoint}`. This eliminates the [Model Crosstalk](#model-crosstalk) issue as each DGD now has a unique namespace and is one less required field for users to configure in DGD manifest.
+In this case, the model worker would register MDC under `v1/mdc/vllm-agg/backend/{endpoint}`.
+
+This eliminates the [Model Crosstalk](#model-crosstalk) issue as each `DGD` now has a unique namespace and is one less required field for users to configure in `DGD` manifest.
+
+_Note: with cluster wide operator you can have a DGD with the same name across k8s namespaces - can be solved by also using the k8s namespace within the dynamo namespace_
 
 ## 6.2 Solution 2: Worker Group Hashing
 
 Using the DGD name as the namespace prevents the [Model Crosstalk](#model-crosstalk) issue. However, it does not solve the [Incompatible KV Cache Transfer during Rollout](#incompatible-kv-cache-transfer-during-rollout) issue where you have a set A and set B of model workers that cannot communicate with each other.
 
-To solve this, we can introduce a hash appended to the namespace to indicate a set A and set B of model workers. For instance, workers for set A would have a namespace like `vllm-llama3-70b-a1b2c3d4` and workers for set B would have a namespace like `vllm-llama3-70b-e5f6g7h8`. This creates a clear isolation for the two sets of workers and prevents them from communicating with each other.
+To solve this, we can introduce a hash appended to the namespace to indicate a set A and set B of model workers. For instance, workers for set A would have a namespace like `vllm-llama3-70b-a1b2c3d4` and workers for set B would have a namespace like `vllm-llama3-70b-e5f6g7h8`. **This creates a clear isolation for the two sets of workers and prevents them from communicating with each other.**
 
-**Issue**: How do we calculate the hash to append to the namespace for a set of workers?
+- A set A and set B of model workers can represent an old and new set of workers in a `RollingUpdate` rollout scenario
+- A set A and set B of model workers can also be used to represent multiple model configurations within a single `DGD`
 
-- Hashing at the DGD spec level, every DGD update would require updating the namespace of the set of workers -> a rollout for all workers (not desirable).
-- Hashing at the component level, each DGD component would receive a different hash -> hash needs to be the same for sets of components.
+### 6.2.1 Hash Solution 1: Introduce Worker Group Name to DGD
 
-### 6.2.1 Hash Solution 1: Introduce Worker Group to DGD
+Can introduce a new field to the DGD spec called `workerGroupName`.
 
-Solution 1 introduces a new field to the DGD spec called `workerGroupName`. This enables a DGD author to group workers into different sets (namespace isolation). For example, if a user wishes to perform a canary rollout strategy for a disaggregated deployment where they want to have 9 replicas for set A of prefill/decode workers and 1 replica for set B of prefill/decode workers, they could do so like this:
+For example, if a user wishes to perform a canary rollout strategy for a disaggregated deployment where they want to have 9 replicas for set A of prefill/decode workers and 1 replica for set B of prefill/decode workers, they could do so like this:
 
 ```yaml
 apiVersion: nvidia.com/v1alpha1
@@ -434,16 +387,17 @@ spec:
 
 ##### Pros:
 
-- Easy to visualize the current state of the deployment like in the case of a canary rollout.
-- Supports the [Hierarchical Planner proposal](https://github.com/ai-dynamo/enhancements/pull/46/files?short_path=09e8f0f#diff-09e8f0f98b689bb0d0f4d26f6a32f85b27c554cb38341f40faab0ef1232442f4) where multiple models can be deployed in the same DGD
+- Can now perform a canary rollout strategy within a single DGD
+- By default within the vllm `disagg.yaml` as an example, performing a `RollingUpdate` in the scenario of **Different MDC Checksum** or **Incompatible KV Cache Transfer** will result in different hashes -> new and old set have different namespaces for isolation
+- Supports the Hierarchical Planner proposal where multiple models configurations can be deployed in the same DGD
 
 ##### Cons:
 
-- Manifest becomes verbose when having multiple worker groups in the disaggregated deployment case.
+- Manifest becomes verbose when having multiple worker groups in the disaggregated deployment case
 
 ### 6.2.2 Hash Solution 2: Introduce Controller Revision to DGD
 
-Solution 2 leverages the [Kubernetes `ControllerRevision` resource](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/controller-revision-v1/) to store updates to the DGD spec. This is how `LeaderWorkerSet` can support canary rollout strategies where a [`partition` field](https://github.com/kubernetes-sigs/lws/blob/f01674b29576223329e35432c77d2b37a995b669/api/leaderworkerset/v1/leaderworkerset_types.go#L272) is used to determine the number of LWS replicas to update with updated template spec. Similar to the canary rollout scenario outlined in Solution 1, the user would have an initial DGD deployed like so:
+Can leverage the [Kubernetes `ControllerRevision` resource](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/controller-revision-v1/) to store updates to the DGD spec. This is how `LeaderWorkerSet` can support canary rollout strategies where a [`partition` field](https://github.com/kubernetes-sigs/lws/blob/f01674b29576223329e35432c77d2b37a995b669/api/leaderworkerset/v1/leaderworkerset_types.go#L272) is used to determine the number of LWS replicas to update with updated template spec. Similar to the canary rollout scenario outlined in Solution 1, the user would have an initial DGD deployed like so:
 
 ```yaml
 apiVersion: nvidia.com/v1alpha1
@@ -526,11 +480,12 @@ Here, the partition indicates that only the 10th replica (0-indexed) is updated 
 - Similar UX as LeaderWorkerSet rollout configuration
 - Manifest is more concise compared to Solution 1
 - ControllerRevision provides a built in mechanism to rollback to a previous revision.
+- By default within the vllm `disagg.yaml` as an example, performing a `RollingUpdate` in the scenario of **Different MDC Checksum** or **Incompatible KV Cache Transfer** will result in different revisions -> new and old set have different namespaces for isolation
 
 ##### Cons:
 
 - Relies on the `ControllerRevision` resource to store updates to the DGD spec.
-- Does not enable deploying multiple models within the same DGD - required for Hierarchical Planner.
+- Does not enable deploying multiple models within the same DGD as desired for Hierarchical Planner.
 
 ### 6.2.3 Suggested Hash Solution
 
@@ -617,7 +572,7 @@ _Note that the `maxUnavailable` and `maxSurge` field is supported at the `DGD` s
 
 **Solves**:
 
-- [Different MDC Checksums during Rollout](#different-mdc-checksums-during-rollout) - in a RollingUpdate scenario or with a canary rollout using worker groups, set A and set B will have hashes appended to isolate them. This assumes the Core Dynamo Lib can be updated to support multiple `Client`s per model engine and load balance traffic across.
+- [Different MDC Checksums during Rollout](#different-mdc-checksums-during-rollout) - in a `RollingUpdate` scenario or with a canary rollout using worker groups, set A and set B will have hashes appended to isolate them. This assumes the Core Dynamo Lib can be updated to support multiple `Client`s per model engine and load balance traffic across.
 - [Incompatible KV Cache Transfer during Rollout](#incompatible-kv-cache-transfer-during-rollout) - similar to [Different MDC Checksums during Rollout](#different-mdc-checksums-during-rollout), set A and set B will have different namespaces, so communication between set A and set B will not occur.
   **Enhances User Functionality:**
 - If using `workerGroupName` solution, a DGD can support the Hierarchical Planner proposal where multiple configurations of the same model can be deployed in the same DGD (do note that the SLO routing logic is not specified - would need to be solved).
@@ -634,7 +589,7 @@ _Note that the `maxUnavailable` and `maxSurge` field is supported at the `DGD` s
 
 ## 7.1 Single vs. Multiple Models per DGD
 
-The proposed solution would allow for both. You can have **llama3.1-70B** and **Qwen3-0.6B** deployed within the same DGD like so:
+The proposed Worker Group Name solution would allow for both. You can have **llama3.1-70B** and **Qwen3-0.6B** deployed within the same DGD like so:
 
 ```yaml
 apiVersion: nvidia.com/v1alpha1
@@ -715,8 +670,6 @@ This would work. You can also have a separate DGD for each model. This also appl
 
 # 8. Implementation Details
 
-**TODO: update with Grove/Dynamo additional rolling update configuration support**
-
 ### DGD/Operator Updates
 
 - Remove `dynamoNamespace` field from DGD service spec and inject DGD name as `DYN_NAMESPACE` env var.
@@ -755,13 +708,14 @@ In this case, the DGD operator would not support updating the DGD spec once depl
 
 **Cons**:
 
-- Requires the user to develop/find their own solution for performing rollouts
-- Not consistent with rollout strategies supported by alternative solutions
+- Requires the user to develop/find their own solution for performing rollouts in all scenarios
 - Two DGDs == two units of gang scheduling/termination and topology awareness
 
 ## 10.2 Only Enable Version Updates for DGD Spec
 
 In this case, we would limit the subset of things a user can update on the DGD spec to only be the image tag of the service. This would enable a `RollingUpdate` strategy in the scenario of [Update Dynamo Worker Version](#update-dynamo-worker-version) and [Update Frontend Worker Version](#update-frontend-worker-version).
+
+**We cannot support modification of the args passed to the model worker as the Operator is not aware of what changes would result in Different MDC Checksums or Incompatible KV Cache Transfer**
 
 **Pros**:
 
@@ -774,17 +728,62 @@ In this case, we would limit the subset of things a user can update on the DGD s
 - In the case of [Incompatible KV Cache Transfer during Rollout](#incompatible-kv-cache-transfer-during-rollout) or [Different MDC Checksums during Rollout](#different-mdc-checksums-during-rollout), the user would need to perform a rollout at a higher level than Dynamo DGD (blue/green with Ingress traffic splitting)
 - Two DGDs == two units of gang scheduling/termination and topology awareness
 
-## 10.3 Enable Multiple MDCs per Model (No Support for Worker Group Isolation)
+# Appendix
 
-In this case, a user can make any update to the DGD spec in order to perform a rollout. The Dynamo Core Lib would be updated to support multiple MDCs per model engine. This would solve for [Update Dynamo Worker Version](#update-dynamo-worker-version), [Update Frontend Worker Version](#update-frontend-worker-version) and [Different MDC Checksums during Rollout](#different-mdc-checksums-during-rollout).
+## 1 Rollout Strategies in K8s AI Model Deployment Ecosystem
 
-However, this would not solve for [Incompatible KV Cache Transfer during Rollout](#incompatible-kv-cache-transfer-during-rollout) as their is no worker group isolation (all workers new/old in the same namespace). Also, it is not clear to the user what would make KV cache transfer incompatible.
+### 1.1 Deployments
 
-**Pros**:
+The core Kubernetes `Deployment` resource has [two strategies for rolling out updates:](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy) `RollingUpdate` and `Recreate`.
 
-- Enables in-place rollout strategy for [Update Dynamo Worker Version](#update-dynamo-worker-version), [Update Frontend Worker Version](#update-frontend-worker-version) and [Different MDC Checksums during Rollout](#different-mdc-checksums-during-rollout)
+- `RollingUpdate` is the default strategy where Pods are updated by gradually scaling down the old `ReplicaSet` and scaling up the new `ReplicaSet`.
+  - Optional field `maxUnavailable` specifies the maximum number of Pods that can be unavailable during the update.
+  - Optional field `maxSurge` specifies the maximum number of Pods that can be created above the desired number of Pods.
+- `Recreate` strategy will delete all existing Pods before the new ones are created.
 
-**Cons**:
+### 1.2 StatefulSets
 
-- Makes the Dynamo Core Lib more complex as it needs to support multiple MDCs per model engine.
-- Does not solve for [Incompatible KV Cache Transfer during Rollout](#incompatible-kv-cache-transfer-during-rollout) case
+The core [Kubernetes `StatefulSet` resource](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/stateful-set-v1/) has two `updateStrategy` options: `RollingUpdate` and `OnDelete`.
+
+- `RollingUpdate` is the default strategy where Pods are updated in sequence (highest index -> lowest index) one Pod at a time.
+  - Optional field `maxUnavailable` specifies the maximum number of Pods that can be unavailable during the update (default is 1).
+  - Optional field `partition` indicates the ordinal at which the StatefulSet should be paritioned for updates (default is 0 - all Pods are updated).
+- `OnDelete` is the legacy behavior where Pods are only updated when they are manually deleted.
+
+_Note that there is no `maxSurge` for `RollingUpdate` strategy as stable Pod identity (index) is important for exclusive PVCs and deterministic startup/shutdown ordering_
+
+### 1.3 LeaderWorkerSet
+
+The `LeaderWorkerSet` resource has a single [`RolloutStrategy` `RollingUpdate`](https://github.com/kubernetes-sigs/lws/blob/main/api/leaderworkerset/v1/leaderworkerset_types.go)
+
+- Optional field `partition` behaves the same as StatefulSet `RollingUpdate` `partition` field.
+- Optional field `maxUnavailable` behaves the same as StatefulSet `RollingUpdate` `maxUnavailable` field.
+- Optional field `maxSurge` behaves the same as Deployment `RollingUpdate` `maxSurge` field.
+
+_Note that LWS does support `maxSurge`. Example of how it works [here](https://lws.sigs.k8s.io/docs/concepts/rollout-strategy/)_
+
+### 1.4 Gateway API Inference Extension
+
+The Gateway API Inference Extension (GAIE) does not control the `Model Server` itself (the piece that is actually running the model inference). Example of a [vllm Model Server Deployment](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/main/config/manifests/vllm/gpu-deployment.yaml)
+
+Since GAIE is just a Gateway that is routing between `InferencePool`s (`Model Server` grouping for a single model), they [expect the user to create another `Model Server` Deployment themselves and use an `HTTPRoute` to split traffic between the new and old `InferencePool`](https://gateway-api-inference-extension.sigs.k8s.io/guides/inferencepool-rollout/). This enables canary or blue/green rollout strategies but the way the `Model Server` is rolled out for updates is on the user.
+
+_Note that llm-d uses GAIE and Deployment (single-node) and LeaderWorkerSet (multi-node) for model serving so it inherits both of their rollout strategies._
+
+### 1.5 CentML Platform
+
+The CentML Platform leverages [`Argo Rollouts`](https://argo-rollouts.readthedocs.io/en/stable/) to enable an [automated canary rollout strategy](https://github.com/CentML/platform/blob/main/catalog/src/catalog/inference_deployment_v3/templates/rollout.yaml).
+
+Argo Rollouts are designed to be a drop in replacement of `Deployment` where the PodSpec is the same but the `.spec.strategy` has more powerful capabilities.
+
+- An example is a canary style rollout where you can define an [`Analysis`](https://argo-rollouts.readthedocs.io/en/stable/features/analysis/) that can query custom metrics and define success/failure conditions, the step size, traffic weighting and rollout speed
+
+_Future inspiration for how a user can perform a canary rollout that monitors SLOs (TTFT, ITL) of new set of workers during rollout._
+
+### 1.6 AIBrix
+
+### 1.7 OME
+
+### 1.8 Canary Rollout
+
+### 1.9 Blue/Green Rollout
