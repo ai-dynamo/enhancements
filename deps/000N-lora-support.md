@@ -359,7 +359,7 @@ class LoraManager(abc.ABC):
         pass
 
 # Concrete implementation of LoRA manager
-class DynamoLoraManager(LoraManager)
+class DynamoVllmLoraManager(LoraManager)
     pass
 
 # Plugin interface for LoRA downloader in LLM backend
