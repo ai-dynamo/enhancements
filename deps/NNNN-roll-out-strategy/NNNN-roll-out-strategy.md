@@ -574,7 +574,9 @@ _Note that the `maxUnavailable` and `maxSurge` field is supported at the `DGD` s
 
 - [Different MDC Checksums during Rollout](#different-mdc-checksums-during-rollout) - in a `RollingUpdate` scenario or with a canary rollout using worker groups, set A and set B will have hashes appended to isolate them. This assumes the Core Dynamo Lib can be updated to support multiple `Client`s per model engine and load balance traffic across.
 - [Incompatible KV Cache Transfer during Rollout](#incompatible-kv-cache-transfer-during-rollout) - similar to [Different MDC Checksums during Rollout](#different-mdc-checksums-during-rollout), set A and set B will have different namespaces, so communication between set A and set B will not occur.
-  **Enhances User Functionality:**
+
+**Enhances User Functionality:**
+
 - If using `workerGroupName` solution, a DGD can support the Hierarchical Planner proposal where multiple configurations of the same model can be deployed in the same DGD (do note that the SLO routing logic is not specified - would need to be solved).
 - Adds support for a canary rollout strategy where a user can deploy X% of new model workers within a DGD and monitor SLOs for the new workers before gradually scaling down old set/scaling up new set.
 
