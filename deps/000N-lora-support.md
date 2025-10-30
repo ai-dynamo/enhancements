@@ -18,6 +18,7 @@ Single backend worker can serve multiple LoRA models. Each worker will have a Lo
 In the frontend, LoRA models can leverage the same code paths used for base model routing and preprocessing, requiring minimal changes.
 
 ## Requirements
+- support for multiple concurrent LoRA model serving and hot loading/unloading of LoRA models at runtime without restarting workers.
 - need for load balancing sparse LoRA deployments across multiple backend workers
 - LoRA scheduling: dynamic lora management across fleet (load, unload, list) when workers/LoRA models are added/removed
 
@@ -170,10 +171,8 @@ spec:
 ```
 <lora-root>/
 ├── <lora-model-1>/
-│   └── <revision>/
 │       └── <model-weights>
 ├── <lora-model-2>/
-│   └── <revision>/
 │       └── <model-weights>
 ```
 
@@ -190,6 +189,22 @@ DYN_LORA_DOWNLOADER_PLUGIN=<my.custom.lora.downloader.CustomDownloader>,  # defa
 # user can bring their own custom LoRA downloader plugin as python module
 python -m dynamo.vllm --lora-downloader-plugin=<my.custom.lora.downloader.CustomDownloader> ...
 ```
+
+## LoRA Cache Management
+
+Different cache levels for LoRA models:
+### Device cache
+LoRA models are loaded into GPU memory and ready for inference. This capacity is limited by GPU VRAM size and framework specific limits and of the order of 10/100s of LoRAs based on parameters like rank, adapter size, etc.
+
+### Host cache
+LoRA models are downloaded to host cache (default is local disk). This is slower than device cache but capacity is not limited by GPU VRAM size. Based on RAM size, the capacity can be of the order of 1000s of LoRAs (assuming 25Mb per LoRA) and load times will reduce to 1-2ms.
+
+### Disk cache 
+loading time ~ 100ms and can support millions of LoRAs based on disk size.
+
+
+### Remote cache
+This is the source of truth of LoRA models. It is used to download LoRA models from remote repositories like HuggingFace, etc.
 
 ## Life of a LoRA Request
 
