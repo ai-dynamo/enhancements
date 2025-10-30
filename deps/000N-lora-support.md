@@ -32,12 +32,14 @@ Sticky LoRA scheduling: (Similar to KV cache indexing)
 
 Backend
 - Eager scheduling: Backend workers expose endpoints for explicit LoRA management (load, unload, list)
-- Lazy loading: Backend workers will lazily load LoRA models to llm engine on first LoRA request if its not already loaded.
+- Backend workers must respond to LoRA inference requests
+  - lazy load LoRA models to llm engine on first LoRA request if its not already loaded.
 - LoRA models status will be available in backend's http service endpoint
+- configurable cache eviction policy for LoRA models across layers
  
 Frontend
 - Fronted will discover backend worker's LoRA models status and populate internal map of Lora model name -> worker list
-- KV Routing can be 
+- KV Router will use same block hash computation logic as backend workers to route requests to the appropriate worker.
 
 ## Architecture
 **LoRA Management Flow:**
@@ -47,6 +49,8 @@ Frontend (HTTP) → Backend Worker → LLM Engine
 Operator → Backend Worker → LLM Engine
 ```
 
+![LoRA Architecture](./000N-lora/lora-1.png)
+
 ### LLM Backends
 
 LLM Manager in backend frameworks will be responsible for:
@@ -55,11 +59,21 @@ LLM Manager in backend frameworks will be responsible for:
 - Unloading LoRA models from llm engine
 - Downloading LoRA models from upstream LoRA repository to local disk
 
-### LoRA loading/unloading logic
+### LoRA loading and cache management
 - explicit: Backend workers expose internal system endpoints to manage LoRA models. The frontend controller discovers workers and distributes LoRA management requests to them.
-- implicit: Backend workers will discover LoRA models from local disk and load them to llm engine on first LoRA request.
+- implicit: Backend workers will discover LoRA models from configurable (local disk or remote repository) location and load them to llm engine on first LoRA request.
 
-**LoRA Management API:**
+Loading a LoRA means its moved into GPU memory and its available for inference. Maximum number of LoRAs loaded into GPU memory depends on model, GPU VRAM size and framework specific limits. 
+Additional LoRas can reside CPU memory or disk cache, but only a limited number can be active in GPU memory at any time.
+
+LRU cache at multiple levels (remote, host, device), and that loading and unloading LoRas between CPU and GPU memory incurs a time penalty. The LoRA controller aims to keep LoRas 'sticky' in memory to minimize frequent evictions and associated delays.
+
+Frontend
+- `load_lora` API will load the LoRA into system wide cache and make it available for inference.
+- `unload_lora` API will evict the LoRA from system wide cache and reclaim resources for other LoRAs.
+
+
+**Backend LoRA Management API:**
 - Load a LoRA model to llm engine
 
 ```bash
@@ -108,11 +122,11 @@ Phase 2: LoRA management scheduling layer
 
 The controller uses the distributed runtime to communicate with backend workers via internal dynamo endpoints.
 
-## Frontend LoRA controller
+## (Alternative 1) Frontend LoRA controller
 
 Frotnend exposes HTTP endpoints for LoRA management
 
-## K8s bsed LoRA controller
+## (Alternative 2) K8s bsed LoRA controller
 
 More details in DEP for Dynamo Model
 
@@ -198,8 +212,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 3. **Frontend Processing**: Preprocessor converts the request to pre-processed format (tokenize, chat template, etc.) - same code path as base model
 
 4. **Routing Decision**: 
-   - Option 1: LoRA-specific KV Router routes to workers that have this LoRA loaded
-   - Option 2: Single KV Router per base model with LoRA-aware block hashing
+   - There will be KV Router per base model. LoRA-aware block hashing (same as backend model block hashing) will be used in router to compute KV block hash and route requests to appropriate workers.
 
 5. **Backend Processing**: Backend worker identifies LoRA by name and constructs framework-specific request and generates response.
    - vLLM: Creates `LoRARequest(lora_name, lora_int_id, lora_path)`
@@ -233,7 +246,7 @@ Each active LoRA model will have dedicated KV router to handle the request for t
 
 Backend requests will generate KV event stream and Frontend router will consume them to build its Radix Tree.
 
-### Alterntive : Single KV Router per base model
+### Single KV Router per base model
 In this approach, we create a single KV Router per base model.
 This approach will need to use lora identifier (lora name or id) to compute the KV block hashes for request consistently across Backend LLM workers and frontend router.
 
@@ -416,6 +429,24 @@ For example, vLLM has the following configuration:
   - `--max-lora-rank`: Maximum LoRA rank (default: 64)
   - `--max-loras`: Maximum concurrent LoRAs (default: 4)
 
+
+## Smart LoRA Serving
+
+### Load Distribution Logic: 
+LoRA controller distributes LoRas across available backend workers to minimize cache thrashing and maximize resource utilization, with the controller orchestrating which worker loads which LoRa.
+
+### Traffic Weighting and Pinning: 
+- Optionally user can assign traffic weights to LoRas (e.g., loading more replicas of high-traffic LoRas) and pinning specific LoRas to prevent eviction.
+
+### Thundering Herd problem with new LoRA model requests:
+State synchronization between multiple front ends is required to avoid thundering herd problem with new LoRA model requests. We can use event-based updates and service discovery to ensure consistent LoRA model states across FE instances.
+
+### Scaling and Fault Tolerance:
+LoRA controller will be responsible for fault tolerance for LoRA model serving.
+
+As the system scales to more workers and LoRas, LoRA placement (LoRA replicas for fault tolerance) will become increasingly important.
+We need a pluggable policy where use can configure how to place M LoRAs on N workers optimally.
+
 ## Phases
 
 ### Phase 1: Basic Support for LoRA models in Dynamo
@@ -448,3 +479,7 @@ For example, vLLM has the following configuration:
 - [vLLM LoRA Documentation](https://docs.vllm.ai/en/stable/features/lora.html)
 - [SGLang LoRA Documentation](https://docs.sglang.ai/advanced_features/lora.html)
 - [TensorRT-LLM LoRA Documentation](https://nvidia.github.io/TensorRT-LLM/1.1.0rc5/features/lora.html)
+
+### Questions 
+- How much time it takes to load a LoRA model to llm engine?
+- How many LoRA models can be loaded to llm engine simultaneously? This is limited by LoRA size, device memory and framework specific limits.
