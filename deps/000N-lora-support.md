@@ -50,7 +50,7 @@ Frontend (HTTP) → Backend Worker → LLM Engine
 Operator → Backend Worker → LLM Engine
 ```
 
-![LoRA Architecture](./000N-lora/lora-1.png)
+![LoRA Architecture](./000N-lora/lora-2.png)
 
 ### LLM Backends
 
