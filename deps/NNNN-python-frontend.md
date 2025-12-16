@@ -50,11 +50,11 @@ Example is for vllm. We would provide one for each engine.
 from vllm.v1.engine.async_llm import AsyncLLM
 engine = vllm.AsyncLLM.from_vllm_config(...)
 
-component = runtime.namespace(config.namespace).component(config.component)
-generate_endpoint = component.endpoint(config.endpoint)
-endpoint_client = await generate_endpoint.client()
-
-def py_handler(request: dynamo.NVCreateChatCompletionRequest) -> dynamo.NvCreateChatCompletionResponse:
+def py_handler(request: dynamo.NVCreateChatCompletionRequest, endpoint: Endpoint) -> dynamo.NvCreateChatCompletionStreamResponse:
+    """
+    Takes an OpenAI compliant request, and the Endpoint that serves the model named in that request.
+    The Endpoint knows which backend instances are available to route to.
+    """
 
     # Let vllm handle all pre-processing
     vllm_preproc: vllm.EngineCoreRequest = engine.input_processor.process_inputs(..request fields..)
@@ -65,14 +65,17 @@ def py_handler(request: dynamo.NVCreateChatCompletionRequest) -> dynamo.NvCreate
 
     # Dynamo Router. This goes to the backend, waits, gets the streaming response, returns it
     # stream is AsyncResponseStream
+    endpoint_client = await generate_endpoint.client()
     dynamo_stream: dynamo.AsyncResponseStream = await endpoint_client.round_robin(our_preproc)
-    vllm_stream: [EngineCoreOutput] = map_it_somehow(dynamo_stream)
+    async for dynamo_response in dynamo_stream:
+        vllm_response: [EngineCoreOutput] = convert(dynamo_response)
 
-    # Let vllm handle all post-processing
-    vlm_out: vllm.RequestOutput = engine.output_processor.process_output(vllm_stream)
+        # Let vllm handle all post-processing
+        vlm_out: vllm.RequestOutput = engine.output_processor.process_output(vllm_response)
 
-    dynamo_out: dynamo.NvCreateChatCompletionResponse = convert(vllm_out)
-    return dynamo_out
+        dynamo_out: dynamo.NvCreateChatCompletionResponse = convert(vllm_out)
+        yield dynamo_out
+
 ```
 
 ## What we already have
@@ -102,7 +105,33 @@ Using the engine we already have "A Python engine", we need to wire up calling t
 
 To call the vllm input and output processors we need to convert the types, the imaginary `convert` functions in the pseudo-code.
 
+### Endpoint should cache the client
+
+Currently `Endpoint::client` is relatively heavyweight. It creates a new `AddressedPushRouter` each call. It should instead cache the existing
+
+# Open questions
+
+The example handler takes `NvCreateChatCompletionRequest`. What about Completions, Requests, and Embeddings? Do we have a separate handler for each? Should a single handler be able to cope with all of them, and we indicate in the call which type it is? Or it could take a union and figure it out.
+
 # Misc
+
+## Using it with KVRouter
+
+KVRouter has good [Python bindings - docs -](https://github.com/ai-dynamo/dynamo/blob/main/docs/router/kv_cache_routing.md#using-kvpushrouter-python-api):
+
+```
+    if is_first_call:
+        kv_router_config = KvRouterConfig()
+        kv_router = KvPushRouter(
+            endpoint=endpoint,
+            block_size=16,
+            kv_router_config=kv_router_config
+        )
+
+    stream = kv_router.generate(token_ids=..., ...)
+```
+
+It needs to know the `Endpoint`.
 
 ## Downside
 
@@ -112,7 +141,9 @@ The current frontend will remain, allowing users to choose.
 
 ## Out of scope
 
-Bindings for the current Rust pre and post processors is out of scope for this proposal.
+- Bindings for the current Rust pre and post processors.
+- Multi-process frontends, to handle GIL contention.
+- Experimenting with free-threaded python, to handle GIL contention.
 
 # Related Proposals
 
