@@ -193,3 +193,409 @@ The current frontend will remain, allowing users to choose.
 
 https://github.com/ai-dynamo/enhancements/pull/50
 
+===============================================================================================
+============================= Appendix ========================================================
+===============================================================================================
+
+=== Appendix A.
+=== spec.md for injecting the Python engine factory callback
+=== Opus 4.5 Thinking implemented this to create https://github.com/ai-dynamo/dynamo/pull/4999
+
+# Spike: Python Engine Factory Callback
+
+## Objective
+
+Add the ability to pass a Python async function (`engine_factory`) as a callback into the Rust code. This spike verifies that we can successfully call an async Python function from Rust code when a model is discovered.
+
+## Background
+
+The callback signature is:
+```python
+async def engine_factory(mdc: ModelDeploymentCard) -> PythonAsyncEngine:
+    ...
+```
+
+- `ModelDeploymentCard` - Rust object with Python bindings in `lib/bindings/python/rust/llm/model_card.rs`
+- `PythonAsyncEngine` - Rust object with Python bindings in `lib/bindings/python/rust/engine.rs`
+
+When an async Python function is passed to Rust, we need to:
+1. Capture Python's event loop context (TaskLocals) at registration time
+2. Use those locals when converting the Python coroutine to a Rust Future
+
+## Reference: Existing Pattern
+
+The `register_engine_route` function in `lib/bindings/python/rust/lib.rs` (lines 627-703) demonstrates how to properly handle async Python callbacks:
+
+```rust
+fn register_engine_route(&self, py: Python<'_>, route_name: String, callback: PyObject) -> PyResult<()> {
+    // Capture TaskLocals at registration time
+    let locals = Arc::new(pyo3_async_runtimes::tokio::get_current_locals(py).map_err(to_pyerr)?);
+    let callback = Arc::new(callback);
+
+    let rust_callback: EngineRouteCallback = Arc::new(move |body: serde_json::Value| {
+        let callback = callback.clone();
+        let locals = locals.clone();
+
+        Box::pin(async move {
+            let py_future = Python::with_gil(|py| {
+                let py_body = pythonize::pythonize(py, &body)?;
+                let coroutine = callback.call1(py, (py_body,))?;
+                pyo3_async_runtimes::into_future_with_locals(&locals, coroutine.into_bound(py))
+            })?;
+
+            let py_result = py_future.await?;
+
+            Python::with_gil(|py| {
+                pythonize::depythonize::<serde_json::Value>(py_result.bind(py))
+            })
+        })
+    });
+    // ...
+}
+```
+
+## Implementation Steps
+
+### Step 1: Create the Python dummy callback
+
+**File:** `components/src/dynamo/frontend/main.py`
+
+Add a dummy `engine_factory` function that returns a minimal `PythonAsyncEngine`. This will be used to test the callback mechanism.
+
+1. Import the necessary types at the top of the file:
+   ```python
+   from dynamo.llm import ModelDeploymentCard, PythonAsyncEngine
+   ```
+
+2. Create a dummy async generator function (required for `PythonAsyncEngine`):
+   ```python
+   async def dummy_generator(request):
+       """Minimal generator that yields nothing - just for spike testing."""
+       return
+       yield  # Makes this an async generator
+   ```
+
+3. Create the `engine_factory` callback:
+   ```python
+   async def engine_factory(mdc: ModelDeploymentCard) -> PythonAsyncEngine:
+       """
+       Spike: Dummy engine factory callback.
+       Called by Rust when a model is discovered.
+       """
+       import asyncio
+       loop = asyncio.get_event_loop()
+       print(f"[SPIKE] engine_factory called with MDC: {mdc.to_json_str()[:100]}...")
+       return PythonAsyncEngine(dummy_generator, loop)
+   ```
+
+4. In the `async_main()` function, add to `kwargs` before creating `EntrypointArgs`:
+   ```python
+   # Get TaskLocals for the callback
+   kwargs['engine_factory'] = engine_factory
+   ```
+
+### Step 2: Define the Rust callback type
+
+**File:** `lib/llm/src/entrypoint.rs` (or create a new file `lib/llm/src/engine_factory.rs`)
+
+Define a type alias for the engine factory callback that mirrors `EngineRouteCallback`:
+
+```rust
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+use crate::model_card::ModelDeploymentCard;
+
+/// Callback type for engine factory (async)
+/// Takes a ModelDeploymentCard, returns unit (for now - spike only logs success)
+pub type EngineFactoryCallback = Arc<
+    dyn Fn(
+        ModelDeploymentCard,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
+        + Send
+        + Sync,
+>;
+```
+
+### Step 3: Add `engine_factory` parameter to `EntrypointArgs`
+
+**File:** `lib/bindings/python/rust/llm/entrypoint.rs`
+
+1. Add new imports at the top:
+   ```rust
+   use pyo3_async_runtimes::TaskLocals;
+   ```
+
+2. Add a new field to the `EntrypointArgs` struct:
+   ```rust
+   #[pyclass]
+   #[derive(Clone, Debug)]
+   pub(crate) struct EntrypointArgs {
+       // ... existing fields ...
+       engine_factory: Option<EngineFactoryCallback>,
+   }
+   ```
+
+   **Note:** Since `EngineFactoryCallback` contains `dyn Fn`, the struct cannot derive `Clone` automatically. You'll need to wrap it in `Arc` or change the approach. Consider:
+   ```rust
+   engine_factory: Option<Arc<EngineFactoryCallback>>,
+   ```
+   Or store raw `PyObject` + `TaskLocals` separately and create the callback later.
+
+3. Update the `#[new]` method signature to accept the callback:
+   ```rust
+   #[pyo3(signature = (engine_type, ..., engine_factory=None))]
+   pub fn new(
+       py: Python<'_>,  // Need py for get_current_locals
+       // ... existing params ...
+       engine_factory: Option<PyObject>,
+   ) -> PyResult<Self> {
+   ```
+
+4. Inside `new()`, convert the Python callback to Rust:
+   ```rust
+   let engine_factory_callback: Option<EngineFactoryCallback> = engine_factory.map(|callback| {
+       let locals = Arc::new(
+           pyo3_async_runtimes::tokio::get_current_locals(py)
+               .expect("Failed to get TaskLocals")
+       );
+       let callback = Arc::new(callback);
+
+       let f: EngineFactoryCallback = Arc::new(move |card: ModelDeploymentCard| {
+           let callback = callback.clone();
+           let locals = locals.clone();
+
+           Box::pin(async move {
+               let py_future = Python::with_gil(|py| {
+                   // Convert ModelDeploymentCard to Python object
+                   let py_card = /* create Python ModelDeploymentCard wrapper */;
+
+                   let coroutine = callback.call1(py, (py_card,))
+                       .map_err(|e| anyhow::anyhow!("Failed to call engine_factory: {}", e))?;
+
+                   pyo3_async_runtimes::into_future_with_locals(&locals, coroutine.into_bound(py))
+                       .map_err(|e| anyhow::anyhow!("Failed to convert coroutine: {}", e))
+               })?;
+
+               let _py_result = py_future.await
+                   .map_err(|e| anyhow::anyhow!("engine_factory failed: {}", e))?;
+
+               // For spike: just log success, don't use the returned PythonAsyncEngine
+               tracing::info!("[SPIKE] engine_factory callback succeeded!");
+               Ok(())
+           })
+       });
+       f
+   });
+   ```
+
+### Step 4: Thread the callback through `make_engine`
+
+**File:** `lib/bindings/python/rust/llm/entrypoint.rs`
+
+In `make_engine()`, pass the callback to `LocalModelBuilder`:
+
+```rust
+if let Some(factory) = args.engine_factory.clone() {
+    builder.engine_factory(Some(factory));
+}
+```
+
+### Step 5: Add `engine_factory` field to `LocalModelBuilder` and `LocalModel`
+
+**File:** `lib/llm/src/local_model.rs`
+
+1. Add the field to `LocalModelBuilder`:
+   ```rust
+   pub struct LocalModelBuilder {
+       // ... existing fields ...
+       engine_factory: Option<EngineFactoryCallback>,
+   }
+   ```
+
+2. Add builder method:
+   ```rust
+   pub fn engine_factory(&mut self, callback: Option<EngineFactoryCallback>) -> &mut Self {
+       self.engine_factory = callback;
+       self
+   }
+   ```
+
+3. Add field to `LocalModel`:
+   ```rust
+   pub struct LocalModel {
+       // ... existing fields ...
+       engine_factory: Option<EngineFactoryCallback>,
+   }
+   ```
+
+4. Add getter:
+   ```rust
+   pub fn engine_factory(&self) -> Option<&EngineFactoryCallback> {
+       self.engine_factory.as_ref()
+   }
+   ```
+
+5. Update `build()` to transfer the callback to `LocalModel`.
+
+### Step 6: Thread through `EngineConfig`
+
+**File:** `lib/llm/src/entrypoint.rs`
+
+1. Update `EngineConfig::Dynamic` to include the callback:
+   ```rust
+   pub enum EngineConfig {
+       Dynamic {
+           model: Box<LocalModel>,
+           engine_factory: Option<EngineFactoryCallback>,
+       },
+       // ... other variants unchanged
+   }
+   ```
+
+2. Update `local_model()` method accordingly.
+
+### Step 7: Pass to `run_watcher` in HTTP entrypoint
+
+**File:** `lib/llm/src/entrypoint/input/http.rs`
+
+1. Update `run_watcher` signature to accept the callback:
+   ```rust
+   async fn run_watcher(
+       runtime: DistributedRuntime,
+       model_manager: Arc<ModelManager>,
+       router_config: RouterConfig,
+       target_namespace: Option<String>,
+       http_service: Arc<HttpService>,
+       metrics: Arc<crate::http::service::metrics::Metrics>,
+       engine_factory: Option<EngineFactoryCallback>,  // NEW
+   ) -> anyhow::Result<()>
+   ```
+
+2. In `run()`, extract and pass the callback:
+   ```rust
+   EngineConfig::Dynamic { model, engine_factory } => {
+       // ...
+       run_watcher(
+           distributed_runtime.clone(),
+           http_service.state().manager_clone(),
+           router_config.clone(),
+           target_namespace,
+           Arc::new(http_service.clone()),
+           http_service.state().metrics_clone(),
+           engine_factory,  // NEW
+       ).await?;
+   }
+   ```
+
+### Step 8: Pass to `ModelWatcher`
+
+**File:** `lib/llm/src/discovery/watcher.rs`
+
+1. Add field to `ModelWatcher`:
+   ```rust
+   pub struct ModelWatcher {
+       // ... existing fields ...
+       engine_factory: Option<EngineFactoryCallback>,
+   }
+   ```
+
+2. Update `new()`:
+   ```rust
+   pub fn new(
+       runtime: DistributedRuntime,
+       model_manager: Arc<ModelManager>,
+       router_config: RouterConfig,
+       engine_factory: Option<EngineFactoryCallback>,  // NEW
+   ) -> ModelWatcher {
+       Self {
+           manager: model_manager,
+           drt: runtime,
+           router_config,
+           notify_on_model: Notify::new(),
+           model_update_tx: None,
+           engine_factory,  // NEW
+       }
+   }
+   ```
+
+### Step 9: Call the callback in `handle_put`
+
+**File:** `lib/llm/src/discovery/watcher.rs`
+
+In `handle_put()`, find the block that handles `card.model_type.supports_chat()` (around line 431). Add the callback invocation **before** calling `build_routed_pipeline`:
+
+```rust
+// SPIKE: Call the engine factory callback if present
+if let Some(ref factory) = self.engine_factory {
+    tracing::info!(
+        model_name = card.name(),
+        "[SPIKE] Calling engine_factory callback"
+    );
+
+    factory(card.clone()).await.map_err(|e| {
+        tracing::error!(%e, "[SPIKE] engine_factory callback failed");
+        e
+    })?;
+
+    tracing::info!(
+        model_name = card.name(),
+        "[SPIKE] engine_factory callback completed successfully"
+    );
+}
+
+// Continue with existing build_routed_pipeline call...
+if card.model_type.supports_chat() {
+    let chat_engine = entrypoint::build_routed_pipeline::<...>(...).await?;
+    // ...
+}
+```
+
+## Build and Test
+
+1. Navigate to bindings directory:
+   ```bash
+   cd lib/bindings/python
+   ```
+
+2. Build with maturin:
+   ```bash
+   maturin develop --uv
+   ```
+
+3. Run the frontend to test:
+   ```bash
+   python -m dynamo.frontend --help
+   # Or with a test configuration
+   ```
+
+4. Expected output when a model is discovered:
+   ```
+   [SPIKE] engine_factory called with MDC: {"name":"...
+   [SPIKE] Calling engine_factory callback
+   [SPIKE] engine_factory callback completed successfully
+   ```
+
+## Challenges / Notes
+
+1. **Clone for `EntrypointArgs`**: Since `EngineFactoryCallback` uses `dyn Fn`, it cannot be cloned directly. Options:
+   - Wrap in `Arc` (recommended)
+   - Store `PyObject` + `TaskLocals` separately and construct callback lazily
+   - Remove `Clone` derive and adjust code accordingly
+
+2. **Python object conversion**: The `ModelDeploymentCard` needs to be converted to its Python wrapper type. Check how this is done elsewhere in the bindings (see `model_card.rs`).
+
+3. **GIL considerations**: All Python interactions must happen within `Python::with_gil()`. The actual async await happens outside the GIL.
+
+4. **Error handling**: The spike can use simple error propagation. Production code should have more robust error handling.
+
+## Files Changed Summary
+
+| File | Changes |
+|------|---------|
+| `components/src/dynamo/frontend/main.py` | Add `engine_factory` callback and pass to kwargs |
+| `lib/llm/src/entrypoint.rs` | Define `EngineFactoryCallback` type, update `EngineConfig::Dynamic` |
+| `lib/bindings/python/rust/llm/entrypoint.rs` | Accept `engine_factory` in `EntrypointArgs`, convert to Rust callback |
+| `lib/llm/src/local_model.rs` | Add `engine_factory` field to builder and model |
+| `lib/llm/src/entrypoint/input/http.rs` | Thread callback through to `run_watcher` |
+| `lib/llm/src/discovery/watcher.rs` | Store callback in `ModelWatcher`, call in `handle_put` |
