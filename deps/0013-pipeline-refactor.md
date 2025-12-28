@@ -22,23 +22,25 @@
 
 # Summary
 
-This proposal introduces a modular, configuration-driven pipeline architecture for the Dynamo frontend. Instead of the current monolithic build_routed_pipeline_with_preprocessor function and complex internal branching, we propose:
-Independent configuration knobs for preprocessing location, postprocessing location, routing behavior, and migration
-A single build_pipeline(config, components) function that assembles pipeline segments based on configuration
-Separation of concerns between worker routing decisions and disaggregated prefill/decode orchestration
-Support for three primary use-cases: query-only mode (GAIE EPP stage 1), direct-to-known-workers mode (GAIE stage 2), and full discovery mode (dynamo default)
+This proposal introduces a modular, configuration-driven pipeline architecture for the Dynamo frontend. Instead of the current monolithic ``build_routed_pipeline_with_preprocessor`` function and complex internal branching, we propose:
+- Independent configuration knobs for preprocessing location, postprocessing location, routing behavior, and migration
+- A single build_pipeline(config, components) function that assembles pipeline segments based on configuration
+- Separation of concerns between worker routing decisions and disaggregated prefill/decode orchestration
+- Support for three primary use-cases: query-only mode (GAIE EPP stage 1), direct-to-known-workers mode (GAIE stage 2), and full discovery mode (dynamo default)
 
 # Motivation
 
-The current build_routed_pipeline_with_preprocessor function in lib/llm/src/entrypoint/input/common.rs has grown to handle multiple concerns in a tightly-coupled manner:
-Preprocessing is always in the frontend: There is no clean way to skip frontend preprocessing when the engine backend handles its own tokenization and prompt formatting.
-Routing logic is scattered: The decision to route to a specific worker is controlled through backend_instance_id in annotations/routing hints, which is not elegant. The RouterMode::Direct(instance_id) can be configured during the pipeline construction time, not per-request.
-PrefillRouter does too much: It handles prefill/decode orchestration, GAIE Stage 1/2 state machine, bootstrap info discovery, worker selection, and fallback to aggregated mode—all in one component. In the llm-d and the architecture adopted by the Inference Gateway the decode worker calls prefill in a dedicated sidecar, not in the routing module.
-No query-only mode: There is no clean way to run only preprocessing + routing decisions without executing the model (needed for external prefetch processors like GAIE).
-Migration is always included: No way to opt-out of retry logic when it's not needed (e.g., single-worker scenarios).
+The current ``build_routed_pipeline_with_preprocessor`` function in ``lib/llm/src/entrypoint/input/common.rs`` has grown to handle multiple concerns in a tightly-coupled manner:
+- Preprocessing is always in the frontend: There is no clean way to skip frontend preprocessing when the engine backend handles its own tokenization and prompt formatting.
+- Routing logic is scattered: The decision to route to a specific worker is controlled through backend_instance_id in annotations/routing hints, which is not elegant. The RouterMode::Direct(instance_id) can be configured during the pipeline construction time, not per-request.
+- PrefillRouter does too much: It handles prefill/decode orchestration, GAIE Stage 1/2 state machine, bootstrap info discovery, worker selection, and fallback to aggregated mode - all in one component. In the llm-d and the architecture adopted by the Inference Gateway the decode worker calls prefill in a dedicated sidecar, not in the routing module.
+- No query-only mode: There is no clean way to run only preprocessing + routing decisions. It is handled by an annotation flag and a short-circut. 
+- Migration is always included: No way to opt-out of retry logic when it's not needed (e.g., single-worker scenarios).
+
+
 These limitations make it difficult to support new use-cases like:
-Inference Gateway API approach
-Clients who want to handle their own preprocessing / post processing in their modules or rely on Inference Engines. See this [https://github.com/ai-dynamo/enhancements/pull/50/changes#diff-d06f262c7a840682785ad441a3dcaef9ba9f6938bc0e71d1895c89874e7f4086R177]
+- Inference Gateway API approach
+- Clients who want to handle their own preprocessing / post processing in their modules or rely on Inference Engines. See this [https://github.com/ai-dynamo/enhancements/pull/50/changes#diff-d06f262c7a840682785ad441a3dcaef9ba9f6938bc0e71d1895c89874e7f4086R177]
 
 
 
@@ -106,7 +108,7 @@ routing: QueryOnly | DirectToKnown | Discover
 migration_enabled: bool    
 
 PipelineConfig:
-/// Pipeline configuration - each knob is independent
+Pipeline configuration - each knob is independent
 ```rust
 pub struct PipelineConfig {
     /// Where does preprocessing happen?
