@@ -42,7 +42,9 @@ These limitations make it difficult to support new use-cases like:
 - Inference Gateway API approach
 - Clients who want to handle their own preprocessing / post processing in their modules or rely on Inference Engines. See this [https://github.com/ai-dynamo/enhancements/pull/50/changes#diff-d06f262c7a840682785ad441a3dcaef9ba9f6938bc0e71d1895c89874e7f4086R177]
 
-
+# Constraints
+- Preprocessing must always be in the frontend because KV cache routing requires tokens to calculate hashes for matching against indexer hashes from KV events.
+-  Postprocessing can be frontend or engine depending on whether the user wants Rust processing (default) or native framework processing (fallback).
 
 ## Goals
 
@@ -72,7 +74,7 @@ These limitations make it difficult to support new use-cases like:
 
 ### REQ 1 Independent Configuration Knobs
 - The pipeline **MUST** support independent configuration of:
-- Preprocessing location: Frontend or Engine
+- Preprocessing location: Frontend
 - Postprocessing location: Frontend or Engine
 - Routing behavior: QueryOnly, DirectToKnown, or Discover
 - Migration: Enabled or Disabled
@@ -102,18 +104,30 @@ The decision to use disaggregated (prefill + decode) vs aggregated serving **MUS
 # Proposal
 
 We propose replacing the current pipeline construction approach with a configuration-driven, single-function design. The function will take the PipelineConfig as a parameter with the following knobs:
-preprocessing: Dynamo | Engine
+preprocessing: Dynamo 
 postprocessing: Dynamo | Engine     
 routing: QueryOnly | DirectToKnown | Discover 
 migration_enabled: bool    
 
+The current pipeline architecture uses compile-time type chains where each .link() call returns a different type.
+The advantage is that it assures type safety and uses generics, concrete types rather than runtime polymorphism consistent with idiomatic rust.
+
+The downside it that this prevents runtime-conditional segment inclusion:
+```rust
+// NOT possible with current architecture:
+let mut pipeline = frontend;
+if config.has_preprocessing {
+    pipeline = pipeline.link(preprocessor.forward_edge())?;  // Type changes here
+}
+```
+
+Implementing this new interface requires a fair amount of work.
+For the step 1 of this proposal we will code additional functions instead of the new pipeline.
+
 PipelineConfig:
 Pipeline configuration - each knob is independent
 ```rust
-pub struct PipelineConfig {
-    /// Where does preprocessing happen?
-    pub preprocessing: ProcessingLocation,
-    
+pub struct PipelineConfig {    
     /// Where does postprocessing happen?
     pub postprocessing: ProcessingLocation,
     
@@ -127,7 +141,7 @@ pub struct PipelineConfig {
 pub enum ProcessingLocation {
     /// Processing happens in the frontend (Dynamo EPP side)
     #[default]
-    Frontend,
+    Frontend / Dynamo,
     
     /// Processing happens in the engine backend
     Engine,
@@ -146,7 +160,78 @@ pub enum RoutingBehavior {
 }
 ```
 
-Optional presets to satisfy the 3 use-cases.
+Stage 1 proposal:
+
+```rust
+/// Main entry point - selects pipeline variant based on config
+pub async fn build_pipeline<Req, Resp>(
+    config: &PipelineConfig,
+    components: &PipelineComponents,
+) -> anyhow::Result<ServiceEngine<SingleIn<Req>, ManyOut<Annotated<Resp>>>>
+where
+    Req: Data,
+    Resp: Data,
+{
+    match (&config.routing, &config.postprocessing) {
+        // 1. Query-only 
+        (RoutingBehavior::QueryOnly, _) => {
+            build_query_only_pipeline(components).await
+        }
+        
+        // 2. Direct + Rust postprocessing
+        (RoutingBehavior::DirectToKnown, ProcessingLocation::Frontend) => {
+            build_direct_rust_pipeline(components, config.migration_enabled).await
+        }
+        
+        // 3. Direct + Native postprocessing
+        (RoutingBehavior::DirectToKnown, ProcessingLocation::Engine) => {
+            build_direct_native_pipeline(components, config.migration_enabled).await
+        }
+        
+        // 4. Discover + Rust postprocessing (current default)
+        (RoutingBehavior::Discover, ProcessingLocation::Frontend) => {
+            build_discover_rust_pipeline(components, config.migration_enabled).await
+        }
+        
+        // 5. Discover + Native postprocessing
+        (RoutingBehavior::Discover, ProcessingLocation::Engine) => {
+            build_discover_native_pipeline(components, config.migration_enabled).await
+        }
+    }
+}
+```
+
+We will have 5 pipeline functions:
+```rust
+/// Query-only pipeline: preprocessing + routing decision, no execution
+/// 
+/// Pipeline:
+///   Frontend → Preprocessor.fwd → Backend.fwd → RouteQueryBackend
+///           ← Preprocessor.bwd ← Backend.bwd ←
+async fn build_query_only_pipeline<Req, Resp>(
+    components: &PipelineComponents,
+) -> anyhow::Result<ServiceEngine<SingleIn<Req>, ManyOut<Annotated<Resp>>>> {
+    let frontend = SegmentSource::<SingleIn<Req>, ManyOut<Annotated<Resp>>>::new();
+    
+    let preprocessor = build_preprocessor(components)?.into_operator();
+    let backend = Backend::from_tokenizer(components.tokenizer.clone()).into_operator();
+    let route_query = RouteQueryBackend::new(components.router.clone());
+    let service_backend = ServiceBackend::from_engine(Arc::new(route_query));
+    
+    Ok(frontend
+        .link(preprocessor.forward_edge())?
+        .link(backend.forward_edge())?
+        .link(service_backend)?
+        .link(backend.backward_edge())?
+        .link(preprocessor.backward_edge())?
+        .link(frontend)?)
+}
+
+/// the rest of the cases. 
+```
+
+
+Stage 2 - one pipeline with conditionals:
 
 ```rust
 impl PipelineConfig {
@@ -189,7 +274,6 @@ dynamo-run \
 
 # Use-case 2: Gaie stage 2 Execute with pre-selected workers, engine does preprocessing
 dynamo-run \
-  --preprocessing engine \
   --postprocessing engine \
   --routing direct \
   --in http --out auto
@@ -201,7 +285,6 @@ dynamo-run \
 
 # Use-case 3 variant: Engine preprocessing, engine postprocessing
 dynamo-run \
-  --preprocessing engine \
   --postprocessing engine \
   --routing discover \
   --migration-enabled false \
