@@ -22,7 +22,7 @@
 
 # Summary
 
-This proposal introduces a modular, configuration-driven pipeline architecture for the Dynamo frontend. Instead of the current monolithic ``build_routed_pipeline_with_preprocessor`` function and complex internal branching, we propose:
+This proposal calls for a modular, configuration-driven pipeline architecture for the Dynamo frontend. Instead of the current monolithic ``build_routed_pipeline_with_preprocessor`` function and complex internal branching, we propose:
 - Independent configuration knobs for preprocessing location, postprocessing location, routing behavior, and migration
 - A single build_pipeline(config, components) function that assembles pipeline segments based on configuration
 - Separation of concerns between worker routing decisions and disaggregated prefill/decode orchestration
@@ -97,8 +97,7 @@ These limitations make it difficult to support new use-cases like:
 The decision to use disaggregated (prefill + decode) vs aggregated serving **MUST** be made per-request based on prefill worker availability, NOT as a pipeline configuration. This is the current behavior. But The DisaggOrchestrator component **MUST** be taken out of the router.
 
 ### REQ 4 Configuration Validation
-- The code **MUST** validate configuration combinations and return clear errors for invalid combinations:
-- QueryOnly GAIE stage 1 routing with Engine preprocessing MUST be rejected
+- The code **MUST** validate configuration combinations and return clear errors for invalid combinations
 - Other invalid combinations SHOULD be identified and rejected with descriptive error messages
 
 # Proposal
@@ -121,7 +120,7 @@ if config.has_preprocessing {
 }
 ```
 
-Implementing this new interface requires a fair amount of work.
+Implementing such new interface requires a fair amount of work.
 For the step 1 of this proposal we will code additional functions instead of the new pipeline.
 
 PipelineConfig:
@@ -204,10 +203,6 @@ where
 We will have 5 pipeline functions:
 ```rust
 /// Query-only pipeline: preprocessing + routing decision, no execution
-/// 
-/// Pipeline:
-///   Frontend → Preprocessor.fwd → Backend.fwd → RouteQueryBackend
-///           ← Preprocessor.bwd ← Backend.bwd ←
 async fn build_query_only_pipeline<Req, Resp>(
     components: &PipelineComponents,
 ) -> anyhow::Result<ServiceEngine<SingleIn<Req>, ManyOut<Annotated<Resp>>>> {
@@ -227,41 +222,8 @@ async fn build_query_only_pipeline<Req, Resp>(
         .link(frontend)?)
 }
 
-/// the rest of the cases. 
-```
-
-
-Stage 2 - one pipeline with conditionals:
-
-```rust
-impl PipelineConfig {
-    /// Use-case 1: Preprocessing + routing query only
-    /// Returns tokens and worker IDs without model execution
-    pub fn query_only() -> Self {
-        Self {
-            preprocessing: ProcessingLocation::Frontend, // Required
-            postprocessing: ProcessingLocation::Frontend, // Ignored for this mode
-            routing: RoutingBehavior::QueryOnly,
-            migration_enabled: false, // N/A for this mode
-        }
-    }
-    
-    /// Use-case 2: Execute with known workers
-    /// Workers are pre-selected, route directly to them
-    pub fn direct_execution() -> Self {
-        Self {
-            preprocessing: ProcessingLocation::Frontend,
-            postprocessing: ProcessingLocation::Frontend,
-            routing: RoutingBehavior::DirectToKnown,
-            migration_enabled: true,
-        }
-    }
-    
-    /// Use-case 3: Full discovery + execution (current default)
-    pub fn full_discovery() -> Self {
-        Self::default()
-    }
-}
+/// ... the rest of the cases. 
+To shrink the amount of boilerplate code we can define a macro that generates pipeline functions.
 ```
 
 CLI usage:
@@ -344,137 +306,85 @@ impl Operator<
 }
 ```
 
-Pipeline building function
+# Alternative / Stage 2 proposal.
+To preserve 1 pipeline we will have to resort to the type erasure / traits.
+The downsides are the loss of compile-time safety, bugs will become run-time errors.
+There is a performance overhead given the heap allocation and that every call to process() goes through a vtable lookup. But it can be considered negligible in the inference context?
 
 ```rust
-/// Components needed to build the pipeline
-pub struct PipelineComponents {
-    pub card: Arc<ModelDeploymentCard>,
-    pub tokenizer: HfTokenizer,
-    pub client: Client,
-    pub router: Arc<dyn WorkerRouter>,
-    pub metrics: Arc<Metrics>,
+// new trait for each stage
+
+pub trait DynStage: Send + Sync + 'static {
+    /// Process input, produce output stream
+    fn process(
+        &self,
+        input: DynRequest,
+    ) -> BoxFuture<'_, Result<BoxStream<'_, DynResponse>>>;
+
+    /// Optional backward edge for bidirectional stages
+    fn backward_edge(&self) -> Option<Arc<dyn DynStage>> {
+        None
+    }
 }
 
-/// Build a pipeline based on configuration
-pub async fn build_pipeline<Req, Resp>(
-    config: PipelineConfig,
-    components: PipelineComponents,
-) -> Result<ServiceEngine<SingleIn<Req>, ManyOut<Annotated<Resp>>>>
-where
-    Req: Data,
-    Resp: Data,
-{
-    // Validate configuration
-    validate_config(&config)?;
-    
-    let frontend = SegmentSource::<SingleIn<Req>, ManyOut<Annotated<Resp>>>::new();
-    
-    // Preprocessing (if frontend)
-    let preprocessor = if config.preprocessing == ProcessingLocation::Frontend {
-        let formatter = PromptFormatter::from_mdc(&components.card)?;
-        Some(OpenAIPreprocessor::new_with_parts(
-            (*components.card).clone(),
-            formatter,
-            components.tokenizer.clone(),
-        )?.into_operator())
-    } else {
-        None
-    };
-    
-    let backend_op = if config.preprocessing == ProcessingLocation::Frontend {
-        Some(Backend::from_tokenizer(components.tokenizer.clone()).into_operator())
-    } else {
-        None
-    };
-    
-    let migration = if config.migration_enabled 
-        && config.routing != RoutingBehavior::QueryOnly 
-    {
-        Some(Migration::from_mdc(&components.card, components.metrics.clone()).into_operator())
-    } else {
-        None
-    };
-    
-    let disagg = if config.routing != RoutingBehavior::QueryOnly {
-        Some(DisaggOrchestrator::new(
-            components.router.clone(),
-            components.client.clone(),
-        )?.into_operator())
-    } else {
-        None
-    };
-    
-    // Service backend (based on routing behavior)
-    let service_backend = match config.routing {
-        RoutingBehavior::QueryOnly => {
-            let query_backend = RouteQueryBackend::new(components.router.clone());
-            ServiceBackend::from_engine(Arc::new(query_backend))
-        }
-        RoutingBehavior::DirectToKnown => {
-            let transport = DirectTransport::new(components.client.clone()).await?;
-            ServiceBackend::from_engine(Arc::new(transport))
-        }
-        RoutingBehavior::Discover => {
-            let transport = RoutedTransport::new(
-                components.router.clone(),
-                components.client.clone(),
-            ).await?;
-            ServiceBackend::from_engine(Arc::new(transport))
-        }
-    };
-        
-    let mut pipeline = frontend.clone();
-    
-    // Forward edges
-    if let Some(ref pp) = preprocessor {
-        pipeline = pipeline.link(pp.forward_edge())?;
-    }
-    if let Some(ref be) = backend_op {
-        pipeline = pipeline.link(be.forward_edge())?;
-    }
-    if let Some(ref mig) = migration {
-        pipeline = pipeline.link(mig.forward_edge())?;
-    }
-    if let Some(ref dis) = disagg {
-        pipeline = pipeline.link(dis.forward_edge())?;
-    }
-    
-    pipeline = pipeline.link(service_backend)?;
-    
-    // Backward edges
-    if let Some(ref dis) = disagg {
-        pipeline = pipeline.link(dis.backward_edge())?;
-    }
-    if let Some(ref mig) = migration {
-        pipeline = pipeline.link(mig.backward_edge())?;
-    }
-    
-    if config.postprocessing == ProcessingLocation::Frontend {
-        if let Some(ref be) = backend_op {
-            pipeline = pipeline.link(be.backward_edge())?;
-        }
-    }
-    if let Some(ref pp) = preprocessor {
-        pipeline = pipeline.link(pp.backward_edge())?;
-    }
-    
-    Ok(pipeline.link(frontend)?)
+// This trait will have to be implemented for the OpenAIPreprocessor, KvPushRouter, Migration, Backend, PrefillRouter, 
+
+// Type-Erased Request/Response
+
+pub struct DynRequest(Box<dyn Any + Send>);
+pub struct DynResponse(Box<dyn Any + Send>);
+
+impl DynRequest {
+    pub fn new<T: Send + 'static>(value: T) -> Self { Self(Box::new(value)) }
+    pub fn downcast<T: 'static>(self) -> Result<T> { /* ... */ }
 }
 
-fn validate_config(config: &PipelineConfig) -> Result<()> {
-    // QueryOnly requires frontend preprocessing (need tokens for routing)
-    if config.routing == RoutingBehavior::QueryOnly 
-        && config.preprocessing == ProcessingLocation::Engine 
-    {
-        bail!(
-            "QueryOnly routing requires frontend preprocessing to extract tokens for routing. \
-             Set --preprocessing=frontend or use --routing=discover or --routing=direct."
-        );
+// Pipeline Builder
+
+pub struct DynPipelineBuilder {
+    stages: Vec<Arc<dyn DynStage>>,
+}
+
+// this will determine which steps go in which order. 
+impl DynPipelineBuilder {
+    pub fn new() -> Self { Self { stages: vec![] } }
+
+    pub fn add(mut self, stage: impl DynStage) -> Self {
+        self.stages.push(Arc::new(stage));
+        self
     }
-    
-    Ok(())
+
+    pub fn add_if(self, condition: bool, stage: impl DynStage) -> Self {
+        if condition { self.add(stage) } else { self }
+    }
+
+    pub fn build(self) -> Result<DynPipeline> {
+        // Links stages together, wires backward edges
+        Ok(DynPipeline { /* ... */ })
+    }
+}
+
+// The Built Pipeline 
+
+pub struct DynPipeline {
+    head: Arc<dyn DynStage>,
+}
+
+impl DynPipeline {
+    pub async fn execute(&self, req: DynRequest) -> Result<BoxStream<'_, DynResponse>> {
+        self.head.process(req).await
+    }
+}
+
+// Usage:
+pub async fn build_pipeline(config: &PipelineConfig) -> Result<DynPipeline> {
+    DynPipelineBuilder::new()
+        .add(ServiceFrontend::new())
+        .add_if(config.preprocessing == Frontend, OpenAIPreprocessor::new())
+        .add_if(config.routing == Discover, KvPushRouter::new())
+        .add_if(config.routing == Direct, DirectTransport::new())
+        .add_if(config.migration_enabled, Migration::new())
+        .add_if(config.postprocessing == Frontend, Backend::new())
+        .build()
 }
 ```
-
-
