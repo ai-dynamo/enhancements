@@ -40,7 +40,8 @@ The current ``build_routed_pipeline_with_preprocessor`` function in ``lib/llm/sr
 
 These limitations make it difficult to support new use-cases like:
 - Inference Gateway API approach
-- Clients who want to handle their own preprocessing / post processing in their modules or rely on Inference Engines. See this [https://github.com/ai-dynamo/enhancements/pull/50/changes#diff-d06f262c7a840682785ad441a3dcaef9ba9f6938bc0e71d1895c89874e7f4086R177]
+- Clients who want to handle their own preprocessing / post processing in their modules or rely on Inference Engines. See [`backend fallback` draft](https://github.com/ai-dynamo/enhancements/pull/50/changes#diff-d06f262c7a840682785ad441a3dcaef9ba9f6938bc0e71d1895c89874e7f4086R177)
+
 
 # Constraints
 - Preprocessing must always be in the frontend because KV cache routing requires tokens to calculate hashes for matching against indexer hashes from KV events.
@@ -103,10 +104,12 @@ The decision to use disaggregated (prefill + decode) vs aggregated serving **MUS
 # Proposal
 
 We propose replacing the current pipeline construction approach with a configuration-driven, single-function design. The function will take the PipelineConfig as a parameter with the following knobs:
+```md
 preprocessing: Dynamo 
 postprocessing: Dynamo | Engine     
 routing: QueryOnly | DirectToKnown | Discover 
 migration_enabled: bool    
+```
 
 The current pipeline architecture uses compile-time type chains where each .link() call returns a different type.
 The advantage is that it assures type safety and uses generics, concrete types rather than runtime polymorphism consistent with idiomatic rust.
