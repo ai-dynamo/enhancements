@@ -183,6 +183,111 @@ Planner requires K8s API access to:
 - GET/PATCH `DynamoGraphDeployment` resources
 - Read deployment status and replica counts
 
+## Service Interface & I/O Contract
+
+### Current Architecture
+
+The planner runs as an **autonomous control loop** with no REST/HTTP API for external control. It is not designed to receive requests - instead it:
+1. Polls metrics from Prometheus
+2. Makes scaling decisions internally
+3. Executes scaling via K8s API or etcd
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         PLANNER                                 │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
+│  │   Observe    │───►│   Predict    │───►│    Scale     │      │
+│  │   Metrics    │    │    Load      │    │   Workers    │      │
+│  └──────────────┘    └──────────────┘    └──────────────┘      │
+└─────────────────────────────────────────────────────────────────┘
+         ▲                                         │
+         │                                         ▼
+   ┌─────┴─────┐                           ┌──────────────┐
+   │Prometheus │                           │   K8s API    │
+   │  (pull)   │                           │  (DGD CRD)   │
+   └───────────┘                           └──────────────┘
+```
+
+### Inputs
+
+| Input | Source | Format | Notes |
+|-------|--------|--------|-------|
+| **CLI Arguments** | Startup | argparse | SLA targets, backend, intervals |
+| **Profile Results** | ConfigMap/Files | JSON files | Pre-computed performance interpolation data |
+| **Prometheus Metrics** | Pull from Prometheus | PromQL queries | TTFT, ITL, request rate, ISL, OSL |
+| **Worker State** | etcd (via DistributedRuntime) | KV watch | Worker instance IDs, endpoints |
+| **Deployment State** | K8s API | DGD CRD | Current replica counts |
+
+### Outputs
+
+| Output | Destination | Format | Notes |
+|--------|-------------|--------|-------|
+| **Scaling Decisions** | K8s API (KubernetesConnector) | DGD patch | `replicas` field updates |
+| **Scaling Decisions** | etcd (VirtualConnector) | KV put | `num_prefill_workers`, `num_decode_workers`, `decision_id` |
+| **Prometheus Metrics** | HTTP :9085 | Prometheus format | Observability only, not control |
+| **Logs** | stdout/stderr | Structured logs | Via `dynamo.runtime.logging` |
+
+### etcd Key Schema (VirtualConnector)
+
+```
+v1/{namespace}/planner/
+├── num_prefill_workers    # int: desired prefill replicas
+├── num_decode_workers     # int: desired decode replicas
+├── decision_id            # int: monotonic decision counter
+└── scaled_decision_id     # int: ack from client that scaling completed
+```
+
+### What's Missing (No External API)
+
+Currently there is **no way to**:
+- Query planner state via REST/gRPC
+- Override scaling decisions externally
+- Pause/resume the planner
+- Dynamically update SLA targets
+- Get scaling history/decisions
+- Integrate with external autoscalers
+
+### 1.0 Standardization Recommendations
+
+#### Option A: Add REST API (Recommended for Flexibility)
+
+```yaml
+# Proposed endpoints
+GET  /health              # Health check
+GET  /status              # Current state (workers, metrics, decisions)
+GET  /config              # Current configuration
+PUT  /config              # Update SLA targets dynamically
+POST /pause               # Pause scaling decisions
+POST /resume              # Resume scaling decisions
+GET  /decisions           # Scaling decision history
+POST /decisions/override  # Manual scaling override
+```
+
+#### Option B: Keep Control Loop, Standardize Observability
+
+If planner remains autonomous, standardize:
+1. **Prometheus metrics schema** - document all metrics, labels, types
+2. **etcd key schema** - version the key structure
+3. **Log format** - structured JSON with standard fields
+4. **ConfigMap schema** - versioned profile results format
+
+#### Option C: Event-Driven Architecture
+
+Replace polling with event-driven:
+1. **Input**: Subscribe to metric events (not poll)
+2. **Output**: Publish scaling events to message queue
+3. **Control**: Accept control commands via events
+
+### Contract Versioning Needs
+
+| Component | Current | 1.0 Requirement |
+|-----------|---------|-----------------|
+| CLI args | Undocumented | Versioned schema, deprecation policy |
+| Profile results format | Implicit | JSON schema, version field |
+| Prometheus metrics | `planner:*` prefix | Documented schema, stability guarantees |
+| etcd keys | `v1/{ns}/planner/` | Documented, versioned prefix |
+| K8s DGD spec | `componentType: planner` | Documented required fields |
+
 ## Observability
 
 ### Prometheus Metrics (prefix: `planner:`)
