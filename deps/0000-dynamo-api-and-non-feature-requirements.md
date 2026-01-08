@@ -64,8 +64,9 @@ Cover projects related to but not directly in the core dynamo repo.
 
 For dynamo 1.0 each of the following is considered a separate reusable unit and will have its own set of documentation and tests.
 
-| Component | Purpose | Languages | Application | Interfaces | 
-----
+| Component | Purpose | Languages | Application | Interfaces |
+|-----------|---------|-----------|-------------|------------|
+|           |         |           |             |            |
 
 **TBD** - Describe the high level design / proposal. Use sub sections as needed, but start with an overview and then dig into the details. Try to provide images and diagrams to facilitate understanding.
 
