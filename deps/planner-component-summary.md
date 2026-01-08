@@ -218,6 +218,120 @@ Pre-built dashboard available: `deploy/observability/k8s/grafana-planner-dashboa
 | Logging | Uses `dynamo.runtime.logging` | Consistent log levels/formats |
 | Versioning | Part of `ai-dynamo` package | Independent versioning? |
 
+## Customization & Extension
+
+### Extension Points
+
+#### 1. Custom PlannerConnector (New Deployment Environments)
+
+Implement `PlannerConnector` ABC to support new deployment environments (e.g., cloud-specific APIs, custom orchestrators):
+
+```python
+from dynamo.planner.planner_connector import PlannerConnector
+
+class MyCustomConnector(PlannerConnector):
+    async def add_component(self, sub_component_type, blocking=True):
+        # Custom scaling logic for your environment
+        pass
+
+    async def remove_component(self, sub_component_type, blocking=True):
+        # Custom scaling logic for your environment
+        pass
+```
+
+**Existing implementations:**
+- `KubernetesConnector` - Scales via K8s DynamoGraphDeployment API
+- `VirtualConnector` - Coordinates via etcd for non-K8s environments
+
+#### 2. Custom Load Predictor (Scaling Algorithms)
+
+Implement `BasePredictor` ABC to add custom load prediction algorithms:
+
+```python
+from dynamo.planner.utils.load_predictor import BasePredictor, LOAD_PREDICTORS
+
+class MyCustomPredictor(BasePredictor):
+    def __init__(self, **kwargs):
+        super().__init__(minimum_data_points=5)
+
+    def predict_next(self):
+        # Custom prediction logic
+        if len(self.data_buffer) < self.minimum_data_points:
+            return self.get_last_value()
+        # Your prediction algorithm here
+        return predicted_value
+
+# Register the predictor
+LOAD_PREDICTORS["my_predictor"] = MyCustomPredictor
+```
+
+**Built-in predictors:**
+| Predictor | Description | Use Case |
+|-----------|-------------|----------|
+| `constant` | Returns last observed value | Stable workloads |
+| `arima` | Auto ARIMA time-series model | Variable workloads with patterns |
+| `prophet` | Meta's Prophet forecasting | Complex seasonal patterns |
+
+#### 3. Configuration Tuning
+
+**CLI Arguments** (pass via DGD spec `args`):
+```bash
+python -m planner_sla \
+  --environment kubernetes \
+  --backend vllm \
+  --adjustment-interval 60 \
+  --ttft 500 \
+  --itl 50 \
+  --load-predictor arima \
+  --min-endpoint 1 \
+  --max-gpu-budget 8
+```
+
+**Environment Variables:**
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DYN_NAMESPACE` | Dynamo namespace | `dynamo` |
+| `PROMETHEUS_ENDPOINT` | Prometheus server URL | Cluster default |
+| `PLANNER_PROMETHEUS_PORT` | Port for planner metrics | `9085` |
+| `SCALING_CHECK_INTERVAL` | Scaling readiness check interval (VirtualConnector) | `10` |
+| `SCALING_MAX_WAIT_TIME` | Max wait for scaling (VirtualConnector) | `1800` |
+
+#### 4. Custom Metrics Source
+
+The planner queries Prometheus for metrics. To customize metrics:
+
+1. **Use different metric names**: Modify `dynamo.prometheus_names` constants
+2. **Add custom metrics**: Expose additional Prometheus metrics from workers
+3. **Alternative metric source**: Implement custom `MetricSource` in `planner/utils/prometheus.py`
+
+### Current Limitations (Not Easily Extensible)
+
+| Area | Limitation | Workaround |
+|------|------------|------------|
+| Scaling algorithm | Core logic in `planner_core.py` is not pluggable | Fork and modify |
+| Component types | Hardcoded to PREFILL/DECODE | Modify `SubComponentType` enum |
+| Profiling format | Expects specific profile results format | Match expected schema |
+| Backend names | Hardcoded in `WORKER_COMPONENT_NAMES` | Add to dict |
+
+### Adding a New Backend
+
+To support a new inference backend (beyond vLLM, SGLang, TRT-LLM):
+
+1. Add component names to `defaults.py`:
+```python
+class MyBackendComponentName:
+    prefill_worker_k8s_name = "MyBackendPrefillWorker"
+    prefill_worker_component_name = "prefill"
+    prefill_worker_endpoint = "generate"
+    decode_worker_k8s_name = "MyBackendDecodeWorker"
+    decode_worker_component_name = "backend"
+    decode_worker_endpoint = "generate"
+
+WORKER_COMPONENT_NAMES["mybackend"] = MyBackendComponentName
+```
+
+2. Use `--backend mybackend` when launching planner
+
 ## Related Documentation
 
 - [Planner Introduction](docs/planner/planner_intro.rst)
