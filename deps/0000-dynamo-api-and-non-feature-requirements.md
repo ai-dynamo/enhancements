@@ -62,11 +62,24 @@ Cover projects related to but not directly in the core dynamo repo.
 
 ## Component Registry
 
-For dynamo 1.0 each of the following is considered a separate reusable unit and will have its own set of documentation and tests.
+For dynamo 1.0 each of the following is considered a separate reusable unit and will have its own set of interfaces, documentation and tests.
 
-| Component | Purpose | Languages | Application | Interfaces |
-|-----------|---------|-----------|-------------|------------|
-|           |         |           |             |            |
+| Component | Purpose | Languages | Application | Interfaces | Packages | Containers | PIC |
+|-----------|---------|-----------|-------------|------------|----------|------------|-----|
+| Planner | | Python | components/src/dynamo/planner | | | | |
+| KV Router | | Python | components/src/dynamo/router | | | | |
+| Frontend | Tiny | Python | components/src/dynamo/frontend | | | | |
+| Backend vLLM | Python wrapper for vLLM | Python | components/src/dynamo/vllm | | | | |
+| Backend SGLang | Python wrapper for SGLang | Python | components/src/dynamo/sglang | | | | |
+| Backend TRT-LLM | Python wrapper for TRT-LLM | Python | components/src/dynamo/trtllm | | | | |
+| Python Bindings | Bindings for dynamo-llm and dynamo-runtime | Python, Rust | lib/bindings/python | | | | |
+| C Bindings | | Rust, C | lib/bindings/c | | | | |
+| Core Libraries | | Rust | lib/llm, lib/parsers, lib/runtime | | | | |
+| KVBM | KV Block Manager | Rust, Python | lib/llm/src/block_manager, lib/bindings/kvbm | | | | |
+| Deployment | | Go, YAML | deploy/ | | | | |
+| Recipes | | YAML, JSON, Python | recipes/ | | | | SA / DevEx |
+| Examples | | YAML, JSON, Python | examples/ | | | | SA / DevEx |
+| Benchmarks | | YAML, JSON, Python | benchmarks/ | | | | SA / DevEx |
 
 **TBD** - Describe the high level design / proposal. Use sub sections as needed, but start with an overview and then dig into the details. Try to provide images and diagrams to facilitate understanding.
 
