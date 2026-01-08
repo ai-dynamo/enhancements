@@ -22,11 +22,11 @@
 
 # Summary
 
-Define the API stability guarantees, component and module boundaries, and non-feature requirements (tracing, logging, observability, naming, testing) for Dynamo 1.0 GA release.
+Define the API stability guarantees, component and module boundaries, and non-feature requirements (tracing, logging, observability, naming, testing, documentation) for Dynamo 1.0 GA release.
 
 # Motivation
 
-As Dynamo enters GA we want to clearly articulate what "1.0" implies in terms of API stability, component and module boundaries, and any other non feature requirements (tracing, logging, observability, naming, testing requirements).
+As Dynamo enters GA we want to clearly articulate what "1.0" implies in terms of API stability, component and module boundaries, and any other non feature requirements (tracing, logging, observability, naming, documentation, testing requirements).
 
 These will underlie a basic contract that we can continue to evolve.
 
@@ -62,7 +62,10 @@ Cover projects related to but not directly in the core dynamo repo.
 
 ## Component Registry
 
-For dynamo 1.0 each of the following is considered a separate reusable unit and will have its own set of tests.
+For dynamo 1.0 each of the following is considered a separate reusable unit and will have its own set of documentation and tests.
+
+| Component | Purpose | Languages | Application | Interfaces | 
+----
 
 **TBD** - Describe the high level design / proposal. Use sub sections as needed, but start with an overview and then dig into the details. Try to provide images and diagrams to facilitate understanding.
 
