@@ -11,6 +11,89 @@ The KV Router provides intelligent KV cache-aware routing for LLM inference requ
 - **Package**: `ai-dynamo` (part of main package)
 - **Current Version**: 0.8.0
 
+## Components That Call Router
+
+The KV Router is a central orchestration component. Here are all components that interact with it:
+
+### Callers (Request Routing)
+
+| Component | File | Interaction |
+|-----------|------|-------------|
+| **Frontend** | `components/src/dynamo/frontend/main.py` | Primary caller - embeds router for request dispatch |
+| **Standalone Router** | `components/src/dynamo/router/__main__.py` | Dedicated routing service using `KvPushRouter` |
+
+### Publishers (KV Events & Metrics)
+
+| Component | File | Events Published |
+|-----------|------|------------------|
+| **vLLM Worker** | `components/src/dynamo/vllm/publisher.py` | KV block events, worker metrics, cache stats |
+| **TRT-LLM Worker** | `components/src/dynamo/trtllm/publisher.py` | `BlockStored`, `BlockRemoved`, `AllBlocksCleared` |
+| **SGLang Worker** | `components/src/dynamo/sglang/publisher.py` | KV events via ZMQ, worker metrics |
+| **Mocker Worker** | `components/src/dynamo/mocker/` | Mock KV events for testing |
+
+### Configuration Providers
+
+| Component | File | Configuration |
+|-----------|------|---------------|
+| **Frontend CLI** | `components/src/dynamo/frontend/main.py` | `--router-mode`, `--kv-overlap-score-weight`, etc. |
+| **Python Bindings** | `lib/bindings/python/src/dynamo/llm/__init__.py` | Exports `KvRouterConfig`, `RouterConfig`, `RouterMode` |
+
+### Interaction Flow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         REQUEST FLOW                                 │
+│                                                                      │
+│   HTTP Request                                                       │
+│        │                                                             │
+│        ▼                                                             │
+│   ┌─────────┐    KvPushRouter.generate()    ┌──────────────┐        │
+│   │Frontend │ ─────────────────────────────►│  KV Router   │        │
+│   └─────────┘                               │  (Rust Core) │        │
+│                                             └──────┬───────┘        │
+│                                                    │                 │
+│                         ┌──────────────────────────┼────────────┐   │
+│                         ▼                          ▼            ▼   │
+│                   ┌──────────┐              ┌──────────┐  ┌────────┐│
+│                   │vLLM      │              │TRT-LLM   │  │SGLang  ││
+│                   │Worker    │              │Worker    │  │Worker  ││
+│                   └────┬─────┘              └────┬─────┘  └───┬────┘│
+│                        │                         │            │     │
+└────────────────────────┼─────────────────────────┼────────────┼─────┘
+                         │                         │            │
+┌────────────────────────┼─────────────────────────┼────────────┼─────┐
+│                        ▼          EVENT FLOW     ▼            ▼     │
+│                   ┌─────────────────────────────────────────────┐   │
+│                   │           NATS JetStream                    │   │
+│                   │     (KV Events: BlockStored, BlockRemoved)  │   │
+│                   └─────────────────────┬───────────────────────┘   │
+│                                         │                           │
+│                                         ▼                           │
+│                                   ┌──────────────┐                  │
+│                                   │  KV Router   │                  │
+│                                   │  (Indexer)   │                  │
+│                                   └──────────────┘                  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Router Methods Called
+
+| Method | Caller | Purpose |
+|--------|--------|---------|
+| `KvPushRouter.generate_from_request()` | Frontend, Standalone Router | Route request and stream response |
+| `KvPushRouter.best_worker_id()` | Standalone Router | Query best worker without routing |
+| `KvRouterConfig()` | Frontend, Standalone Router | Configure routing behavior |
+
+### Worker Registration Flags
+
+Workers register their type with the router via CLI flags:
+
+| Flag | Worker Types | Effect on Router |
+|------|--------------|------------------|
+| `--is-prefill-worker` | vLLM, TRT-LLM, SGLang, Mocker | Router knows worker handles prefill only |
+| `--is-decode-worker` | vLLM, TRT-LLM, SGLang, Mocker | Router knows worker handles decode only |
+| `--enable-local-indexer` | All workers | Worker maintains local KV index |
+
 ## Internal Dependencies
 
 ### Dynamo Python Modules
