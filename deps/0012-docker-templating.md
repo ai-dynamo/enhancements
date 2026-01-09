@@ -34,37 +34,51 @@ Dockerfile templating is a solution meant to replace the `container/build.sh` sc
   - `build.sh` is a glorified wrapper script around the `docker build` command, most of what it does is append `--build-arg`s
     - ie `container/build.sh <args>` always results in a `docker build <args>` with no additional value add, its 95% conditional variable declarations
     - Additionally, if we ever want to use more `docker build` features, we have to re-implement them in `build.sh`
+  - The order of how things are defined actually matters
+    - Adding a new argument too early in the script could break things after it
+    - Adding it too early in the script could break things that may have required it earlier.
+    - Keeping track of the order is unnecessarily confusing, and massively slows down development
+- `build.sh` structure allows developers add things in various, chaotic ways
+  - Dockerfile arguments are spread across various layers of abstraction
+    - Some args are defined in CI workflows, by passing additional `--build-args` to `build.sh`
+    - Some args are defined in `build.sh`, sometimes within deep logical `if` statements
+    - Some args just use the default of what is in the `Dockerfile` being referenced
+  - Sometimes `build.sh` isn't even updated, so it doesn't function as source of truth anymore (which was its original purpose)
 - Sets us up for better expansion in the future
   - Simple way to support slightly different layers based on configuration
     - For example, for more OS support... `RUN apt-get install` for Ubuntu, and `RUN dnf install` for CentOS
 
-## Goals
+# Goals
 
-* Remove the need of `build.sh` completely
+* Bring structure to chaos
 
-* Extract `docker build` from the process, allow it to function on its own
+* Declarative > Imperative implementation
 
-* Declarative, easy to follow solution
+* Reduce mental load when implementing new features
+
+* Removes redundancy in current Dockerfiles
+
+* Improve extensibility
 
 
 # Proposal
 
 ## Key Components
 
-- `config.yaml` (~about ~90 lines)
+- `context.yaml` (~about ~90 lines) [Link to File](https://github.com/ai-dynamo/dynamo/blob/poc-dockerfile-templating/container/context.yaml)
   - Source of truth for all Dockerfile ARGs upon generation
   - Dictionary data structure for sorting, everything in one place
-- `render.py` (~60 lines)
+- `render.py` (~60 lines) [Link to File](https://github.com/ai-dynamo/dynamo/blob/poc-dockerfile-templating/container/render.py)
   - Short python script with minimal arguments
     - ie. framework, platform, target, cuda_ver, OS, etc
-- `templates/` (lines N/A)
+- `templates/` (lines N/A) [Link to Folder](https://github.com/ai-dynamo/dynamo/tree/poc-dockerfile-templating/container/templates)
   - Folder of templates that represent docker stages (such as our `wheel_builder` stage)
   - Current list
     - wheel_builder
     - {trtllm, vllm, sglang} frameworks
     - {trtllm, vllm, sglang} ruintime
     - dev
-- `Dockerfile.template` (30 lines)
+- `Dockerfile.template` (30 lines) [Link to File](https://github.com/ai-dynamo/dynamo/blob/poc-dockerfile-templating/container/Dockerfile.template)
   - File that determines the stage templates to include based on args passed to render.py
   - Should never be long... >100 lines
 
@@ -75,9 +89,9 @@ NOTE: Notice, `build.sh` 1000+ lines is being replaced by a total of <200 lines.
 | File | Frequency | Conditions |
 | --- | --- | --- |
 | `config.yaml` | Often, expected | Changes to ARGs<br/>Change to Support Matrix |
-| `render.py` | Very rare, only functional changes | QoL improvements for CI (informational)<br/>New support matrix keys (OS, CUDA, etc) |
 | `templates/` | Often, expected | Adding layers, changing layers, etc (same as Dockerfile) |
 | `Dockerfile.template` | Rare, major structural changes | Changing order of stages<br/>Removal or additional of stages to structure |
+| `render.py` | Very rare, only functional changes | QoL improvements for CI (informational)<br/>New support matrix keys (OS, CUDA, etc) |
 
 # Previous Concerns
 
