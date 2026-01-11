@@ -62,22 +62,71 @@ The Frontend is Dynamo's HTTP entry point providing OpenAI-compatible API endpoi
 
 ### CLI Arguments
 
+See [DEP: Frontend CLI Formalization](0000-frontend-cli-formalization.md) for complete analysis.
+
 **Server Configuration:**
-- `--http-host` (default: `0.0.0.0`)
-- `--http-port` (default: `8000`)
-- `--tls-cert-path`, `--tls-key-path` - TLS configuration
-- `--namespace` - Scope model discovery
+
+| Argument | Default | Env Var | Notes |
+|----------|---------|---------|-------|
+| `--http-host` | `0.0.0.0` | `DYN_HTTP_HOST` | Listen address |
+| `--http-port` | `8000` | `DYN_HTTP_PORT` | Listen port |
+| `--tls-cert-path` | None | `DYN_TLS_CERT_PATH` | TLS certificate |
+| `--tls-key-path` | None | `DYN_TLS_KEY_PATH` | TLS key (mutual with cert) |
+
+**Model Configuration:**
+
+| Argument | Default | Env Var | Notes |
+|----------|---------|---------|-------|
+| `--model-name` | None | - | Model identifier |
+| `--model-path` | None | - | Local model directory |
+| `--namespace` | None | `DYN_NAMESPACE` | Discovery namespace |
 
 **Router Configuration:**
-- `--router-mode` - `round-robin`, `random`, `kv`
-- `--kv-overlap-score-weight` - KV cache reuse weight
-- `--router-temperature` - Worker selection randomness
-- `--no-kv-events` - Disable KV event tracking
-- `--router-replica-sync` - Multi-replica synchronization
+
+| Argument | Default | Env Var | Notes |
+|----------|---------|---------|-------|
+| `--router-mode` | `round-robin` | `DYN_ROUTER_MODE` | `round-robin`, `random`, `kv` |
+| `--kv-cache-block-size` | None | `DYN_KV_CACHE_BLOCK_SIZE` | KV mode only |
+| `--kv-overlap-score-weight` | `1.0` | `DYN_KV_OVERLAP_SCORE_WEIGHT` | Cache reuse weight |
+| `--router-temperature` | `0.0` | `DYN_ROUTER_TEMPERATURE` | Selection randomness (0-1) |
+| `--kv-events/--no-kv-events` | True | `DYN_KV_EVENTS` | Event tracking |
+| `--router-ttl` | `120.0` | `DYN_ROUTER_TTL` | Block TTL (no-events mode) |
+| `--router-replica-sync` | False | `DYN_ROUTER_REPLICA_SYNC` | Multi-replica sync |
+| `--router-snapshot-threshold` | 1000000 | `DYN_ROUTER_SNAPSHOT_THRESHOLD` | Snapshot interval |
+| `--router-reset-states` | False | `DYN_ROUTER_RESET_STATES` | Reset on startup |
+| `--track-active-blocks` | True | `DYN_ROUTER_TRACK_ACTIVE_BLOCKS` | Track active blocks |
+
+**Worker Load Detection:**
+
+| Argument | Default | Env Var | Notes |
+|----------|---------|---------|-------|
+| `--active-decode-blocks-threshold` | None | `DYN_ACTIVE_DECODE_BLOCKS_THRESHOLD` | Busy threshold (0-1) |
+| `--active-prefill-tokens-threshold` | None | `DYN_ACTIVE_PREFILL_TOKENS_THRESHOLD` | Token threshold |
+
+**Metrics & Observability:**
+
+| Argument | Default | Env Var | Notes |
+|----------|---------|---------|-------|
+| `--metrics-prefix` | None | `DYN_METRICS_PREFIX` | Metrics name prefix |
+| `--kserve-grpc-server` | False | `DYN_KSERVE_GRPC_SERVER` | Enable gRPC server |
+| `--grpc-metrics-port` | `8788` | `DYN_GRPC_METRICS_PORT` | gRPC metrics port |
+| `--custom-backend-metrics-endpoint` | `nim.backend.runtime_stats` | `CUSTOM_BACKEND_ENDPOINT` | Backend metrics |
+| `--custom-backend-metrics-polling-interval` | `0` | `CUSTOM_BACKEND_METRICS_POLLING_INTERVAL` | Poll interval |
 
 **Backend Configuration:**
-- `--request-plane` - `tcp`, `http`, `nats`
-- `--store-kv` - `etcd`, `file`, `mem`
+
+| Argument | Default | Env Var | Notes |
+|----------|---------|---------|-------|
+| `--store-kv` | `etcd` | `DYN_STORE_KV` | `etcd`, `file`, `mem` |
+| `--request-plane` | `tcp` | `DYN_REQUEST_PLANE` | `tcp`, `http`, `nats` |
+
+**General:**
+
+| Argument | Default | Notes |
+|----------|---------|-------|
+| `--interactive`, `-i` | False | Interactive mode |
+| `--exp-python-factory` | False | [EXPERIMENTAL] Python engine |
+| `--dump-config-to` | None | Dump configuration |
 
 ## User/Developer Interaction
 
@@ -216,6 +265,69 @@ Structured logging via `dynamo.runtime.logging`:
 | Metrics | `dynamo_frontend_*` | Document all metrics, labels |
 | Error responses | Basic | Standardize error codes/messages |
 | API extensions | Ad-hoc | Document Dynamo-specific headers |
+
+---
+
+## CLI Formalization Requirements
+
+See [DEP: Frontend CLI Formalization](0000-frontend-cli-formalization.md) for complete details.
+
+### Critical Issues (31 arguments)
+
+| Category | Issue | Impact |
+|----------|-------|--------|
+| **Missing Validation** | 15+ args lack range/bounds checks | Silent failures, runtime errors |
+| **Missing Env Vars** | 10+ args without `DYN_*` support | K8s deployments limited |
+| **Inconsistent Booleans** | Mix of `store_true` and `BooleanOptionalAction` | UX confusion |
+| **Implicit Dependencies** | KV args accepted in non-KV modes | Invalid configs |
+| **No Argument Groups** | 31 args in flat list | Poor discoverability |
+
+### Validation Requirements
+
+| Type | Arguments | Validation |
+|------|-----------|------------|
+| Port range | `--http-port`, `--grpc-metrics-port` | 1-65535 |
+| Float [0,1] | `--router-temperature`, `--router-prune-target-ratio`, `--active-decode-blocks-threshold` | 0.0-1.0 |
+| Positive | `--router-ttl`, `--router-max-tree-size`, `--router-snapshot-threshold`, `--kv-cache-block-size` | >0 |
+| Non-negative | `--kv-overlap-score-weight`, `--custom-backend-metrics-polling-interval` | ≥0 |
+| Mode check | 10+ KV router args | Only with `--router-mode=kv` |
+
+### Missing Environment Variables
+
+| Argument | Proposed Env Var |
+|----------|------------------|
+| `--tls-cert-path` | `DYN_TLS_CERT_PATH` |
+| `--tls-key-path` | `DYN_TLS_KEY_PATH` |
+| `--router-replica-sync` | `DYN_ROUTER_REPLICA_SYNC` |
+| `--router-snapshot-threshold` | `DYN_ROUTER_SNAPSHOT_THRESHOLD` |
+| `--router-reset-states` | `DYN_ROUTER_RESET_STATES` |
+| `--track-active-blocks` | `DYN_ROUTER_TRACK_ACTIVE_BLOCKS` |
+| `--active-decode-blocks-threshold` | `DYN_ACTIVE_DECODE_BLOCKS_THRESHOLD` |
+| `--active-prefill-tokens-threshold` | `DYN_ACTIVE_PREFILL_TOKENS_THRESHOLD` |
+| `--kserve-grpc-server` | `DYN_KSERVE_GRPC_SERVER` |
+| `--grpc-metrics-port` | `DYN_GRPC_METRICS_PORT` |
+
+### Proposed Argument Groups
+
+```
+HTTP Server (4 args)
+Model Configuration (3 args)
+Request Routing (1 arg)
+KV Router Options (3 args) - requires --router-mode=kv
+Router Tuning (7 args)
+Worker Load Detection (2 args)
+Metrics & Observability (5 args)
+Backend Configuration (2 args)
+Experimental (1 arg)
+General (3 args)
+```
+
+### Implementation Priority
+
+1. **Phase 1 (Critical)**: Add validation, mode dependency checks
+2. **Phase 2**: Add missing environment variables
+3. **Phase 3**: Standardize booleans, add argument groups
+4. **Phase 4**: Documentation generation from argparse
 
 ## Customization & Extension
 
