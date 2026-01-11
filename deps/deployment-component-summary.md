@@ -269,6 +269,114 @@ Structured logging via `klog`:
 | Multi-tenancy | Namespace-scoped | Document isolation guarantees |
 | Resource quotas | Basic | Enhanced quota management |
 
+---
+
+## API Formalization Requirements
+
+See [DEP: Kubernetes API Formalization](0000-kubernetes-api-formalization.md) for complete details.
+
+### CRD Field Stability Matrix
+
+#### DynamoGraphDeployment (DGD)
+
+| Field | Stability | Notes |
+|-------|-----------|-------|
+| `spec.backendFramework` | Must stabilize | Enum: vllm, sglang, trtllm |
+| `spec.services` | Must stabilize | Max 25 items |
+| `spec.pvcs` | Must stabilize | Max 100 items |
+| `status.state` | Must stabilize | Lifecycle states |
+| `status.services` | Must stabilize | ServiceReplicaStatus with componentKind |
+
+#### DynamoComponentDeployment (DCD)
+
+| Field | Stability | Notes |
+|-------|-----------|-------|
+| `spec.componentType` | Must stabilize | planner, frontend, worker |
+| `spec.subComponentType` | Must stabilize | prefill, decode |
+| `spec.scalingAdapter` | Must stabilize | DGDSA ownership |
+| `spec.multinode` | Must stabilize | NodeCount (min 2) |
+| `spec.ingress` | Must stabilize | TLS, VirtualService |
+| `spec.modelRef` | Must stabilize | Model discovery binding |
+| `spec.autoscaling` | **Deprecated** | Use DGDSA instead |
+| `spec.dynamoNamespace` | **Deprecated** | Implicit from DGD |
+
+#### DynamoGraphDeploymentRequest (DGDR)
+
+| Field | Stability | Notes |
+|-------|-----------|-------|
+| `spec.profilingConfig` | Must stabilize | Needs JSON Schema |
+| `spec.deploymentOverrides` | Must stabilize | DGD customization |
+| `status.generatedDeployment` | Must stabilize | RawExtension |
+
+#### DynamoGraphDeploymentScalingAdapter (DGDSA)
+
+| Field | Stability | Notes |
+|-------|-----------|-------|
+| `/scale` subresource | Must stabilize | HPA/KEDA compatibility |
+| `status.selector` | Stable | For HPA |
+
+#### DynamoModel (DM)
+
+| Field | Stability | Notes |
+|-------|-----------|-------|
+| `spec.modelType` | Must stabilize | Enum: base, lora, adapter |
+| `spec.source.uri` | Must stabilize | s3://, hf:// format |
+| `status.endpoints` | Must stabilize | Pod discovery protocol |
+
+### Kubernetes Labels Registry
+
+**Namespace**: `nvidia.com/`
+
+| Label | Purpose | Set By |
+|-------|---------|--------|
+| `nvidia.com/selector` | Component selection | Operator |
+| `nvidia.com/dynamo-graph-deployment-name` | DGD identity | Operator |
+| `nvidia.com/dynamo-component` | Component name | Operator |
+| `nvidia.com/dynamo-namespace` | Dynamo namespace | Operator |
+| `nvidia.com/dynamo-component-type` | planner/frontend/worker | Operator |
+| `nvidia.com/dynamo-sub-component-type` | prefill/decode | Operator |
+| `nvidia.com/dynamo-base-model` | Model identifier | Operator |
+| `nvidia.com/dynamo-discovery-backend` | kubernetes/etcd | Operator |
+| `nvidia.com/metrics-enabled` | Enable metrics | User |
+| `nvidia.com/kai-scheduler-queue` | Kai scheduler queue | User |
+
+### Service Port Registry
+
+| Port | Name | Purpose | Owner |
+|------|------|---------|-------|
+| 8000 | http | Main service (DYNAMO_PORT) | All |
+| 9085 | metrics | Planner Prometheus | Planner |
+| 9090 | system | Health/admin | All |
+| 2222 | ssh | MPI multi-node | Workers |
+
+### Environment Variable Contracts
+
+| Variable | Scope | Format | Purpose |
+|----------|-------|--------|---------|
+| `DYN_DEPLOYMENT_CONFIG` | Component | YAML | Deployment config |
+| `DYN_NAMESPACE` | Component | String | Dynamo namespace |
+| `DYN_COMPONENT` | Component | String | Component name |
+| `DYN_DISCOVERY_BACKEND` | Component | Enum | kubernetes/etcd |
+| `DYNAMO_PORT` | Component | Integer | Service port |
+| `PROMETHEUS_ENDPOINT` | Operator | URL | Metrics endpoint |
+
+### Version Graduation Path
+
+```
+v1alpha1 (current) → v1beta1 (stabilized) → v1 (GA)
+```
+
+**Before v1beta1:**
+- Lock all `Must stabilize` fields
+- JSON Schemas for profilingConfig, deploymentOverrides
+- Label and port registries documented
+- Webhook validation for required fields
+
+**Before v1:**
+- Deprecation policy enforced 2+ releases
+- Conversion webhooks v1alpha1 → v1
+- Full API reference documentation
+
 ## Customization & Extension
 
 ### Extension Points
