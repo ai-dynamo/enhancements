@@ -329,6 +329,76 @@ General (3 args)
 3. **Phase 3**: Standardize booleans, add argument groups
 4. **Phase 4**: Documentation generation from argparse
 
+---
+
+## Backend Contract Enforcement
+
+See [DEP: Backend-Frontend Contract](0000-backend-frontend-contract.md) for complete details.
+
+### Contract Enforcement Layers
+
+| Layer | Location | Enforcement | Coverage |
+|-------|----------|-------------|----------|
+| HTTP Validation | `lib/llm/src/http/service/validate.rs` | 25+ validators | **Strong** |
+| Protocol (Serde) | `lib/llm/src/protocols/` | Type deserialization | Partial |
+| Python Bridge | `handlers.py` | `Dict[str, Any]` | **None** |
+| Response | `BackendOutput` | Structure only | Minimal |
+
+### Critical Gap: Python Bridge
+
+```
+Frontend (Rust)                    Backend (Python)
+PreprocessedRequest  ──────────►  Dict[str, Any]
+(typed struct)                    (no type safety)
+```
+
+**Current code** (`handlers.py`):
+```python
+for key, value in request["sampling_options"].items():
+    if hasattr(sampling_params, key):
+        setattr(sampling_params, key, value)  # NO TYPE CHECK
+```
+
+### What IS Validated (Rust HTTP Layer)
+
+| Parameter | Validation | Range |
+|-----------|------------|-------|
+| temperature | `validate_temperature()` | 0.0 - 2.0 |
+| top_p | `validate_top_p()` | 0.0 - 1.0 |
+| top_k | `validate_top_k()` | -1 or ≥1 |
+| frequency_penalty | `validate_frequency_penalty()` | -2.0 - 2.0 |
+| presence_penalty | `validate_presence_penalty()` | -2.0 - 2.0 |
+| n | `validate_n()` | 1 - 128 |
+| stop | `validate_stop()` | max 4, non-empty |
+| messages | `validate_messages()` | non-empty array |
+| unknown fields | `validate_no_unsupported_fields()` | rejected |
+
+### What is NOT Validated
+
+| Gap | Impact |
+|-----|--------|
+| Python receives `Dict[str, Any]` | Type mismatches propagate silently |
+| No capability negotiation | Wrong backend can claim model support |
+| Response token IDs not validated | Invalid IDs can panic |
+| No version negotiation | Future incompatibility undetected |
+
+### Request/Response Schema Locations
+
+| Schema | Location |
+|--------|----------|
+| Chat Completions | `lib/llm/src/protocols/openai/chat_completions.rs` |
+| Common Extensions | `lib/llm/src/protocols/openai/common_ext.rs` |
+| NVIDIA Extensions | `lib/llm/src/protocols/openai/nvext.rs` |
+| Backend Output | `lib/llm/src/protocols/common/llm_backend.rs` |
+| KServe Proto | `lib/llm/src/grpc/protos/kserve.proto` |
+
+### Formalization Requirements
+
+1. **Add Pydantic models** to Python handlers for type safety
+2. **Add capability declaration** to worker registration
+3. **Add response validation** for semantic correctness
+4. **Add protocol versioning** headers
+
 ## Customization & Extension
 
 ### Extension Points
