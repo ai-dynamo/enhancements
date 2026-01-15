@@ -22,158 +22,45 @@
 
 # Summary
 
-This proposal calls for a modular, configuration-driven pipeline architecture for the Dynamo frontend. Instead of the current monolithic ``build_routed_pipeline_with_preprocessor`` function and complex internal branching, we propose:
-- Independent configuration knobs for preprocessing location, postprocessing location, routing behavior, and migration
-- A single build_pipeline(config, components) function that assembles pipeline segments based on configuration
-- Separation of concerns between worker routing decisions and disaggregated prefill/decode orchestration
-- Support for three primary use-cases: query-only mode (GAIE EPP stage 1), direct-to-known-workers mode (GAIE stage 2), and full discovery mode (dynamo default)
+This proposal calls for the option of using a third party router in Dynamo. The first use case is EPP. 
 
 # Motivation
 
-The current ``build_routed_pipeline_with_preprocessor`` function in ``lib/llm/src/entrypoint/input/common.rs`` has grown to handle multiple concerns in a tightly-coupled manner:
-- Preprocessing is always in the frontend: There is no clean way to skip frontend preprocessing when the engine backend handles its own tokenization and prompt formatting.
-- Routing logic is scattered: The decision to route to a specific worker is controlled through backend_instance_id in annotations/routing hints, which is not elegant. The RouterMode::Direct(instance_id) can be configured during the pipeline construction time, not per-request.
-- PrefillRouter does too much: It handles prefill/decode orchestration, GAIE Stage 1/2 state machine, bootstrap info discovery, worker selection, and fallback to aggregated mode - all in one component. In the llm-d and the architecture adopted by the Inference Gateway the decode worker calls prefill in a dedicated sidecar, not in the routing module.
-- No query-only mode: There is no clean way to run only preprocessing + routing decisions. It is handled by an annotation flag and a short-circut. 
-- The pipeline conflates routing selection with request processing.
+The current ``build_routed_pipeline_with_preprocessor` function in `lib/llm/src/entrypoint/input/common.rs` conflates routing selection with request processing when used with a 3rd party router (i.e. GAIE EPP).
+The decision to route to a specific worker is controlled through backend_instance_id in annotations/routing hints.
+When GAIE EPP determines routing it calls this pipeline with the `query_instance_id` annotation and the pipeline determines the workers and short-circutes without serving the request.
+When GAIE serves this request this pipeline is called again. The router looks for the hints and if present, routes there instead of figuring out the workers. The presence of these hints is used as a signal not to figure out the routing again.
+
+In the new approach the routing is figured out by EPP calling the Prefill_Router directly through new bindings and the pipeline is only instantiated once during the request serving.
+
+During GAIE request serving the FrontEnd has to be instantiated with the `--direct-route` cli flag which tells the pipeline to route directly. It translates into the RouterMode::Direct() and the router expects for the hints to be in the body. It is the 3rd party router's responsibility to provide them. Dynamo will error out if they are not provided. 
 
 
-These limitations make it difficult to support new use-cases like:
-- Inference Gateway API approach
-- Clients who want to handle their own preprocessing / post processing in their modules or rely on Inference Engines. See [`backend fallback` draft](https://github.com/ai-dynamo/enhancements/pull/50/changes#diff-d06f262c7a840682785ad441a3dcaef9ba9f6938bc0e71d1895c89874e7f4086R177)
-
-
-# Constraints
-- Preprocessing must always be in the frontend because KV cache routing requires tokens to calculate hashes for matching against indexer hashes from KV events.
-- Postprocessing can be frontend or engine depending on whether the user wants Rust processing (default) or native framework processing (fallback).
 
 ## Goals
 
-* Cleanly separate routing decisions from transport and from disaggregation orchestration
+* Allow for the 3rd party Router.
+* Allow for the Router to be called outside of the pipeline
 
-* Support Inference Gateway API 
-
-* Maintain backward compatibility with existing behavior as the default configuration
-
-
-### Non Goals
-
-* Changing the wire protocol between frontend and backend
-
-* Modifying the underlying PushRouter or transport implementations
-
-* Changing how discovery works
-
-* Changing the OpenAI API compatibility layer
 
 ## Requirements
 
-### REQ 1 Independent Configuration Knobs
-- The pipeline **MUST** support independent configuration of:
-- Preprocessing location: Frontend
-- Postprocessing location: Frontend or Engine
-- Routing behavior: QueryOnly, DirectToKnown, or Discover
-- Migration: Enabled or Disabled
-- Each knob **MUST** be independently configurable and **SHOULD** have sensible defaults that match current behavior.
+### REQ 1 Allow for the 3rd party Router
 
-### REQ 2 GAIE compatibility
 
-- The system MUST support a query-only (EPP) mode where:
-- Preprocessing runs inside the pipeline before routing or through bindings in the EPP Body based routing.
-- Routing decisions are made (worker selection for both aggregated and disaggregated cases)
-- The response contains tokens and selected worker IDs
-- Model execution does NOT occur
+### REQ 2 Allow for the Router to be called outside of the pipeline
 
-- The system MUST support routing directly to pre-selected workers where:
-- Worker IDs are specified in the request (via routing.backend_instance_id, routing.prefill_worker_id, routing.decode_worker_id)
-- No routing logic executes to find workers
-- The request is sent directly to the specified worker(s)
 
 ### REQ 3 Disaggregated serving
-The decision to use disaggregated (prefill + decode) vs aggregated serving **MUST** be made per-request based on prefill worker availability, NOT as a pipeline configuration. This is the current behavior. But The DisaggOrchestrator component **MUST** be taken out of the router.
-
-### REQ 4 Configuration Validation
-- The code **MUST** validate configuration combinations and return clear errors for invalid combinations
-- Other invalid combinations SHOULD be identified and rejected with descriptive error messages
+Allow for the routing hints to be read from the headers and if not found then from the nvext annotation in the body.
 
 # Proposal
 
-Separate the Concerns:
-1. Standalone Router Binding for EPP (Route-Only)
-Create a direct binding to the router's select_worker logic that Go can call: `lib/llm/src/kv_router/standalone.rs`
-2. Enable it via C bindings
-3. Create another pipeline similar to the existing one with direct routing: `async fn build_direct_routed_pipeline<Req, Resp>`
-Create a config:
+See this [PR] (https://github.com/ai-dynamo/dynamo/pull/5446) for proposed changes.
 
-```bash
-pub enum PipelineMode {
-    /// Full routing - KvRouter selects workers
-    FullRouting,
-    /// Direct routing - worker IDs provided in request
-    DirectFromRequest,
-}
-
-// In EngineConfig or LocalModel
-pub struct RouterConfig {
-    pub mode: RouterMode,
-    pub pipeline_mode: PipelineMode,  // NEW
-    // ...
-}
-````
-and then u=in the HTTP entrypoint:
-
-```bash
-match config.pipeline_mode {
-    PipelineMode::FullRouting => {
-        build_routed_pipeline_with_preprocessor(...)
-    }
-    PipelineMode::DirectFromRequest => {
-        build_direct_routed_pipeline(...)
-    }
-}
-```
-4. Change the kvPushRouter to handle new modes:
-```bash
-pub enum RouterMode {
-    #[default]
-    RoundRobin,
-    Random,
-    Direct(u64),            // Existing: hardcoded worker ID
-    KV,                     // Existing: KV-cache aware routing
-    DirectFromRequest,      // NEW: Read worker ID from request nvext
-}
-
-// In KvPushRouter::generate() or similar
-
-impl KvPushRouter {
-    pub async fn generate(&self, request: SingleIn<PreprocessedRequest>) 
-        -> Result<ManyOut<...>> 
-    {
-        match self.router_mode {
-            RouterMode::KV => {
-                // Existing: compute best worker from KV cache overlap
-                let worker_id = self.select_worker(&request).await?;
-                self.push_router.direct(request, worker_id).await
-            }
-            RouterMode::DirectFromNvext => {
-                // NEW: read worker ID from request
-                let worker_id = request.routing
-                    .as_ref()
-                    .and_then(|r| r.decode_worker_id)
-                    .ok_or_else(|| anyhow!("decode_worker_id required"))?;
-                
-                self.push_router.direct(request, worker_id).await
-            }
-            RouterMode::RoundRobin => {
-                self.push_router.round_robin(request).await
-            }
-            RouterMode::Random => {
-                self.push_router.random(request).await
-            }
-            RouterMode::Direct(worker_id) => {
-                self.push_router.direct(request, worker_id).await
-            }
-        }
-    }
-}
-```
+# Related Proposal
+- Clients who want to handle their own preprocessing / post processing in their modules or rely on Inference Engines. See [frontend: Proposal for having Python orchestrate the request handling](https://github.com/ai-dynamo/enhancements/pull/52/changes)
+When an alternative python pipeline is implemented it should also support Direct Routing.
+The bindings with pre-processing needs to be able to also call Vllm.
+A possibility is that we will create a python PrefillRouter binding and instantiate it as a service for EPP. 
+This python bonding will be needed for the primary serving pipeline anyway. This is TBD.
