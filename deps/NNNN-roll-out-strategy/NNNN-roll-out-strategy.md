@@ -442,10 +442,7 @@ For rolling the workers, either **4.1.1 Solution A: Modify Worker Resource In-Pl
 
 The problem with the shared frontend is that if we do a RollingUpdate of a DGD for Model A, the shared frontend would need to be able to support a router client for Model A in dynamo namespace X and Model A in dynamo namespace Y, with potentially differing MDC checksums, and load balance between the two clients.
 
-**Open Questions**:
-
-- Do we want to continue supporting the shared frontend pattern?
-- If so, feasibility of the frontend supporting multiple MDCs per model key and load balancing effectively between them?
+**We should remove the shared frontend pattern. It creates additional complexity to support multiple MDCs per model key and load balancing effectively between them.**
 
 ## 4.3 Load Balancing
 
@@ -597,9 +594,6 @@ This bypasses the need for discoverability because the ConfigMap that the contro
 ### 4.3.3 Solution Selection
 
 **Solution A** with Gateway Load Balancing is the preferred solution. While it introduces additional dependencies, the implementation and separation of concerns is vastly simpler. Having a decentralized frontend approach requires adding discovery logic and potentially hand-rolling proxying for SSE streaming within the Dynamo runtime itself. Envoy Gateway is a tried and true solution for proxying and load balancing.
-
-**If we are scaling up/down two different PCS, any implications on the topology awareness/gang scheduling?**
-**What are the implications on routing?**
 
 ### Future Considerations
 
