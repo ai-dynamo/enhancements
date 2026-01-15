@@ -31,16 +31,18 @@ The decision to route to a specific worker is controlled through backend_instanc
 When GAIE EPP determines routing it calls this pipeline with the `query_instance_id` annotation and the pipeline determines the workers and short-circutes without serving the request.
 When GAIE serves this request this pipeline is called again. The router looks for the hints and if present, routes there instead of figuring out the workers. The presence of these hints is used as a signal not to figure out the routing again.
 
-In the new approach the routing is figured out by EPP calling the Prefill_Router directly through new bindings and the pipeline is only instantiated once during the request serving.
+In the new approach the routing is figured out by EPP calling the Prefill_Router directly through new bindings and the pipeline is only instantiated once during the request serving. All of the book-keeping operations will also be called on the Prefill_Router instance.
 
-During GAIE request serving the FrontEnd has to be instantiated with the `--direct-route` cli flag which tells the pipeline to route directly. It translates into the RouterMode::Direct() and the router expects for the hints to be in the body. It is the 3rd party router's responsibility to provide them. Dynamo will error out if they are not provided. 
-
+During GAIE request serving the FrontEnd has to be instantiated with the `--direct-route` cli flag which tells the pipeline to route directly. It translates into the existing RouterMode::Direct() and the router expects for the hints to be in the body. It is the 3rd party router's responsibility to provide them. Dynamo will error out if they are not provided. 
+In this mode the router will NOT be doing book keeping and no router events coordination will be needed.
 
 
 ## Goals
 
 * Allow for the 3rd party Router.
-* Allow for the Router to be called outside of the pipeline
+* Allow for the PrefillRouter to be called outside of the pipeline.
+* Do not do book keeping in the Direct routing mode.
+* Remove the router sync flag from the FrontEnd in case of the direct rotuing 
 
 
 ## Requirements
