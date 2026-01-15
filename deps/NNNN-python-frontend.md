@@ -36,7 +36,7 @@ Example is for vllm. We would provide one for each engine.
 
 Set a Python handler for the entire request. This is in `components/src/dynamo/frontend/main.py` on startup.
 
-```
+```python
     ### THE EXCITING NEW PART
 
     # kwargs contains all the command line flags, such as router mode. The engine factory will use those.
@@ -56,7 +56,7 @@ Set a Python handler for the entire request. This is in `components/src/dynamo/f
 
 The normal HTTP server and Discovery service run like before. When a new backend appears, we call the engine factory. Probably it has saved `EntrypointArgs` / `kwargs` from Setup step:
 
-```
+```python
 from vllm.v1.engine.async_llm import AsyncLLM
 
 class PyEngine:
@@ -80,7 +80,7 @@ class PyEngine:
 
 The Rust HTTP handler will call our `PythonAsyncEngine`, which delegates to the registered generator, here `self.generate`.
 
-```
+```python
 class PyEngine:
 
     def generate(self, request: dynamo.NVCreateChatCompletionRequest) -> dynamo.NvCreateChatCompletionStreamResponse:
@@ -127,11 +127,11 @@ We have an `HttpAsyncEngine` binding, that wraps a `PythonAsyncEngine` that wrap
 ### Python router bindings
 
 These two lines should work today:
-```
+```python
     endpoint_client = await generate_endpoint.client()
 ```
 and
-```
+```python
     dynamo_stream: dynamo.AsyncResponseStream = await endpoint_client.round_robin(our_preproc)
 ```
 
@@ -162,7 +162,7 @@ To call the vllm input and output processors we need to convert the types, the i
 KVRouter has good [Python bindings - docs -](https://github.com/ai-dynamo/dynamo/blob/main/docs/router/kv_cache_routing.md#using-kvpushrouter-python-api):
 
 In factory:
-```
+```python
     kv_router_config = KvRouterConfig()
     kv_router = KvPushRouter(
         endpoint=endpoint,
@@ -173,7 +173,7 @@ In factory:
 
 In generate:
 
-```
+```python
     stream = kv_router.generate(token_ids=..., ...)
 ```
 
