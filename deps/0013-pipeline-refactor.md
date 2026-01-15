@@ -26,7 +26,7 @@ This proposal calls for the option of using a third party router in Dynamo. The 
 
 # Motivation
 
-The current ``build_routed_pipeline_with_preprocessor` function in `lib/llm/src/entrypoint/input/common.rs` conflates routing selection with request processing when used with a 3rd party router (i.e. GAIE EPP).
+The current `build_routed_pipeline_with_preprocessor` function in `lib/llm/src/entrypoint/input/common.rs` conflates routing selection with request processing when used with a 3rd party router (i.e. GAIE EPP).
 The decision to route to a specific worker is controlled through backend_instance_id in annotations/routing hints.
 When GAIE EPP determines routing it calls this pipeline with the `query_instance_id` annotation and the pipeline determines the workers and short-circutes without serving the request.
 When GAIE serves this request this pipeline is called again. The router looks for the hints and if present, routes there instead of figuring out the workers. The presence of these hints is used as a signal not to figure out the routing again.
@@ -46,13 +46,14 @@ During GAIE request serving the FrontEnd has to be instantiated with the `--dire
 ## Requirements
 
 ### REQ 1 Allow for the 3rd party Router
+The first use case is the GAIE EPP.
 
+### REQ 2 Allow for the Router to be called outside of the p pipeline
+When EPP needs to know the worker(s) it does not need the entire pipeline. We can expose the PrefillRouter as a stand-alone.
 
-### REQ 2 Allow for the Router to be called outside of the pipeline
-
-
-### REQ 3 Disaggregated serving
+### REQ 3 Routing Hints enhancement
 Allow for the routing hints to be read from the headers and if not found then from the nvext annotation in the body.
+The nvext values also have to be preserved because the  NAT (Nemo Agentic Toolkit) team uses them.
 
 # Proposal
 
