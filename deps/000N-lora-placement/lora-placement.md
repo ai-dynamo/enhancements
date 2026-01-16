@@ -48,6 +48,30 @@ Each LoRA MUST have at least one active replica available for routing except dur
 - Separate desired placement (intent) from actual loaded set (location).
 - Routing changes can precede actual loads; servers load on first miss.
 
+### Architecture components
+
+- Optimal Placement: a routing table mapping lora adapter → (servers, probability of routing)
+- Real metrics: an adapter location table (cluster-wide index of where each adapter is present) 
+- Placement Controller: a loop that re-estimates demand each timestep, recomputes placement, and updates routing
+
+
+### Adapter Palcement algo
+
+A placement algorithm that takes in the following inputs:
+- backends: list of backend servers
+- loras: list of loras
+- current_placement: dictionary mapping adapter to server
+- demand_estimate_per_lora: dictionary mapping adapter to demand estimate (normalized to 0-1)
+
+And outputs a new placement dictionary mapping loras to servers.
+
+```python
+next_placement = placement_algorithm(backends, loras, current_placement, demand_estimate_per_lora)
+```
+- Use Active sequence tracking to estimate demand for each lora.
+- Compute optimal placement using HRW Rendezvous hashing (generalized consistent hashing) with replica factors.
+- Update the routing table based on the new placement.
+- we can debounce or wait for k iterations to update the placement to avoid churn.
 
 ![LoRA Placement](arch-v1.png)
 
