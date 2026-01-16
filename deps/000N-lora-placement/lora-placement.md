@@ -38,7 +38,7 @@ Each LoRA MUST have at least one active replica available for routing except dur
 ### Lazy loading the LoRA adapter
 - Load the LoRA adapter on the first request to the server.
 
-## Router handles control plane for LoRA placement
+### Router handles control plane for LoRA placement
 - centralize the control plane for LoRA placement in router. 
 - Router hosts controller logic to handle the placement of loras to servers.
 
