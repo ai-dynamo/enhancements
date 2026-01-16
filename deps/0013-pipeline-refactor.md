@@ -60,6 +60,37 @@ The nvext values also have to be preserved because the  NAT (Nemo Agentic Toolki
 # Proposal
 
 See this [PR] (https://github.com/ai-dynamo/dynamo/pull/5446) for proposed changes.
+The EPP would call Routers Directly to figure out the workers.
+
+```bash
+router_handles_create(..., &handle); { // Blocks until workers discovered
+    # wait_for_prefill	enforce_disagg	Behavior
+    # false	            any	            Return immediately, prefill discovered async
+    # true	            false	Wait up to timeout, continue in aggregated mode if not found
+    # true	            true	Wait up to timeout, FAIL if not found
+  wait_for_prefill()
+}
+
+bool disagg = router_handles_is_disaggregated(handle);
+   
+if (disagg) {
+    router_handles_query_prefill(handle, tokens, n, true, &prefill_id);
+    router_handles_query_decode(handle, tokens, n, true, true, &decode_result);
+} else {
+    router_handles_query_decode(handle, tokens, n, true, false, &decode_result);
+}
+# When the request comes GAIE calls the EPP callback:
+    router_handles_add_request()    
+# When the first token arrives GAIE calls the EPP callback:
+    router_handles_mark_prefill_complete() 
+# When the response is served GAIE calls the EPP callback:
+    router_handles_free_request()  
+
+```
+
+
+
+For request Serving the FrontEnd pipeline will be instantiated with Direct Routing mode.
 
 # Related Proposal
 - Clients who want to handle their own preprocessing / post processing in their modules or rely on Inference Engines. See [frontend: Proposal for having Python orchestrate the request handling](https://github.com/ai-dynamo/enhancements/pull/52/changes)
