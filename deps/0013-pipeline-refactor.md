@@ -55,7 +55,7 @@ When EPP needs to know the worker(s) it does not need the entire pipeline. We ca
 
 ### REQ 3 Routing Hints enhancement
 Allow for the routing hints to be read from the headers and if not found then from the nvext annotation in the body.
-The nvext values also have to be preserved because the  NAT (Nemo Agentic Toolkit) team uses them.
+The nvext values also have to be preserved because the  NAT (Nemo Agentic Toolkit) team uses them. TBD: if the NAT team does not use the `query_instance_id` annotation to request the worker ids only instead of serving, we need to remove it to streamline the logic.
 
 # Proposal
 
