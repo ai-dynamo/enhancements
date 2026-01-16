@@ -61,6 +61,7 @@ The nvext values also have to be preserved because the  NAT (Nemo Agentic Toolki
 
 See this [PR] (https://github.com/ai-dynamo/dynamo/pull/5446) for proposed changes.
 The EPP would call Routers Directly to figure out the workers.
+It will also create the Dynamo Preprocessor to handle prompt tokenization for the kv-router.
 
 ```bash
 router_handles_create(..., &handle); { // Blocks until workers discovered
@@ -68,6 +69,7 @@ router_handles_create(..., &handle); { // Blocks until workers discovered
     # false	            any	            Return immediately, prefill discovered async
     # true	            false	Wait up to timeout, continue in aggregated mode if not found
     # true	            true	Wait up to timeout, FAIL if not found
+  create_preprocessor()
   wait_for_prefill()
 }
 
