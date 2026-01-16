@@ -71,6 +71,12 @@ A placement algorithm that takes in the following inputs:
 
 And outputs a new placement dictionary mapping loras to servers.
 
+Algorithm 1 is basically:
+- estimate per-adapter demand from history,
+- do a packing/allocation,
+- permute to minimize deviation from previous placement (explicitly to reduce movement)
+- update router + per-server mappings
+
 ```python
 next_placement = placement_algorithm(backends, loras, current_placement, demand_estimate_per_lora)
 ```
