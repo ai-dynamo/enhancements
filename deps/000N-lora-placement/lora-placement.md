@@ -34,6 +34,14 @@ Each LoRA MUST have at least one active replica available for routing except dur
 # Proposal
 
 ## Design Principles
+
+### Lazy loading the LoRA adapter
+- Load the LoRA adapter on the first request to the server.
+
+## Router handles control plane for LoRA placement
+- centralize the control plane for LoRA placement in router. 
+- Router hosts controller logic to handle the placement of loras to servers.
+
 ### Stability via HRW hashing
 - For each LoRA a, compute a deterministic ranking of servers by score(a, s) = H(a || s).
 - Replica set = top-R_a servers in this ranking.
@@ -41,8 +49,6 @@ Each LoRA MUST have at least one active replica available for routing except dur
 
 ### Churn-first control
 - Prefer traffic steering and add-only replication.
-- Use leases/cooldowns to prevent immediate unload after load.
-- Enforce a churn budget per control interval.
 
 ### Lazy realization
 - Separate desired placement (intent) from actual loaded set (location).
