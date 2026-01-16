@@ -88,15 +88,20 @@ next_placement = placement_algorithm(backends, loras, current_placement, demand_
 ![LoRA Placement](arch-v1.png)
 
 ## Example 
-4 LoRAs 
+Example: 4 LoRAs 
 
-Servers: S1,S2,S3,S4, slots S=2, LoRAs {A,B,C,D} with heat {A>>B>>C>D}.
+Servers: S1,S2,S3,S4
+
+slots: S=2
+LoRAs: {A,B,C,D} 
+traffic distribution: (3:2:1:1) 
 
 Replica factors for each LoRA: R_A=3, R_B=2, R_C=1, R_D=1
 
 HRW server orderings for each LoRA:
+```
 A: [S2,S4,S1,S3] → target[A]={S2,S4,S1}
 B: [S3,S2,S4,S1] → target[B]={S3,S2}
 C: [S1,S4,S2,S3] → target[C]={S1}
 D: [S4,S3,S1,S2] → target[D]={S4}
-
+```
