@@ -6,7 +6,7 @@
 
 **Category**: Architecture
 
-**Required Reviewers**: Biswa Panda, Neelay Shah, Maksim Khadkevich, Julien Mancuso, Itay Neeman, Rudy Pei, Rohan Varma
+**Required Reviewers**: Biswa Panda, Neelay Shah, Maksim Khadkevich, Julien Mancuso, Itay Neeman, Rohan Varma
 
 **Review Date**: January 14, 2026
 
