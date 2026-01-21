@@ -450,11 +450,27 @@ During the RollingUpdate, we will essentially have two deployments, each with a 
 
 ### 4.3.1 Solution A: Gateway Load Balancing
 
-In order to load balance between the two frontends, the DGD controller will manage a top-level Gateway with an HTTPRoute that's dynamically updated based on the ratio of old/new workers.
+Use a Gateway with HTTPRoute to load balance between old and new frontends, with weights dynamically updated based on the ratio of old/new workers.
+
+#### Gateway Provisioning
+
+Two options for Gateway provisioning:
+
+1. **User brings their own Gateway**: User provides the Gateway name via the DGD spec. User is responsible for Gateway configuration and lifecycle.
+2. **Controller creates the Gateway**: Controller creates and manages the Gateway. Requires user to have installed a GatewayClass (e.g., Istio, Envoy Gateway).
+
+#### Service URL Stability
+
+Currently, deploying a DGD creates a Kubernetes Service that internal clients can use to reach the frontend pods.
+
+With Gateway-based load balancing, the controller cannot guarantee a stable in-cluster service URL for the entire DGD unless using GAMMA. The Gateway handles external traffic, but internal service-to-service routing requires additional configuration:
+
+- **User configures Gateway for internal access**: User brings their own Gateway and attaches a ClusterIP Service to expose it internally.
+- **GAMMA (Service-attached HTTPRoute)**: Controller creates an HTTPRoute with the Service as `parentRef`. Service mesh intercepts traffic and applies weights. Requires a GAMMA-compatible service mesh (Istio, Cilium, Linkerd, or Kuma).
 
 #### How It Works
 
-The controller maintains a Gateway resource that acts as the single entry point for client traffic. During a RollingUpdate, the controller watches the worker replica counts in both the old and new deployments and dynamically adjusts the HTTPRoute backend weights to reflect the actual capacity. As new workers come online and old workers are terminated, the traffic split shifts proportionally until 100% of traffic flows to the new deployment.
+During a RollingUpdate, the controller watches worker replica counts and dynamically adjusts HTTPRoute backend weights. As new workers come online and old workers terminate, traffic shifts proportionally until 100% flows to the new deployment.
 
 ```mermaid
 sequenceDiagram
@@ -475,26 +491,20 @@ sequenceDiagram
     Note over C: User triggers RollingUpdate
 
     C->>FE_new: Create new Frontend (NS B)
-    C->>HR: Update weights<br/>(A: 100%, B: 0%)
+    C->>HR: Update weights (A: 100%, B: 0%)
 
     Note over C: New workers scaling up, old scaling down
 
     C->>C: Watch worker counts<br/>(NS A: 3, NS B: 1)
-    C->>HR: Update weights<br/>(A: 75%, B: 25%)
+    C->>HR: Update weights (A: 75%, B: 25%)
 
     Client->>GW: Request
     GW->>HR: Route lookup
     HR->>FE_new: 25% chance
     FE_new-->>Client: Response
 
-    C->>C: Watch worker counts<br/>(NS A: 2, NS B: 2)
-    C->>HR: Update weights<br/>(A: 50%, B: 50%)
-
-    C->>C: Watch worker counts<br/>(NS A: 1, NS B: 3)
-    C->>HR: Update weights<br/>(A: 25%, B: 75%)
-
     C->>C: Watch worker counts<br/>(NS A: 0, NS B: 4)
-    C->>HR: Update weights<br/>(A: 0%, B: 100%)
+    C->>HR: Update weights (A: 0%, B: 100%)
 
     Note over C: RollingUpdate complete
 
@@ -513,8 +523,8 @@ sequenceDiagram
 
 1. **Watch Loop**: Controller continuously monitors worker replica counts across both namespaces
 2. **Weight Calculation**: `weight_new = new_ready_workers / (old_ready_workers + new_ready_workers)`
-3. **HTTPRoute Update**: Controller patches the HTTPRoute `backendRefs` with calculated weights
-4. **Cleanup**: Once old workers reach 0, controller removes old frontend and its backend reference
+3. **HTTPRoute Update**: Controller patches HTTPRoute `backendRefs` with calculated weights
+4. **Cleanup**: Once old workers reach 0, controller removes old frontend and its backend reference from HTTPRoute
 
 **Pros:**
 
@@ -523,6 +533,10 @@ sequenceDiagram
 
 **Cons:**
 
+- Cannot guarantee a stable in-cluster service URL for a single DGD unless using GAMMA, which requires:
+  - Gateway API CRDs installed
+  - A GAMMA-compatible service mesh (Istio, Cilium, Linkerd, or Kuma)
+  - Namespace configured for mesh (e.g., sidecar injection enabled)
 - Controller will now need to manage a Gateway resource. Will need to provide configurability of the Gateway resource via the DGD API (or another CRD).
 - Will either need to:
   - Always have a Gateway resource to manage in front of a frontend. This introduces an extra hop. OR
@@ -530,6 +544,56 @@ sequenceDiagram
 - Introduces additional dependencies for the Dynamo Kubernetes platform:
   - Gateway API
   - Gateway controller installed (Istio, Envoy Gateway, etc.)
+
+#### Supporting Internal Traffic (East/West) with GAMMA (Gateway API for Mesh)
+
+GAMMA allows HTTPRoutes to attach directly to Services (rather than Gateways), enabling the service mesh to intercept traffic to the standard service DNS and apply routing rules.
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: frontend-internal-route
+spec:
+  parentRefs:
+    - name: frontend # The service internal clients call
+      kind: Service
+      group: "" # Must be empty string, NOT "core"
+      port: 8000
+  rules:
+    - backendRefs:
+        - name: frontend-old
+          port: 8000
+          weight: 75
+        - name: frontend-new
+          port: 8000
+          weight: 25
+```
+
+**User Brings Their Own Gateway and GatewayClass**
+
+The user is responsible for deploying a Gateway implementation that supports GAMMA. The DGD controller creates the HTTPRoute resources; the mesh infrastructure is a prerequisite provided by the user.
+
+**GAMMA Support Requirements**
+
+For a Gateway implementation to support this solution, it must be conformant with the GAMMA mesh profile:
+
+| Requirement                          | Description                                                   |
+| ------------------------------------ | ------------------------------------------------------------- |
+| **HTTPRoute with Service parentRef** | Must support `parentRef` targeting a Service with `group: ""` |
+| **Weighted backendRefs**             | Must support traffic splitting via weighted `backendRefs`     |
+| **Path-agnostic routing**            | Must work without requiring path-based matching rules         |
+
+**Conformant Implementations**
+
+| Implementation | Architecture       | Notes                                                        |
+| -------------- | ------------------ | ------------------------------------------------------------ |
+| **Istio**      | Sidecar or Ambient | Supports both sidecar injection and sidecarless ambient mode |
+| **Cilium**     | Sidecarless (eBPF) | CNCF graduated. No sidecar overhead                          |
+| **Linkerd**    | Sidecar (Rust)     | CNCF graduated. Lightweight, simpler operational model       |
+| **Kuma**       | Sidecar            | CNCF project. Built on Envoy                                 |
+
+**Non-conformant implementations** (Traefik, NGINX Gateway Fabric, Envoy Gateway, Contour, Kong) do not support GAMMA and cannot be used for internal traffic routing with HTTPRoute weights.
 
 ### 4.3.2 Solution B: Frontend Proxy Based Load Balancing
 
@@ -591,9 +655,135 @@ Each of the Frontend Pods would have a sidecar Envoy container that is configure
 
 This bypasses the need for discoverability because the ConfigMap that the controller creates for the Envoy sidecar container will embed the traffic split and new frontend service URL.
 
-### 4.3.3 Solution Selection
+### 4.3.3 Solution C: Simple Proxy Load Balancing
 
-**Solution A** with Gateway Load Balancing is the preferred solution. While it introduces additional dependencies, the implementation and separation of concerns is vastly simpler. Having a decentralized frontend approach requires adding discovery logic and potentially hand-rolling proxying for SSE streaming within the Dynamo runtime itself. Envoy Gateway is a tried and true solution for proxying and load balancing.
+The Gateway-based solution (4.3.1) introduces significant infrastructure dependencies (Gateway API, Gateway controller, GAMMA-compatible service mesh for east/west traffic). A simpler alternative is to deploy a lightweight reverse proxy that performs weighted routing between the old and new frontend services.
+
+#### How It Works
+
+The controller deploys a reverse proxy (e.g., HAProxy) with a Service in front. Internal and external clients connect to this Service, and the proxy routes requests to the old and new frontend services based on configured weights. The controller updates the weights dynamically as workers scale up/down during the rolling update.
+
+```mermaid
+flowchart LR
+    Client([Client])
+
+    subgraph proxy[" "]
+        direction TB
+        proxy_label["<b>Proxy Service</b><br/>(model-a)"]
+        HAProxy[HAProxy Pod]
+    end
+
+    subgraph old[" "]
+        direction TB
+        old_label["<b>Old Frontend</b><br/>(model-a-v1)"]
+        FE_old[Frontend Pods<br/>NS A]
+    end
+
+    subgraph new[" "]
+        direction TB
+        new_label["<b>New Frontend</b><br/>(model-a-v2)"]
+        FE_new[Frontend Pods<br/>NS B]
+    end
+
+    Client --> HAProxy
+    HAProxy -->|weight: 75%| FE_old
+    HAProxy -->|weight: 25%| FE_new
+
+    style proxy_label fill:none,stroke:none
+    style old_label fill:none,stroke:none
+    style new_label fill:none,stroke:none
+    style proxy fill:#e8f4ea,stroke:#69c
+    style old fill:#fdd,stroke:#c99
+    style new fill:#dfd,stroke:#9c9
+```
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant C as DGD Controller
+    participant Proxy as HAProxy Pod
+    participant FE_old as Old Frontend<br/>(NS A, 4 workers)
+    participant FE_new as New Frontend<br/>(NS B, 0 workers)
+
+    Note over Proxy,FE_old: Initial State: All traffic to NS A
+
+    Client->>Proxy: Request
+    Proxy->>FE_old: weight: 100%
+    FE_old-->>Client: Response
+
+    Note over C: User triggers RollingUpdate
+
+    C->>FE_new: Create new Frontend (NS B)
+
+    Note over C: New workers scaling up, old scaling down
+
+    C->>C: Watch worker counts<br/>(NS A: 3, NS B: 1)
+    C->>Proxy: Update weights via Runtime API<br/>(v1: 75%, v2: 25%)
+
+    Client->>Proxy: Request
+    Proxy->>FE_new: 25% chance
+    FE_new-->>Client: Response
+
+    C->>C: Watch worker counts<br/>(NS A: 0, NS B: 4)
+    C->>Proxy: Update weights via Runtime API<br/>(v1: 0%, v2: 100%)
+
+    Note over C: RollingUpdate complete
+
+    C->>FE_old: Delete old Frontend
+    C->>Proxy: Remove old backend
+
+    Note over Proxy,FE_new: Final State: All traffic to NS B
+```
+
+#### Proxy Selection
+
+HAProxy is recommended due to its runtime API that allows instant weight updates without reload, proven reliability at scale, and minimal latency overhead.
+
+| Proxy       | Update Mechanism      | Latency Overhead | Notes                                                                |
+| ----------- | --------------------- | ---------------- | -------------------------------------------------------------------- |
+| **HAProxy** | Runtime socket API    | ~0.1-0.3ms       | Instant updates, battle-tested at GitHub/Reddit/Stack Overflow scale |
+| **Caddy**   | Admin REST API        | ~0.5-1ms         | Instant updates, beginner-friendly JSON config                       |
+| **Traefik** | File watch (fsnotify) | ~0.5-1.5ms       | Near-instant (~100ms detection delay), Kubernetes-native             |
+
+#### Pros
+
+- **Minimal dependencies**: No Gateway API, no service mesh, no GAMMA required
+- **Works for both internal and external traffic**: Single proxy Service handles all clients
+- **Instant weight updates**: HAProxy/Caddy APIs allow immediate changes without pod restarts
+- **Low latency overhead**: HAProxy adds ~0.1-0.3ms per request
+- **Battle-tested**: HAProxy powers GitHub, Reddit, Stack Overflow at massive scale
+- **Simple mental model**: Just a reverse proxy with weighted backends
+
+#### Cons
+
+- **Additional component to manage**: Controller must deploy and configure the proxy
+- **Single point of failure**: Proxy pods must be replicated for HA (though this is straightforward)
+- **Extra network hop**: All requests pass through the proxy (same as Gateway solutions)
+- **Limited routing features**: No advanced traffic management (retries, circuit breaking, etc.) unless proxy supports it
+
+#### Comparison with Gateway Solution (4.3.1)
+
+| Aspect                     | Gateway + GAMMA                                        | Simple Proxy (HAProxy) |
+| -------------------------- | ------------------------------------------------------ | ---------------------- |
+| **Dependencies**           | Gateway API, Gateway Controller, GAMMA-compatible mesh | HAProxy only           |
+| **East/West Traffic**      | Requires GAMMA (Istio, Cilium, Linkerd)                | Works out of the box   |
+| **Config Update**          | HTTPRoute resource updates                             | Runtime API (instant)  |
+| **Latency Overhead**       | ~0.5-1ms + sidecar overhead                            | ~0.1-0.3ms             |
+| **Operational Complexity** | High (mesh infrastructure)                             | Low (single proxy)     |
+| **Advanced Features**      | Full service mesh capabilities                         | Basic load balancing   |
+
+### 4.3.4 Solution Selection
+
+**Solution C** with Simple Proxy Load Balancing (HAProxy) is the preferred solution. The Gateway-based approach (Solution A) requires cluster-level dependencies (Gateway API CRDs, a GatewayClass controller like Istio or Envoy Gateway) and additional complexity for internal traffic routing (GAMMA-compatible service mesh). This is heavyweight infrastructure for what is fundamentally simple HTTP weighted routing.
+
+HAProxy provides:
+- **No cluster dependencies**: Just a Deployment and Service managed by the controller
+- **Instant weight updates**: Runtime socket API allows immediate changes without pod restarts
+- **Works for both internal and external traffic**: Single proxy Service handles all clients
+- **Battle-tested reliability**: Powers GitHub, Reddit, Stack Overflow at massive scale
+- **Minimal latency overhead**: ~0.1-0.3ms per request
+
+Solution B (Frontend Proxy Based Load Balancing) is not recommended as it requires adding discovery logic and potentially hand-rolling proxying for SSE streaming within the Dynamo runtime itself.
 
 ### Future Considerations
 
@@ -684,4 +874,3 @@ The Dynamo Kubernetes Operator leverages the [Grove API](https://github.com/ai-d
 ### 1.9 Canary Rollout
 
 ### 1.10 Blue/Green Rollout
-
