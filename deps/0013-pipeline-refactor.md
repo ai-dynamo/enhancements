@@ -64,6 +64,7 @@ The EPP would call Routers Directly to figure out the workers.
 It will also create the Dynamo Preprocessor to handle prompt tokenization for the kv-router.
 
 ```bash
+# Init time
 router_handles_create(..., &handle); { // Blocks until workers discovered
     # wait_for_prefill	enforce_disagg	Behavior
     # false	            any	            Return immediately, prefill discovered async
@@ -73,20 +74,23 @@ router_handles_create(..., &handle); { // Blocks until workers discovered
   wait_for_prefill()
 }
 
+# Query Time
 bool disagg = router_handles_is_disaggregated(handle);
    
 if (disagg) {
-    router_handles_query_prefill(handle, tokens, n, true, &prefill_id);
-    router_handles_query_decode(handle, tokens, n, true, true, &decode_result);
+    workerQueryResult = router_handles_query_prefill(handle, tokens, n, true, &prefill_id);
+    workerQueryResult = router_handles_query_decode(handle, tokens, n, true, true, &decode_result);
 } else {
-    router_handles_query_decode(handle, tokens, n, true, false, &decode_result);
+    workerQueryResult = router_handles_query_decode(handle, tokens, n, true, false, &decode_result);
 }
+request_headers[headers] = workerQueryResult
+
 # When the request comes GAIE calls the EPP callback:
-    router_handles_add_request()    
+    router_handles_add_request(workerQueryResult.dp_rank, workerQueryResult.worker_id)    
 # When the first token arrives GAIE calls the EPP callback:
-    router_handles_mark_prefill_complete() 
+    router_handles_mark_prefill_complete(workerQueryResult) 
 # When the response is served GAIE calls the EPP callback:
-    router_handles_free_request()  
+    router_handles_free_request(workerQueryResult)  
 
 ```
 
