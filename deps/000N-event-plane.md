@@ -1,11 +1,17 @@
 # Dynamo Event Plane
 
 **Status:** In-Review
+
 **Authors:** [biswa](https://github.com/biswapanda)
+
 **Category:** Architecture
+
 **Sponsor:** Neelay Shah, Itay Neeman, Suman Tatiraju, Maksim Khadkevich
+
 **Required Reviewers:** Neelay, Itay, Suman, Maksim
+
 **Review Date:** 2026-01-22
+
 **Pull Request:** TBD
 
 ## Summary
