@@ -167,6 +167,16 @@ ZMQ uses the Discovery plane as a control channel to learn publisher endpoints a
 - **KV Store / etcd discovery**: entries are written under the `v1/event_channels` bucket using the topic-aware key format.
 - **Kubernetes discovery**: event channel registrations are reflected in pod metadata and propagated via CR updates.
 
+**DiscoverySpec::EventChannel**
+
+`DiscoverySpec::EventChannel` is the discovery-plane record used to register event publishers. It includes:
+
+- `namespace` and `component` scope
+- `topic` name (e.g., `kv-events`, `kv-metrics`)
+- `transport` details (NATS subject or ZMQ endpoint)
+
+This record is written under the key `namespace/component/topic/{instance_id}` and is the authoritative source for dynamic subscriber discovery.
+
 This design keeps discovery as the authoritative source of active publishers while allowing ZMQ to scale with dynamic process lifecycles.
 
 ## Alternate Solutions
@@ -185,16 +195,7 @@ This design keeps discovery as the authoritative source of active publishers whi
 **Reason Rejected:**
 - Splitting publisher/subscriber provides clearer UX and avoids accidental side effects.
 
-### Alt 2 Keep Transport-Specific APIs or semantics (nats vs zmq)
-
-**Pros:**
-- Maximum control and performance per transport
-- No abstraction overhead
-
-**Cons:**
-- Duplicated code paths
-- Inconsistent developer experience across transports
-- Harder to switch environments
+### Alt 2 Keep any transport-specific APIs or semantics
 
 **Reason Rejected:**
 - The event plane requires a unified interface to support runtime configuration and portability.
