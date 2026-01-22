@@ -65,7 +65,7 @@ It will also create the Dynamo Preprocessor to handle prompt tokenization for th
 
 ```bash
 # Init time
-router_handles_create(..., &handle); { // Blocks until workers discovered
+create_routers(..., &handle); { // Blocks until workers discovered
     # wait_for_prefill	enforce_disagg	Behavior
     # false	            any	            Return immediately, prefill discovered async
     # true	            false	Wait up to timeout, continue in aggregated mode if not found
@@ -75,22 +75,22 @@ router_handles_create(..., &handle); { // Blocks until workers discovered
 }
 
 # Query Time
-bool disagg = router_handles_is_disaggregated(handle);
+bool disagg = is_disaggregated(handle);
    
 if (disagg) {
-    workerQueryResult = router_handles_query_prefill(handle, tokens, n, true, &prefill_id);
-    workerQueryResult = router_handles_query_decode(handle, tokens, n, true, true, &decode_result);
+    workerQueryResult = query_prefill(handle, tokens, n, true, &prefill_id);
+    workerQueryResult = query_decode(handle, tokens, n, true, true, &decode_result);
 } else {
-    workerQueryResult = router_handles_query_decode(handle, tokens, n, true, false, &decode_result);
+    workerQueryResult = query_decode(handle, tokens, n, true, false, &decode_result);
 }
 request_headers[headers] = workerQueryResult
 
 # When the request comes GAIE calls the EPP callback:
-    router_handles_add_request(workerQueryResult.dp_rank, workerQueryResult.worker_id)    
+    add_request(workerQueryResult.dp_rank, workerQueryResult.worker_id)    
 # When the first token arrives GAIE calls the EPP callback:
-    router_handles_mark_prefill_complete(workerQueryResult) 
+    mark_prefill_complete(workerQueryResult) 
 # When the response is served GAIE calls the EPP callback:
-    router_handles_free_request(workerQueryResult)  
+    free_request(workerQueryResult)  
 
 ```
 
