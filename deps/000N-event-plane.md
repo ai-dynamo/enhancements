@@ -1,6 +1,6 @@
 # Dynamo Event Plane
 
-**Status:** Draft
+**Status:** In-Review
 **Authors:** [biswa](https://github.com/biswapanda)
 **Category:** Architecture
 **Sponsor:** Neelay Shah, Itay Neeman, Suman Tatiraju, Maksim Khadkevich
