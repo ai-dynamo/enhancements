@@ -1,6 +1,6 @@
 # Dynamo Event Plane
 
-**Status**: In-Review
+**Status**: Under Review
 
 **Authors**: [biswa](https://github.com/biswapanda)
 
