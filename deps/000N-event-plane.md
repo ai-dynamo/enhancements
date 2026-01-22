@@ -1,25 +1,18 @@
-# Dynamo Runtime: Event Plane API
+# Dynamo Event Plane
 
-**Status:** Draft  
-**Authors:** [@biswapanda](https://github.com/biswaranjanp)  
-**Category:** Architecture | Process | Guidelines  
-**Replaces:** N/A  
-**Replaced By:** N/A  
-**Sponsor:** TBD  
-**Required Reviewers:** TBD  
-**Review Date:** 2026-01-21  
-**Pull Request:** TBD  
-**Implementation PR / Tracking Issue:** TBD  
+**Status:** Draft
+**Authors:** [biswa](https://github.com/biswapanda)
+**Category:** Architecture
+**Sponsor:** Neelay Shah, Itay Neeman, Suman Tatiraju, Maksim Khadkevich
+**Required Reviewers:** Neelay, Itay, Suman, Maksim
+**Review Date:** 2026-01-22
+**Pull Request:** TBD
 
 ## Summary
-
-**[Required]**
 
 The Event Plane provides a transport-agnostic pub/sub interface for Dynamo components. It unifies NATS and ZMQ under a consistent API, exposes strongly scoped publisher/subscriber types, and supports dynamic discovery for ZMQ to automatically connect to publishers at runtime.
 
 ## Motivation
-
-**[Required]**
 
 We need a single event interface that works across transports while providing the same developer experience. Prior iterations mixed pub and sub behaviors into one type, required manual discovery registration, and left topic semantics implicit or transport-specific. This led to confusion, coupling, and subtle failure modes when switching transports (e.g., ZMQ topic filtering).
 
@@ -33,7 +26,6 @@ This document establishes a high-level API and UX that makes transport selection
 - Allow transport selection via an environment variable for deployments.
 
 ## Non Goals
-
 
 - Providing durable message persistence (NATS JetStream remains out of scope).
 - Guaranteeing exactly-once delivery semantics.
@@ -53,17 +45,37 @@ Publish and subscribe APIs **MUST** interpret the topic consistently across tran
 
 Publishers **MUST** automatically register with discovery on creation. Users **MUST NOT** be required to call a separate registration API.
 
-### REQ 4 Dynamic Discovery (ZMQ)
+### REQ 4 Dynamic Discovery
 
-ZMQ subscribers **MUST** support dynamic discovery so new publishers are connected without restarting the subscriber.
+Publishers/Subscribers **MUST** support dynamic discovery so new publishers or subscribers are connected automatically.
 
 ## Proposal
 
-**[Required]**
 
 ### Overview
 
-The API is split into two primary entry points: `EventPublisher` and `EventSubscriber`. Each is scoped to a namespace or component and a specific topic. Publishers auto-register with discovery; subscribers auto-discover publishers. Transport selection is controlled by `DYN_EVENT_PLANE`.
+The API is split into two primary entry points: `EventPublisher` and `EventSubscriber`. Each is scoped to a namespace or component and a specific topic.
+
+Publishers auto-register with discovery; subscribers auto-discover publishers.
+
+Transport selection is controlled by `DYN_EVENT_PLANE`.
+
+### Event Plane Architecture
+
+At a high level, the event plane is composed of four layers:
+
+1. **Publisher and Subscriber layer**: `EventPublisher` and `EventSubscriber` provide the user-facing API. Publishers auto-register with discovery; subscribers auto-discover publishers.
+
+2. **Envelope and Codec layer**: `EventEnvelope` adds topic and sequencing metadata; codecs serialize/deserialize (legacy JSON for NATS, MsgPack for ZMQ). The topic is included in the envelope to allow filtering when the transport does not provide native topic filtering.
+
+3. **Transport Adapter layer**: transport-specific Tx/Rx implementations handle NATS Core subjects or ZMQ PUB/SUB sockets.
+
+4. **Discovery Plane (control)**: registers event channels and publishes membership changes so subscribers can connect to new publishers dynamically.
+
+Key points:
+- Publishers/consumers are scoped by `namespace/component/topic`.
+- The envelope carries topic and sequence metadata so filtering is consistent across transports.
+- Discovery is used only for control-plane concerns (publisher registration and dynamic subscriber updates).
 
 ### Environment Variable
 
@@ -83,8 +95,8 @@ publisher.publish(&event).await?;
 ```
 
 Key behaviors:
-- Auto-registers with discovery on creation.
-- Includes `topic` in `EventEnvelope`.
+- Auto-registers with discovery plane on creation.
+- Includes `topic` in `EventEnvelope` to allow filtering when the transport does not provide native topic filtering.
 - Uses NATS subject prefix for NATS transport; uses ZMQ topic frame for ZMQ transport.
 
 ### Subscriber API
@@ -97,7 +109,8 @@ use dynamo_runtime::transports::event_plane::EventSubscriber;
 let mut subscriber = EventSubscriber::for_component(&component, "kv-events").await?;
 while let Some(result) = subscriber.next().await {
     let envelope = result?;
-    // envelope.topic == "kv-events"
+    // envelope.topic == "kv-events" and envelope.publisher_id is the id of the publisher
+    // envelope.payload is the serialized event payload
 }
 ```
 
@@ -112,44 +125,67 @@ All events are wrapped in an `EventEnvelope` that includes a topic and sequencin
 
 ```rust
 pub struct EventEnvelope {
-    pub publisher_id: u64,
-    pub sequence: u64,
-    pub published_at: u64,
-    pub topic: String,
-    pub payload: Bytes,
+    pub publisher_id: u64,       // unique id of the publisher
+    pub sequence: u64,           // monotonically increasing sequence number per publisher
+    pub published_at: u64,       // timestamp in milliseconds when the event was published
+    pub topic: String,           // topic of the event
+    pub payload: Bytes,          // serialized event payload
 }
 ```
 
 ### ZMQ Dynamic Discovery and Pub/Sub
 
-ZMQ uses discovery to connect subscribers to publishers dynamically:
+ZMQ uses the Discovery plane as a control channel to learn publisher endpoints and keep subscriptions current as publishers come and go.
 
-1. Publishers bind to an OS-assigned port and register their endpoint with discovery.
-2. Subscribers query discovery for matching `namespace/component/topic`.
-3. Subscribers connect to all discovered endpoints and keep watching for new ones.
-4. New publishers are added without subscriber restart.
+**Registration Flow**
 
-The dynamic subscriber merges multiple publisher streams into a single stream and applies topic filtering at the envelope level.
+1. A publisher binds a ZMQ PUB socket on an OS-assigned port.
+2. The publisher registers an `EventChannel` in discovery with:
+   - `namespace`, `component`, and `topic`
+   - transport details containing the ZMQ endpoint (e.g., `tcp://host:port`)
+3. The discovery entry is stored under the key:
+   - `namespace/component/topic/{instance_id}`
+
+**Subscription Flow**
+
+1. A subscriber constructs a discovery query for the topic:
+   - `DiscoveryQuery::TopicEventChannels { namespace, component, topic }`
+2. It calls `list_and_watch()` on the discovery client to:
+   - get all current publishers (initial list)
+   - receive future `Added`/`Removed` events for the same topic
+3. For each `Added` event, the subscriber connects a ZMQ SUB socket to the endpoint.
+4. Incoming messages from all publishers are merged into one stream.
+
+**Runtime Behavior**
+
+- The subscriber continuously watches discovery for changes. New publishers are connected without restart.
+- When a publisher is removed from discovery, the subscriber currently logs the removal and relies on the stream to end naturally when the publisher disappears. This is safe but may leave a brief stale connection.
+- Topic filtering is enforced at the envelope level (via `EventEnvelope.topic`) for consistency across transports.
+
+**Discovery Plane Integration**
+
+- **KV Store / etcd discovery**: entries are written under the `v1/event_channels` bucket using the topic-aware key format.
+- **Kubernetes discovery**: event channel registrations are reflected in pod metadata and propagated via CR updates.
+
+This design keeps discovery as the authoritative source of active publishers while allowing ZMQ to scale with dynamic process lifecycles.
 
 ## Alternate Solutions
 
-**[Required, if not applicable write N/A]**
-
-### Alt 1 Single EventPlane Type for Pub/Sub
+### Alt 1 Single Type for Publisher/Subscriber
 
 **Pros:**
-- Fewer types to learn
+- Fewer types to learn and use
 - Backward compatibility with older API
 
 **Cons:**
 - Always creates both PUB and SUB transports, even when unused
-- Confusing lifecycle and higher resource usage
+- Confusing lifecycle and higher resource usage (PUB and SUB sockets are created even when only one is needed)
 - Inconsistent semantics when switching transports
 
 **Reason Rejected:**
 - Splitting publisher/subscriber provides clearer UX and avoids accidental side effects.
 
-### Alt 2 Transport-Specific APIs
+### Alt 2 Keep Transport-Specific APIs or semantics (nats vs zmq)
 
 **Pros:**
 - Maximum control and performance per transport
