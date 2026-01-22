@@ -162,6 +162,17 @@ ZMQ uses the Discovery plane as a control channel to learn publisher endpoints a
 - When a publisher is removed from discovery, the subscriber currently logs the removal and relies on the stream to end naturally when the publisher disappears. This is safe but may leave a brief stale connection.
 - Topic filtering is enforced at the envelope level (via `EventEnvelope.topic`) for consistency across transports.
 
+**MsgPack Frame (ZMQ)**
+
+ZMQ uses a compact binary frame format for high-performance transport. Each message is sent as a ZMQ multipart payload:
+
+- Frame 0: topic (string)
+- Frame 1: binary frame (8-byte header + MsgPack-encoded `EventEnvelope`)
+
+The 8-byte header encodes protocol version, message type, codec type, flags, and payload length. This keeps framing overhead low while allowing future extension.
+
+This design keeps discovery as the authoritative source of active publishers while allowing ZMQ to scale with dynamic process lifecycles.
+
 **Discovery Plane Integration**
 
 - **KV Store / etcd discovery**: entries are written under the `v1/event_channels` bucket using the topic-aware key format.
