@@ -14,6 +14,9 @@
 
 **Pull Request**: TBD
 
+** version 1**: 2026-01-22: initial version
+** version 2**: 2026-01-26: added zmq based broker mode
+
 ## Summary
 
 The Event Plane provides a transport-agnostic pub/sub interface for Dynamo components. It unifies NATS and ZMQ under a consistent API, exposes strongly scoped publisher/subscriber types, and supports dynamic discovery for ZMQ to automatically connect to publishers at runtime.
@@ -195,6 +198,110 @@ This design keeps discovery as the authoritative source of active publishers whi
 This record is written under the key `namespace/component/topic/{instance_id}` and is the authoritative source for dynamic subscriber discovery.
 
 This design keeps discovery as the authoritative source of active publishers while allowing ZMQ to scale with dynamic process lifecycles.
+
+### ZMQ Scaling: Direct Mode vs Broker Mode
+
+ZMQ provides two deployment modes to address different scalability requirements: **Direct Mode** and **Broker Mode**. The choice depends on the number of publishers and reliability requirements.
+
+#### Direct Mode
+
+In direct mode, each publisher binds a ZMQ PUB socket, and subscribers connect directly to all publishers via discovery.
+
+**Connection Model:** O(P × S) where P = publishers, S = subscribers
+- Example: 100 publishers × 10 subscribers = 1,000 connections
+- Example: 1,000 publishers × 10 subscribers = 10,000 connections
+
+**Characteristics:**
+- Lowest latency (direct publisher → subscriber path)
+- No single point of failure or broker infrastructure
+- Connection count grows multiplicatively with publishers and subscribers
+- Best suited for < 100 publishers
+
+#### Broker Mode
+
+Broker mode introduces a centralized XSUB/XPUB relay that intermediates between publishers and subscribers, reducing connection count at scale.
+
+**Connection Model:** O(P + S) where P = publishers, S = subscribers
+- Example: 100 publishers + 10 subscribers = 110 connections (99% reduction)
+- Example: 1,000 publishers + 10 subscribers = 1,010 connections (99% reduction)
+
+**Activation:**
+
+Broker mode is activated via environment variables:
+
+```bash
+# Explicit broker URL
+export DYN_ZMQ_BROKER_URL="xsub=tcp://broker:5555 , xpub=tcp://broker:5556"
+
+# Or discovery-based
+export DYN_ZMQ_BROKER_ENABLED=true
+```
+
+No code changes required - the Event Plane automatically switches modes based on configuration.
+
+**Characteristics:**
+- Scales to 10,000+ publishers with zero message loss
+- Centralized relay simplifies network topology
+- Adds one network hop (slightly higher latency)
+- Requires broker deployment
+- Supports multi-broker HA for redundancy
+
+#### Multi-Broker High Availability
+
+For production deployments requiring high availability, broker mode supports multiple broker instances with automatic failover.
+
+**Architecture:**
+
+Multiple brokers operate independently. Publishers and subscribers connect to all brokers simultaneously:
+
+```
+Publishers → Broker 1 → Subscribers
+          ↘ Broker 2 ↗
+```
+
+- Brokers can be shareded hash based assigned based on HRW hashing for load balancing in next phase.Each publisher can publish to 2 brokers based on stable HRW hash and subscribers subscribe to all brokers. This can help scale the brokers.
+
+**Configuration:**
+
+```bash
+# Multiple brokers (semicolon-separated)
+export DYN_ZMQ_BROKER_URL="xsub=tcp://broker1:5555;tcp://broker2:5555 , xpub=tcp://broker1:5556;tcp://broker2:5556"
+```
+
+**Behavior:**
+- Publishers load-balance messages across all brokers (ZMQ built-in)
+- Subscribers receive from all brokers for redundancy
+- If one broker fails, messages continue through remaining brokers
+- No coordinator needed - brokers are stateless and independent
+
+**Deduplication:**
+
+Since subscribers receive messages from multiple brokers, client-side deduplication ensures each message is processed once. The Event Plane uses an LRU cache with `(publisher_id, sequence)` tuples from the EventEnvelope to filter duplicates automatically.
+
+**Validation:** Tested with 2,000 publishers and 2 brokers - received exactly 20,000 messages (not 40,000), confirming zero duplicates.
+
+**Benefits:**
+- No single point of failure
+- Automatic failover without coordination
+- Zero duplicate messages delivered to applications
+- Transparent to application code
+
+**Trade-offs:**
+- Higher latency due to deduplication overhead
+- Additional memory for deduplication cache
+- More network connections (connects to each broker)
+
+#### Selection Guidance
+
+| Publishers | Recommended Mode | Rationale |
+|------------|------------------|-----------|
+| < 100 | Direct | Simple, low latency, manageable connections |
+| 100-1,000 | 2 Brokers | Zero message loss, O(P+S) scaling |
+| 1,000+ | Multi-Broker HA | High availability, load distribution |
+
+**Migration:**
+
+Switching modes requires no code changes - only environment variable configuration and process restart. Rollback is similarly simple by unsetting broker environment variables.
 
 ## Alternate Solutions
 
