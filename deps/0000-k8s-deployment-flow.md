@@ -114,8 +114,8 @@ spec:
   # Required: Serving backend
   backend: any                      # enum: [any, sglang, trtllm, vllm]
   
-  # Required: Container image for profiling and runtime
-  image: "nvcr.io/nvidia/ai-dynamo/profiler:1.0.0"
+  # Optional: Container image for profiling (will be `nvcr.io/nvidia/ai-dynamo/dynamo-frontend:<operator-version>` if omitted)
+  image: "nvcr.io/nvidia/ai-dynamo/dynamo-frontend:1.0.0"
   
   # Optional: Workload parameters
   workload:
@@ -317,7 +317,6 @@ metadata:
 spec:
   model: "Qwen/Qwen3-32B"
   backend: any
-  image: "nvcr.io/nvidia/ai-dynamo/profiler:1.0.0"
   autoApply: true
 ```
 
@@ -333,7 +332,6 @@ metadata:
 spec:
   model: "Qwen/Qwen3-32B"
   backend: trtllm
-  image: "nvcr.io/nvidia/ai-dynamo/profiler:1.0.0"
   workload:
     isl: 2048
     osl: 512
@@ -355,7 +353,6 @@ metadata:
 spec:
   model: "Qwen/Qwen3-32B"
   backend: trtllm
-  image: "nvcr.io/nvidia/ai-dynamo/profiler:1.0.0"
   workload:
     isl: 2048
     osl: 512
@@ -377,7 +374,6 @@ metadata:
 spec:
   model: "Qwen/Qwen3-32B"
   backend: trtllm
-  image: "nvcr.io/nvidia/ai-dynamo/profiler:1.0.0"
   workload:
     isl: 2048
     osl: 512
