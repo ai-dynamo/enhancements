@@ -73,7 +73,7 @@ DGDR **MUST** support both exploratory and auto-deploy modes. When `autoApply: t
 
 ### REQ 6: Optional Planner Integration
 
-DGDR **MUST** allow users to optionally include Planner in the generated DGD via the `enableAutoScaling` field. When `enableAutoScaling: false` (default), the generated DGD **MUST NOT** include Planner. When `enableAutoScaling: true`, the generated DGD **MAY** include Planner for autoscaling and SLA monitoring.
+DGDR **MUST** allow users to optionally include Planner in the generated DGD via the `features.planner` field. When `features.planner: false` (default), the generated DGD **MUST NOT** include Planner. When `features.planner: true`, the generated DGD **MAY** include Planner for autoscaling and SLA monitoring.
 
 ### REQ 7: Entry Path, Not Permanent Home
 
@@ -140,8 +140,10 @@ spec:
   # Optional: Search strategy
   searchStrategy: rapid              # enum: [rapid, thorough] (default: rapid)
   
-  # Optional: Enable autoscaling via Planner
-  enableAutoScaling: false           # default: false
+  # Optional: extra features 
+  features:
+      planner: false           # Enable autoscaling via Planner (default: false)
+      kvRouter: false          # Enable KV router (default: false)
   
   # Auto-deploy resulting DGD after profiling
   autoApply: true
@@ -259,7 +261,7 @@ Some DGDR-generated DGDs will include Planner (for autoscaling, SLA tracking), b
 - Users who prefer fixed-capacity, cost-predictable setups
 - Early deployments where Planner is not yet available
 
-This is controlled by the `enableAutoScaling` field (default: `false`).
+This is controlled by the `features.planner` field (default: `false`).
 
 ### 2. DGDR is an Entry Path, Not a Permanent Interface
 
@@ -300,7 +302,7 @@ DGDR controller requires:
 | **AIC** | Simulation-based configuration search | DGDR calls AIC for rapid-search modes without Planner |
 | **DynamoPlannerProfiler** | On-cluster profiling and validation, setting up data for Planner | DGDR calls DPP when `searchStrategy: thorough` or when the user requires Planner |
 | **DGD** | Low-level deployment spec | DGDR generates and applies DGDs |
-| **Planner** | Runtime SLA tracking and autoscaling | Included in DGD only if `enableAutoScaling: true` |
+| **Planner** | Runtime SLA tracking and autoscaling | Included in DGD only if `features.planner: true` |
 | **Recipes** | Pre-built templates | Complementary; users can skip DGDR if using Recipes |
 
 ## Example Workflows
@@ -382,7 +384,8 @@ spec:
   sla:
     ttft: 150
     itl: 20
-  enableAutoScaling: true
+  features:
+    planner: true
   autoApply: true
 ```
 
@@ -418,7 +421,7 @@ spec:
 
 * Thorough search with optimized online profiling
 * Aggregated deployments support for thorough search
-* Planner integration (Planner included when `enableAutoScaling: true`)
+* Planner integration (Planner included when `features.planner: true`)
 * Potential: mutable DGDR (updating spec triggers re-profiling, in-place DGD updates)
 * Runtime ISL/OSL adaptation
 
@@ -457,7 +460,7 @@ A key insight is that DGDR is the entry path, not the permanent home. Once a DGD
 
 ## Planner is Optional
 
-Planner is a powerful feature for autoscaling and SLA monitoring, but it's not required for all deployments. Early deployments may use disaggregated-only (before agg autoscaling). Cost-sensitive users may prefer fixed capacity. `enableAutoScaling: false` (default) reflects this optionality.
+Planner is a powerful feature for autoscaling and SLA monitoring, but it's not required for all deployments. Early deployments may use disaggregated-only (before agg autoscaling). Cost-sensitive users may prefer fixed capacity. `features.planner: false` (default) reflects this optionality.
 
 ---
 
