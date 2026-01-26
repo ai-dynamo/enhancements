@@ -148,7 +148,7 @@ spec:
   # Auto-deploy resulting DGD after profiling
   autoApply: true
 
-status:
+status: # theoretical
   # Current phase in the lifecycle
   phase: Ready                       # enum: [Pending, Profiling, Ready, Deploying, Deployed, Failed]
   
@@ -164,7 +164,7 @@ status:
       status: "True"
       message: "AIC profiling completed successfully"
   
-  # Profiling results
+  # Profiling results (example)
   profilingResults:
     pareto:
       - backend: trtllm
@@ -403,11 +403,13 @@ spec:
 * Quick-start path with defaults
 * SLA-driven profiling with reasonable defaults
 * Web UI for result exploration
+* Resulting DGD has KV Router
 
 **Not Supported:**
 
 * Mutable DGDR (updating DGDR to trigger re-profiling)
 * Thorough search (online profiling)
+* Aggregated profiling when the user requests planner
 
 ## Phase 1
 
@@ -417,7 +419,8 @@ spec:
 
 * Thorough search with optimized online profiling
 * Aggregated deployments support for thorough search
-* Planner integration (Planner included when `features.planner: true`)
+* Aggregated profiling support with Planner
+* Full Planner integration (Planner included when `features.planner: true`)
 * Potential: mutable DGDR (updating spec triggers re-profiling, in-place DGD updates)
 * Runtime ISL/OSL adaptation
 
