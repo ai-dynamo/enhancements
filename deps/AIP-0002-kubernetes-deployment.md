@@ -47,7 +47,7 @@ Single-node AIPerf is limited to ~28K-60K concurrent connections per source IP d
 
 ## Goals
 
-- Scale load generation to 1M+ connections across multiple pods (see [Appendix I](#i-scaling-guidelines))
+- Scale load generation to 1M+ connections across multiple pods
 - Provide simple deployment via `--kubernetes` flag while preserving existing CLI compatibility
 - Reuse existing ZMQ TCP transport to minimize code changes
 - Automatically calculate worker count from target concurrency at deployment time
@@ -73,7 +73,7 @@ The implementation **MUST** use the Kubernetes API directly. All components **MU
 
 ### REQ 3 Concurrency Scaling
 
-The distributed deployment **MUST** sustain at least 1M concurrent connections given sufficient pod replicas. Validation criteria are defined per Phase; see [Appendix I](#i-scaling-guidelines) for pod count calculations.
+The distributed deployment **MUST** sustain at least 100K concurrent connections. The system **SHOULD** support scaling to 1M+ concurrent connections given sufficient pod replicas.
 
 ### REQ 4 Communication Protocol
 
@@ -99,65 +99,93 @@ The architecture uses **JobSet** to manage all components as a unified workload:
 1. **Controller ReplicatedJob**: All singleton services in one pod with **4 containers**, communicating via IPC over a shared volume
 2. **Workers ReplicatedJob**: Scalable worker pods with RecordProcessor sidecars, using TCP to controller and IPC to sidecar
 
+
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ Kubernetes Cluster                                                      │
-│                                                                         │
-│  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │ JobSet: aiperf-benchmark-{job_id}                                 │  │
-│  │   failurePolicy: maxRestarts=0 (fail fast)                        │  │
-│  │   startupPolicy: InOrder (controller → workers)                   │  │
-│  │                                                                   │  │
-│  │  ┌─────────────────────────────────┐  ┌─────────────────────────┐ │  │
-│  │  │ ReplicatedJob: controller       │  │ ReplicatedJob: workers  │ │  │
-│  │  │ replicas: 1                     │  │ replicas: N             │ │  │
-│  │  │                                 │  │                         │ │  │
-│  │  │ ┌─────────────────────────┐     │  │ Pod 0..N-1              │ │  │
-│  │  │ │    control-plane        │     │  │ ┌────────┬─────────┐    │ │  │
-│  │  │ │ (SysCtrl + WorkerMgr)   │     │◄─┤ │Worker  │Processor│    │ │  │
-│  │  │ ├────────────┬────────────┤     │  │ │        │(sidecar)│    │ │  │
-│  │  │ │TimingMgr   │DatasetMgr  │     │  │ └────────┴─────────┘    │ │  │
-│  │  │ ├────────────┴────────────┤     │  │                         │ │  │
-│  │  │ │    RecordsManager       │     │  │                         │ │  │
-│  │  │ └─────────────────────────┘     │  │                         │ │  │
-│  │  │  (4 containers + IPC vol)       │  │   (2 containers)        │ │  │
-│  │  └─────────────────────────────────┘  └─────────────────────────┘ │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│ User's Local Machine                                             │
+│                                                                  │
+│  $ aiperf profile --kubernetes \                                 │
+│      --url http://llm-server:8000 \                              │
+│      --concurrency 100000 \                                      │
+│      --workers-max 200                                           │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │ AIPerf CLI (Python)                                        │  │
+│  │  - Reads ~/.kube/config                                    │  │
+│  │  - Creates namespace, RBAC, ConfigMap via K8s API          │  │
+│  │  - Creates JobSet with controller + workers replicatedJobs │  │
+│  │  - Monitors via Kubernetes API and WebSocket               │  │
+│  │  - Retrieves results via Custom HTTP API                   │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                              │ Kubernetes Python API             │
+└──────────────────────────────┼───────────────────────────────────┘
+                               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ Kubernetes Cluster (namespace: benchmarks or aiperf-{job_id})    │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │ JobSet: aiperf-benchmark-{job_id}                          │  │
+│  │   failurePolicy: maxRestarts=0 (fail fast)                 │  │
+│  │   startupPolicy: InOrder (controller → workers)            │  │
+│  │                                                            │  │
+│  │  ┌─────────────────────────────────────────────────────┐   │  │
+│  │  │ ReplicatedJob: controller (backoffLimit: 0)         │   │  │
+│  │  │                                                 ZMQ │   │  │
+│  │  │  ┌─────────────────────────────────────────────┐IPC │   │  │
+│  │  │  │ control-plane                               │◄─┐ │   │  │
+│  │  │  │  SysCtrl, WorkerMgr, ProxyManager           │◄─┤ │   │  │
+│  │  │  ├─────────────────────┬───────────────────────┤  │ │   │  │
+│  │  │  │      TimingMgr      │      DatasetMgr       │◄─┤ │   │  │
+│  │  │  ├─────────────────────┴───────────────────────┤  │ │   │  │
+│  │  │  │ RecordsMgr, GPUTelemetryMgr, ServerMetrics  │◄─┘ │   │  │
+│  │  │  └─────────────────────────────────────────────┘    │   │  │
+│  │  │  DNS: aiperf-benchmark-{job_id}-controller-0-0      │   │  │
+│  │  └─────────────────────────────────────────────────────┘   │  │
+│  │                           │ ZMQ over TCP         ▲         │  │
+│  │           ┌───────────────┼───────────────┐      │         │  │
+│  │           ▼               ▼               ▼      │         │  │
+│  │  ┌───────────────────────────────────────────────┼─────┐   │  │
+│  │  │ ReplicatedJob: workers (backoffLimit: 2)      │     │   │  │
+│  │  │                                               │ ZMQ │   │  │
+│  │  │  Pod 0 (JOB_COMPLETION_INDEX=0)               │ TCP │   │  │
+│  │  │  ┌──────────────┐  IPC  ┌──────────────────┐  │     │   │  │
+│  │  │  │  Worker      │──────►│ RecordProcessor  │──┘     │   │  │
+│  │  │  │ Container    │       │     (sidecar)    │        │   │  │
+│  │  │  └──────────────┘       └──────────────────┘        │   │  │
+│  │  │   DNS: aiperf-benchmark-{job_id}-workers-0-{N}      │   │  │
+│  │  │      Pod 1 ... Pod N-1 (same structure)             │   │  │
+│  │  └─────────────────────────────────────────────────────┘   │  │
+│  └──────────────┼────────────┼────────────┼───────────────────┘  │
+│                 │            │            │                      │
+│                 ▼            ▼            ▼                      │
+│             ┌──────────────────────────────────┐                 │
+│             │     Target Inference Service     │                 │
+│             └──────────────────────────────────┘                 │
+└──────────────────────────────────────────────────────────────────┘
 ```
+
 
 ### Why JobSet
 
-| Aspect | Raw Pod + Indexed Job | JobSet |
-|--------|----------------------|--------|
-| Industry adoption | Native K8s API | Google (130K-node clusters), Kubeflow Trainer V2 |
-| Multi-component coordination | Manual | Built-in replicatedJobs |
-| Failure policies | Per-resource | Unified across all components |
-| DNS management | Manual Service | Automatic headless service |
-| Startup sequencing | Manual wait | Built-in startupPolicy |
-| Cleanup | Delete Pod + Job separately | Delete JobSet (cascades) |
+| **Aspect** | JobSet | Per-Service Pods | Custom Operator |
+|--------|--------|------------------|-----------------|
+| **Industry adoption** | Google (130K-node clusters), Kubeflow Trainer V2 | Most common K8s pattern | k6-operator, Locust operator |
+| **Coordination primitives** | Built-in (replicatedJobs, startupPolicy, DNS, failure policies) | Must build manually | Must build in operator |
+| **CLI effort** | Low (generate YAML + HTTP APIs) | High (YAML + HTTP APIs + coordination logic) | Low (generate CR + HTTP APIs) |
+| **Coordination effort** | None (JobSet provides) | High (5+ Deployments, Services, readiness logic) | None (operator handles it) |
+| **Maintenance burden** | Low (SIG maintains JobSet) | Medium (more code/YAML to maintain) | High (operator + CRD maintenance) |
+| **Cleanup** | Delete 1 JobSet | Delete 7+ resources | Delete 1 CR |
+| **Prerequisites** | JobSet CRD | None (native K8s) | Operator deployment |
+| **Total effort** | Low (CLI + HTTP APIs) | Medium (CLI + HTTP APIs + coordination) | High (CLI + HTTP APIs + operator + CRD) |
 
 > "Replacing repetitive infrastructure layers with JobSet would help to avoid redundancy and reduce developer toil." - Kubeflow Trainer V2 Proposal<sup>[[1]](#ref-1)</sup>
+
+Following Kubeflow Trainer V2's approach of building on JobSet rather than reinventing coordination primitives, we achieve the lowest total effort: CLI generates YAML while JobSet handles startup ordering, failure policies, and cleanup - infrastructure validated at Google's 130K-node scale.
 
 ### Service Distribution
 
 **Controller ReplicatedJob** (replicas: 1, 4 containers)
-
-| Container | Service(s) | Communication |
-|-----------|------------|---------------|
-| `control-plane` | SystemController, WorkerManager, GPUTelemetryManager*, ServerMetricsManager* | IPC + Event Bus |
-| `timing-manager` | TimingManager | IPC + Credit Router (TCP) |
-| `dataset-manager` | DatasetManager | IPC + Event Bus, HTTP API (dataset) |
-| `records-manager` | RecordsManager | IPC + Pull (TCP), HTTP API (progress, artifacts) |
-
-*Optional services enabled via `--gpu-telemetry` and `--server-metrics` flags.
-
 **Workers ReplicatedJob** (replicas: N, 2 containers)
-
-| Container | Service | Communication |
-|-----------|---------|---------------|
-| `worker` | Worker | TCP to Controller, IPC to sidecar |
-| `record-processor` | RecordProcessor | IPC from Worker, TCP to RecordsManager |
 
 ### Why This Structure
 
@@ -174,7 +202,7 @@ The architecture uses **JobSet** to manage all components as a unified workload:
 
 **RecordProcessor as sidecar:**
 - Keeps data local: KB-MB responses stay within the pod via IPC
-- Reduces network bandwidth ~50x (only ~100B metrics cross the network)
+- Reduces network bandwidth (only <1KB metrics per request cross the network)
 - Scales naturally: adding workers automatically adds processors
 - Isolates CPU spikes in tokenization from timing-sensitive workers
 
@@ -188,15 +216,10 @@ The existing ZMQ-based communication patterns are preserved with adaptations for
 |---------|---------|-----------|---------|
 | CREDIT_ROUTER | ROUTER/DEALER | IPC + TCP | TimingManager ↔ Workers (credit distribution/return) |
 | RAW_INFERENCE | PUSH/PULL | IPC only | Worker → RecordProcessor (raw responses, direct sidecar) |
-| RECORDS | PUSH/PULL | IPC + TCP | RecordProcessors → RecordsManager (processed metrics) |
-| EVENT_BUS_PROXY | XPUB/XSUB | IPC + TCP | Coordination messages |
+| RECORDS | PUSH/PULL | IPC + TCP | RecordProcessors → RecordsManager (processed metrics), GPUTelemetryMgr → RecordsManager (GPU metrics), ServerMetricsMgr → RecordsManager (server metrics) |
+| EVENT_BUS_PROXY | XPUB/XSUB | IPC + TCP | Coordination messages, Progress reporting |
 
 ### Network Configuration
-
-| Scope | Protocol | Latency |
-|-------|----------|---------|
-| Within pods | IPC | ~μs |
-| Between pods | TCP | ~100μs-1ms (acceptable for 100ms+ requests) |
 
 **JobSet DNS format:** Hostname is `{jobset-name}-{replicatedJob-name}-{job-index}-{pod-index}`. Full FQDN is `{hostname}.{subdomain}.{namespace}.svc.cluster.local`, where subdomain defaults to the JobSet name.
 
@@ -217,40 +240,25 @@ frontend.bind("tcp://0.0.0.0:5663")                           # remote workers
 
 This approach delivers IPC latency benefits for co-located services without additional bridging components.
 
-See [Appendix A](#a-zmq-address-tables) for address tables, [Appendix F](#f-yaml-definitions) for Service definition.
-
 ## Deployment Modes
 
-### Single-Node vs Kubernetes
+### Current Single-Node vs Proposed Kubernetes
 
 | Aspect | Single-Node | Kubernetes |
 |--------|-------------|------------|
 | Worker Identity | UUID | `JOB_COMPLETION_INDEX` (0, 1, 2, ...) |
 | Worker → RecordProcessor | Via RAW_INFERENCE_PROXY (IPC) | Direct IPC to sidecar |
-| Dataset Access | Local filesystem | HTTP download to local emptyDir, then mmap |
+| Dataset Access | Local filesystem (mmap) | HTTP download to local emptyDir, then mmap |
 | Service Discovery | Local addresses | JobSet DNS |
 | Progress Streaming | APIService (optional) | APIService via port-forward/LB |
 | Cleanup | Process termination | JobSet deletion (cascades) |
 
-### CLI Usage
-
-```bash
-# Run benchmark
-aiperf profile --kubernetes \
-  --url http://my-llm-service:8080 \
-  --concurrency 100000 \
-  --workers-max 200
-
-# Attach to running benchmark
-aiperf attach <job-id> --namespace benchmarks
-
-# Cleanup
-aiperf cleanup --job-id <job-id>
-```
-
 ## Resource Management
 
 ### Pod Resource Allocation
+
+> [!NOTE]
+> These resource values are preliminary estimates based on similar workloads. Actual requirements will be validated during Phase 0/1 testing and adjusted based on profiling data.
 
 **Controller pod containers:**
 
@@ -276,7 +284,7 @@ aiperf cleanup --job-id <job-id>
 
 **Worker count formula:** `workers = ceil(target_concurrency / connections_per_worker)`
 
-The default is 500 connections per worker (configurable via `AIPERF_HTTP_CONNECTION_LIMIT`). This conservative starting point may be adjusted based on production benchmarking; higher values reduce pod count but increase per-worker event loop load. See [Appendix I](#i-scaling-guidelines) for resource estimates at various scales.
+The default is 500 connections per worker (configurable via `AIPERF_HTTP_CONNECTION_LIMIT`). This  starting point may be adjusted based on production benchmarking; higher values reduce pod count but increase per-worker event loop load.
 
 ### Failure Handling
 
@@ -290,72 +298,9 @@ The default is 500 connections per worker (configurable via `AIPERF_HTTP_CONNECT
 
 ### Error Reporting
 
-When a benchmark fails, the CLI automatically collects diagnostic information:
-
-| Source | Content | Access |
-|--------|---------|--------|
-| Pod logs | stdout/stderr from all containers, including stack traces | `kubectl logs` or automatic retrieval |
-| Pod events | Kubernetes events (OOM kills, image pull failures, scheduling issues) | `kubectl describe pod` |
-| ConfigMap | Last known progress state before failure | Automatic retrieval |
-| Exit codes | Container exit codes indicating failure type | JobSet status |
-
-The `aiperf attach` command (Phase 2) streams logs in real-time and automatically retrieves failure diagnostics when the benchmark terminates unexpectedly. For manual debugging, pod logs remain accessible via `kubectl logs <pod-name> -c <container-name>` until the JobSet is deleted.
-
-# Implementation Phases
-
-## Phase Overview
-
-| Phase | Goal | Key Deliverable |
-|-------|------|-----------------|
-| **0: POC** | Validate architecture | Manual JobSet, split IPC + TCP works across pods |
-| **1: MVP** | Break 65K barrier | `--kubernetes` flag, 100K+ connections, automated |
-| **2: Reliability** | Production-grade | `attach`, progress streaming, pre-flight checks |
-| **3: Production** | Enterprise patterns | Config file, parameter sweeps, S3 upload |
-| **4: Future** | GitOps/declarative | Operator, CRD, status reporting |
-
-## Phase 0: POC
-
-**Goal:** Validate split IPC + TCP architecture across pod boundaries.
-
-**Deliverables:** Manual JobSet YAML deployment
-
-**Success criteria:** IPC works within pods, TCP works across pods, complete 1K request benchmark
-
-## Phase 1: MVP
-
-**Goal:** Break the 65K connection barrier with CLI automation.
-
-**Deliverables:** `--kubernetes` flag, ConfigMap-based config, JobSet creation, health probes, results retrieval, automatic cleanup
-
-**Success criteria:** 100K+ connections, end-to-end automation, ±5% variance versus single-node
-
-## Phase 2: Reliability
-
-**Deliverables:** `aiperf attach` for reconnecting, WebSocket progress streaming, graceful shutdown, pre-flight checks
-
-## Phase 3: Production
-
-**Deliverables:** Config file support (`--config perf.yaml`), parameter sweeps, S3/GCS upload
-
-## Phase 4: Future
-
-**Deliverables:** AIPerf Operator (thin JobSet wrapper), `AIPerfJob` CRD, status reporting
-
-## Interface Evolution
-
-| Phase | Command | Best For |
-|-------|---------|----------|
-| **0** | `kubectl apply -f jobset.yaml` | POC |
-| **1** | `aiperf profile --kubernetes ...` | Dev |
-| **3** | `aiperf profile --config perf.yaml` | CI/CD |
-| **4** | `kubectl apply -f aiperf-job.yaml` | GitOps |
-
-See [Appendix D](#d-interface-evolution-details) for examples. The operator follows Kubeflow Trainer V2<sup>[[1]](#ref-1)</sup>, a thin JobSet wrapper.
+TBD
 
 # Implementation Details
-
-> [!IMPORTANT]
-> This section contains detailed implementation guidance and is **not required reading for design review**. It bridges the gap between architectural decisions and implementation.
 
 ## Configuration Strategy
 
@@ -368,15 +313,14 @@ This hybrid approach enables parameter sweeps without pod restarts.
 
 ### ConfigMap Creation and Loading
 
-Configuration is mounted as JSON files at `/etc/aiperf/`. The CLI serializes Pydantic models to JSON, creates a ConfigMap via Kubernetes API, and pods mount it as files. Services load config using `AIPERF_CONFIG_*` environment variables. See [Appendix B](#b-configmap-code-examples) for code examples.
+Configuration is mounted as JSON/YAML files at `/etc/aiperf/`. The CLI serializes Pydantic models to JSON/YAML, creates a ConfigMap via Kubernetes API, and pods mount it as files. Services load config using `AIPERF_CONFIG_*` environment variable or CLI command.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AIPERF_CONFIG_BASE_PATH` | `/etc/aiperf` | Directory containing config files |
-| `AIPERF_CONFIG_SERVICE_FILE` | `service_config.json` | Service config filename |
-| `AIPERF_CONFIG_USER_FILE` | `user_config.json` | User config filename |
+| Variable | CLI Option | Default | Description |
+|----------|------------|---------|-------------|
+| `AIPERF_CONFIG_SERVICE_FILE` | `--service-config FILE` | `/etc/aiperf/service_config.json` | Service config filename |
+| `AIPERF_CONFIG_USER_FILE` | `--user-config FILE` | `/etc/aiperf/user_config.json` | User config filename |
 
-> **Future:** The `ServiceConfig` + `UserConfig` approach is the MVP solution. It will eventually be replaced by a unified `AIPerfJobSpec` YAML config that the CLI parses to generate both JobSet and ConfigMap. This spec will later become the CRD schema.
+> **Future:** The `ServiceConfig` + `UserConfig` approach is the MVP solution. It will eventually be replaced by a unified `AIPerfJobSpec` YAML config that the CLI parses to generate both JobSet and ConfigMap. This spec will later become the CRD schema for any future operator.
 
 ## Dataset Distribution
 
@@ -397,7 +341,7 @@ The CLI transfers dataset files to the cluster using one of these approaches:
 
 > The `pvc://` URI scheme follows the KServe storage URI convention.<sup>[[2]](#ref-2)</sup>
 
-The HTTP API upload supports chunked transfer and compression (LZ4/ZSTD) for efficient transfer of large dataset files.
+The HTTP API upload should support chunked transfer and compression (LZ4/ZSTD) for efficient transfer of large dataset files.
 
 ### Distribution to Workers
 
@@ -415,9 +359,9 @@ Controller Pod                         Worker Pod
 └─────────────────────┘               └──────────────────────────────────────┘
 ```
 
-**Why this approach:** Works on any cluster without requiring RWX PVC support. The network cost is paid once at startup, avoiding per-request bottlenecks. Memory-mapped access provides ~100x faster reads than network access.
+**Why this approach:** Works on any cluster without requiring RWX PVC support. The network cost is paid once at startup, avoiding per-request bottlenecks. Memory-mapped access provides faster reads than network access.
 
-**Optional:** Use `--dataset-pvc NAME` to mount a pre-existing dataset PVC.
+**Optional:** Use `--dataset-pvc NAME` to mount a pre-existing dataset PVC (ReadWriteMany access mode required).
 
 ## Time Synchronization
 
@@ -425,31 +369,28 @@ Controller Pod                         Worker Pod
 
 **Why credit-based sync:** NTP is often unavailable in containers. Since credits already flow from controller to worker, this approach requires no extra messages and adapts to clock drift over time.
 
-## Progress Streaming and HTTP API
+## Progress Streaming and CLI Communication
 
-The controller pod exposes HTTP APIs via RecordsManager and DatasetManager for CLI communication, providing dedicated endpoints rather than overloading the Kubernetes API for data transfer.
+The controller pod exposes ZeroMQ over WebSocket for CLI communication, providing dedicated endpoints rather than overloading the Kubernetes API for data transfer.
 
-### HTTP API Endpoints (ports 9090, 9091)
+### HTTP API Endpoints
 
-The HTTP API is hosted by two services: **RecordsManager** (progress, metrics, artifacts) on port 9091 and **DatasetManager** (dataset download) on port 9090. Artifact downloads support LZ4/ZSTD compression. See [Appendix G](#g-http-api-endpoints) for the full endpoint reference.
+The HTTP API is hosted by two services: **RecordsManager** (progress, metrics, artifacts) and **DatasetManager** (dataset download, upload). Artifact downloads support LZ4/ZSTD compression.
 
 ### Architecture
 
 ```
 CLI (outside cluster)                    Controller Pod (inside cluster)
 ┌─────────────────────┐                  ┌─────────────────────────────────┐
-│ ProgressClient      │◄─── WebSocket ───│ RecordsManager (port 9091)      │
+│ ProgressClient      │◄─── WebSocket ───│ RecordsManager                  │
 │   └─► Terminal UI   │     /ws          │   /api/progress, /ws            │
 │                     │                  │   /api/artifacts, /api/metrics  │
 │ ArtifactClient      │◄─── HTTP GET ────│                                 │
 │   └─► ./artifacts/  │     /api/...     ├─────────────────────────────────┤
-│                     │                  │ DatasetManager (port 9090)      │
-│ DatasetUpload       │──── HTTP POST ───│   /api/dataset                  │
+│                     │                  │ DatasetManager                  │
+│ DatasetUpload       │──── HTTP POST ──►│   /api/dataset                  │
 │   └─► prompts.jsonl │     /api/dataset │                                 │
 └─────────────────────┘                  └─────────────────────────────────┘
-         │
-         │ port-forward / LB / NodePort
-         └───────────────────────────────────────────────────────────────────
 ```
 
 ### External Access Methods
@@ -457,11 +398,12 @@ CLI (outside cluster)                    Controller Pod (inside cluster)
 | Method | Use Case | Reliability | Setup |
 |--------|----------|-------------|-------|
 | **port-forward** (default) | Dev, short benchmarks | Low (drops on idle) | None |
+| **proxy** | Dev, medium benchmarks | Medium | None |
 | **LoadBalancer** | Cloud, long benchmarks | High | Auto (cloud only) |
-| **NodePort** | On-prem, bare metal | Medium | Know node IP |
+| **NodePort** | On-prem, bare metal | Medium | None (or `--node-ip`) |
 | **Ingress** | Enterprise | High | DNS + TLS config |
 
-> **Recommendation:** For benchmarks longer than a few minutes, use `--api-access loadbalancer` (cloud) or `--api-access nodeport` (on-prem) to avoid port-forward connection drops.
+> **Recommendation:** For benchmarks longer than a few minutes, use `--api-access loadbalancer` (cloud) or `--api-access nodeport` (on-prem) to avoid connection drops. Use `--api-access proxy` as a more stable alternative to port-forward when LoadBalancer/NodePort are unavailable.
 
 > **Why not use JobSet DNS?** The CLI runs outside the cluster. Cluster-internal DNS is not resolvable externally. The `--api-access` option selects the appropriate access method.
 
@@ -471,17 +413,17 @@ CLI (outside cluster)                    Controller Pod (inside cluster)
 |---------|---------|-------------|----------|
 | **emptyDir** (default) | All artifacts | Ephemeral (lost on pod termination) | Dev, short benchmarks, CI/CD |
 | **PVC** (optional) | All artifacts | Persistent (survives pod restart) | Long benchmarks, production |
-| **ConfigMap** | `summary.json` only | Persistent | Quick summary access |
+| **ConfigMap** | `profile_export_aiperf.json` only | Persistent | Quick summary access |
 
-> **ConfigMap size limit:** Kubernetes ConfigMaps have a 1MB limit. The summary.json and progress data are designed to stay well under this threshold (typically <10KB); full artifacts are stored in emptyDir/PVC.
+> **ConfigMap size limit:** Kubernetes ConfigMaps have a 1MB limit. The `profile_export_aiperf.json` and progress data are designed to stay well under this threshold (typically <10KB); full artifacts are stored in emptyDir/PVC.
 
-**Incremental progress persistence:** RecordsManager periodically updates the ConfigMap with current progress (completed requests, error counts, partial latency statistics). If a benchmark fails mid-run, the CLI retrieves the last known state from the ConfigMap, ensuring partial results are preserved even without a PVC.
+**Incremental progress persistence:** RecordsManager periodically updates the ConfigMap with current progress (completed requests, error counts, partial latency statistics).
 
 > Use `--results-pvc` to enable persistent storage. Without it, artifacts must be retrieved via HTTP API before pod terminates.
 
 ### Artifact Retrieval Flow
 
-1. CLI retrieves `summary.json` from ConfigMap (fast, <1 KB)
+1. CLI retrieves `profile_export_aiperf.json` from ConfigMap (fast, <10KB)
 2. CLI downloads artifacts via HTTP API (`GET /api/artifacts/archive` with ZSTD compression, 3-5x smaller)
 3. Results written to `./artifacts/{job_id}/`
 4. Cleanup: JobSet deleted (cascades to all pods)
@@ -496,9 +438,10 @@ CLI (outside cluster)                    Controller Pod (inside cluster)
 | `--workers-max` | int | auto | Number of worker pods |
 | `--kubeconfig` | path | ~/.kube/config | Kubeconfig file |
 | `--kubecontext` | str | current-context | Kubernetes context to use |
-| `--dataset-pvc` | str | None | Mount pre-existing dataset PVC (skips HTTP download) |
+| `--dataset-pvc` | str | None | Mount pre-existing dataset PVC (skips HTTP download). Must be ReadWriteMany. |
 | `--results-pvc` | str | None | PVC name for persistent results (default: emptyDir) |
-| `--api-access` | enum | "port-forward" | External API access method |
+| `--api-access` | enum | "port-forward" | External API access method: port-forward, proxy, loadbalancer, nodeport |
+| `--node-ip` | str | auto | Node IP for nodeport access (auto-discovers if not specified) |
 
 ### Namespace Behavior
 
@@ -506,8 +449,6 @@ CLI (outside cluster)                    Controller Pod (inside cluster)
 |----------|-----------|---------|
 | `--namespace` not specified | Auto-generated: `aiperf-{job_id}` | Auto-deleted after benchmark |
 | `--namespace benchmarks` specified | Uses existing namespace | Resources deleted, namespace preserved |
-
-Auto-generated namespaces provide isolation between concurrent benchmarks and guarantee cleanup. User-specified namespaces allow reuse of existing RBAC, PVCs, and network policies.
 
 ### Pre-flight Checks
 
@@ -521,68 +462,126 @@ Pre-flight checks run automatically with `aiperf profile --kubernetes` and are a
 | resource-quota | Warning with required resources |
 | endpoint-reachability | Error with network troubleshooting hints |
 | image-pull | Error with registry/auth hints |
-| time-synchronization | Warning if clock skew >10ms |
 
-Pre-flight checks fail fast with actionable error messages, preventing partial deployments. See [Appendix E](#e-pre-flight-check-example) for example output.
+Pre-flight checks fail fast with actionable error messages, preventing partial deployments.
+
+## Testing Strategy
+
+- **Unit tests** (mocked K8s client): JobSet/ConfigMap generation, CLI parsing, ZMQ address formatting
+- **Integration tests** (kind/minikube): JobSet lifecycle, IPC/TCP communication, dataset distribution, health probes, progress streaming, artifact retrieval
+- **E2E tests** (real cluster): 10→200+ workers, 1K→100K+ concurrency, results within ±5% of single-node, failure recovery, long-running stability
 
 ## RBAC Requirements
 
-AIPerf requires a Role with permissions for: ConfigMaps, Services (CRUD), Pods/logs (read), Jobs (read), and JobSets (CRUD). See [Appendix F](#f-yaml-definitions) for the full Role definition.
+AIPerf requires a Role with permissions for: ConfigMaps, Services (CRUD), Pods/logs (read), Jobs (read), and JobSets (CRUD).
 
 ## Container Images
 
 A single container image supports all AIPerf service modes. Each container runs one or more services via `aiperf service`:
 
 ```bash
-# Controller pod containers (4 containers)
-aiperf service --type system-controller,worker-manager --health-port 8080  # control-plane
-# With optional telemetry:
-# aiperf service --type system-controller,worker-manager,gpu-telemetry-manager,server-metrics-manager --health-port 8080
+# Controller pod (4 containers) (TBD)
+aiperf service --type system-controller --extra-services worker-manager --health-port 8080
 aiperf service --type timing-manager --health-port 8081
 aiperf service --type dataset-manager --health-port 8082 --api-port 9090
-aiperf service --type records-manager --health-port 8083 --api-port 9091
+aiperf service --type records-manager --extra-services gpu-telemetry-manager,server-metrics-manager --health-port 8083 --api-port 9091
 
-# Worker pod containers
+# Worker pod (2 containers)
 aiperf service --type worker --health-port 8080
 aiperf service --type record-processor --health-port 8081
 ```
 
 ### Service Command Options
 
-The `aiperf service` command accepts `--type` (required), `--api-port`, `--health-port`, and `--id` options. See [Appendix J](#j-service-command-reference) for the full option and service type reference.
+The `aiperf service` command accepts `--type` (required), `--api-port`, `--health-port`, and `--id` options.
 
 ## Health Probes
 
 Each container exposes `/healthz` (liveness) and `/readyz` (readiness) endpoints via a minimal HTTP server on the async event loop.
 
-**Controller pod containers:**
-
-| Container | Port | Health Checks |
-|-----------|------|---------------|
-| `control-plane` | 8080 | Event loop responsive, ZMQ sockets bound, worker registry initialized |
-| `timing-manager` | 8081 | Event loop responsive, credit router connected |
-| `dataset-manager` | 8082 | Event loop responsive, dataset loaded |
-| `records-manager` | 8083 | Event loop responsive, pull socket bound |
-
-**Worker pod containers:**
-
-| Container | Port | Health Checks |
-|-----------|------|---------------|
-| `worker` | 8080 | Event loop responsive, ZMQ connected, dataset mmap loaded |
-| `record-processor` | 8081 | Event loop responsive, IPC socket connected |
-
-All containers use startup probes to allow time for initialization (up to 60s for dataset loading). See [Appendix H](#h-health-probe-configuration) for full YAML configuration.
-
 ## Deferred to Implementation
 
-The following details are deferred to the implementation phase: exact ZMQ port assignments, StorageClass recommendations per cloud provider, container image registry location, Prometheus metrics endpoint, and log format schema for Loki/EFK.
+The following details are deferred to the implementation phase: exact ZMQ port assignments, StorageClass recommendations per cloud provider, container image registry location, Prometheus metrics endpoint, and log format schema.
 
-See [Appendix F](#f-yaml-definitions) for RBAC Role and Controller Service YAML definitions.
 
-# Related Proposals
+# Implementation Phases
 
-- [research/10-indexed-jobs-vs-jobset-comparison.md](./research/10-indexed-jobs-vs-jobset-comparison.md)
-- [config-schema-alignment.md](./config-schema-alignment.md)
+## MVP Scope
+
+**Target:** Sustain 100K+ concurrent connections (200+ workers) with results matching single-node quality (±5% variance).
+
+**Deliverables:**
+
+*Container Runtime (M0):*
+- [ ] `aiperf service` CLI command for running services in containers
+- [ ] Config Pydantic serialization (`to_json()`, `from_json()`)
+- [ ] Config loading from `/etc/aiperf/` files
+- [ ] HTTP health server (`/healthz`, `/readyz` endpoints)
+
+*Communication (M1):*
+- [ ] Configurable ZMQ addresses
+- [ ] Dual-bind ZMQ proxies (IPC + TCP simultaneously)
+
+*Kubernetes Resources (M2-M3):*
+- [ ] JobSet YAML generation with controller + workers replicatedJobs
+- [ ] startupPolicy for controller-first ordering
+- [ ] Headless Service DNS for pod discovery
+- [ ] ConfigMap creation for user/service config
+- [ ] Namespace, RBAC, Service creation
+- [ ] Basic CLI integration (`--kubernetes`, `--kubeconfig`, `--image`, `--workers-max`)
+
+*Dataset & Benchmark (M4):*
+- [ ] HTTP dataset API (`GET /api/dataset`)
+- [ ] Worker dataset download and local mmap access
+- [ ] CLI dataset upload (`POST /api/dataset`)
+
+*Progress & Results (M5):*
+- [ ] Progress polling (`GET /api/progress`)
+- [ ] WebSocket API for progress streaming
+- [ ] port-forward setup for CLI↔controller communication
+- [ ] HTTP artifact API (`GET /api/artifacts/archive`)
+- [ ] ConfigMap summary storage
+
+*Lifecycle (M6):*
+- [ ] Automatic cleanup (delete JobSet after benchmark)
+- [ ] Ctrl+C cancellation with graceful termination
+
+**Exit Criteria:**
+- Small benchmark (50 workers): 10K+ concurrency sustained for 30+ minutes, results within ±5% of single-node
+- Large benchmark (200+ workers): 100K+ concurrency sustained for 30+ minutes
+
+## Potential Future Interface Evolution Details
+
+All interfaces converge on the same JobSet abstraction:
+
+- **CLI + Flags (MVP):** `aiperf profile --kubernetes --url ...` for interactive use
+- **CLI + Config (Future):** `aiperf profile --config perf.yaml` for CI/CD reproducibility
+- **Operator (Future):** `kubectl apply -f aiperf-job.yaml` for GitOps workflows
+
+```mermaid
+flowchart TB
+    subgraph MVP["MVP CLI"]
+        P1[aiperf profile --kubernetes --url ...]
+    end
+
+    subgraph Config["Future CLI"]
+        P2[aiperf profile --config perf.yaml]
+    end
+
+    subgraph Future["Future Operator"]
+        P3[kubectl apply -f aiperf-job.yaml]
+    end
+
+    P1 -->|Kubernetes API| JobSet
+    P2 -->|Kubernetes API| JobSet
+    P3 -->|Creates AIPerfJob| Operator[AIPerf Operator]
+    Operator -->|Kubernetes API| JobSet
+
+    JobSet["JobSet (same for all)"]
+
+    JobSet --> ControllerPod[Controller Pod]
+    JobSet --> Workers[Worker Pods 1..N]
+```
 
 # Alternate Solutions
 
@@ -605,16 +604,15 @@ Build a dedicated AIPerf Kubernetes operator with a custom CRD (`AIPerfJob`), si
 - Self-healing can corrupt benchmark results (partial restarts skew timing measurements)
 - Technical silos: "Custom operators create technical silos with limited reuse; teams cannot easily compose automation logic from multiple Operators"<sup>[[12]](#ref-12)</sup>
 
-**Rejected:** Kubeflow Trainer V2 explicitly moved away from custom operators toward JobSet, noting that custom operators "introduce redundancy and increase maintenance costs."<sup>[[1]](#ref-1)</sup> For batch workloads like benchmarking, operators add complexity without proportional benefit: the "self-healing" that justifies operators for stateful databases is counterproductive for benchmarks where partial restarts invalidate measurements. JobSet provides the necessary coordination primitives (startup ordering, failure policies, DNS) without custom controller code. Phase 4 reserves an operator option for GitOps use cases, but as a thin JobSet wrapper following the Kubeflow Trainer V2 pattern. See [research/12-leveraging-jobset-vs-custom-operator.md](./research/12-leveraging-jobset-vs-custom-operator.md) and [research/architecture-decision-analysis-jobset-vs-operator.md](./research/architecture-decision-analysis-jobset-vs-operator.md) for detailed analysis.
+**Rejected:** Kubeflow Trainer V2 explicitly moved away from custom operators toward JobSet, noting that custom operators "introduce redundancy and increase maintenance costs."<sup>[[1]](#ref-1)</sup> For batch workloads like benchmarking, operators add complexity without proportional benefit: the "self-healing" that justifies operators for stateful databases is counterproductive for benchmarks where partial restarts invalidate measurements. JobSet provides the necessary coordination primitives (startup ordering, failure policies, DNS) without custom controller code. AIPerf can still implement an operator option for GitOps use cases, but as a thin JobSet wrapper following the Kubeflow Trainer V2 pattern.
 
 ## Per-Service Pod Architecture (Original Proposal)
 
-Separate pods for each service (5 singleton pods + worker Deployment + processor Deployment). See [AIP-0002-kubernetes-deployment.md](./AIP-0002-kubernetes-deployment.md).
+Separate pods for each service (5 singleton pods + worker Deployment + processor Deployment). See git commit history for the original proposal.
 
 | Aspect | Original | Final |
 |--------|----------|-------|
-| Singleton pods | 5 separate (7 CPU, 8Gi) | 1 co-located (0.6-3 CPU, 0.9-2.25Gi) |
-| Pod count (100K) | 255 | 201 |
+| Singleton pods | 5 separate | 1 co-located |
 | Worker↔Processor | TCP (~ms) | IPC (~μs) |
 | Dataset access | ZMQ request/reply (~ms) | Local mmap (~μs) |
 | Cleanup | Delete 7+ resources | Delete 1 JobSet |
@@ -624,10 +622,7 @@ Separate pods for each service (5 singleton pods + worker Deployment + processor
 - Theoretical flexibility for independent service updates
 
 **Cons:**
-- High resource overhead (7 CPU, 8Gi for singletons alone)
-- TCP latency on timing-critical credit distribution path
 - False sense of resilience (any singleton failure still fails the benchmark)
-- Dataset bottleneck with ZMQ request/reply at scale
 - Complex orchestration (5+ Deployments)
 - No startup ordering without manual readiness waits
 
@@ -648,7 +643,7 @@ Separate pods for each service (5 singleton pods + worker Deployment + processor
 - Separate cleanup (delete each resource individually)
 - No unified failure policies
 
-**Rejected:** JobSet provides startup ordering, automatic headless services, unified cleanup, and failure policies out of the box.<sup>[[3]](#ref-3)</sup> Google uses JobSet on 130K-node clusters<sup>[[6]](#ref-6)</sup> and Kubeflow Trainer V2 builds on JobSet.<sup>[[1]](#ref-1)</sup> See [research/10-indexed-jobs-vs-jobset-comparison.md](./research/10-indexed-jobs-vs-jobset-comparison.md) for detailed comparison.
+**Rejected:** JobSet provides startup ordering, automatic headless services, unified cleanup, and failure policies out of the box.<sup>[[3]](#ref-3)</sup> Google uses JobSet on 130K-node clusters<sup>[[6]](#ref-6)</sup> and Kubeflow Trainer V2 builds on JobSet.<sup>[[1]](#ref-1)</sup>
 
 ## Job-Based Deployment Only (No CLI)
 
@@ -663,7 +658,7 @@ Separate pods for each service (5 singleton pods + worker Deployment + processor
 - Requires separate `kubectl` commands for monitoring and cleanup
 - Results must be retrieved manually via `kubectl cp` or PVC
 
-**Rejected:** The CLI provides integrated progress streaming, automatic result retrieval, and simplified cleanup. Pure YAML-based deployment without CLI orchestration would require users to manually handle these concerns. Phase 4's Operator/CRD approach addresses GitOps use cases while still providing automation.
+**Rejected:** The CLI provides integrated progress streaming, automatic result retrieval, and simplified cleanup. Pure YAML-based deployment without CLI orchestration would require users to manually handle these concerns.
 
 ## Helm Charts
 
@@ -674,26 +669,9 @@ Separate pods for each service (5 singleton pods + worker Deployment + processor
 **Cons:**
 - Helm's strengths (release management, upgrades, rollbacks) do not apply to ephemeral benchmark jobs
 - Adds chart maintenance burden without corresponding benefit
+- Helm provides resource-type ordering and `--wait`, but not multi-component coordination primitives (startup ordering between jobs, unified failure policies, automatic headless DNS); those must still be implemented manually or via JobSet
 
-**Rejected:** Helm is designed for managing long-running services with versioned releases. AIPerf benchmarks are ephemeral jobs: they run, produce results, and are deleted. The CLI handles templating internally, making Helm an unnecessary layer.
-
-# Key Design Decisions
-
-| Aspect | Decision | Rationale |
-|--------|----------|-----------|
-| Workload Management | JobSet | Industry standard, unified lifecycle, startup ordering |
-| Failure Handling | Fail-fast (maxRestarts=0) | Benchmark accuracy over auto-recovery |
-| Singletons | Single controller pod, 4 containers | Atomic unit, resource isolation where needed |
-| Container Isolation | Hybrid (critical services isolated) | TimingManager/RecordsManager isolated for timing precision and CPU spike protection |
-| RecordProcessor | Sidecar (1:1) | Data locality, ~50x bandwidth reduction |
-| Configuration | ConfigMap + ProfileConfigureCommand | Minimal refactoring, sweep support |
-| Dataset | HTTP download + local mmap | Works on any cluster, no RWX PVC required |
-| Time Sync | Credit-based offset | Zero extra messages, per-request freshness |
-| Results | emptyDir default, PVC optional | Quick access + persistence when needed |
-| CLI Orchestration | Kubernetes Python API | Direct control, no Helm dependency |
-| RBAC | Namespace-scoped Role | Least privilege |
-| Intra-pod Communication | IPC via shared emptyDir | ~μs latency for co-located services |
-| Inter-pod Communication | TCP | Required for cross-pod, uses JobSet DNS |
+**Rejected:** Helm is designed for managing long-running services with versioned releases. AIPerf benchmarks are ephemeral jobs: they run, produce results, and are deleted. Helm templating does not solve the coordination challenges that JobSet addresses out of the box. The CLI handles templating internally, making Helm an unnecessary layer.
 
 # Background
 
@@ -729,7 +707,7 @@ AIPerf is NVIDIA's AI inference performance benchmarking tool. The current imple
 
 | Term | Definition |
 |------|------------|
-| **Credit** | Token representing a single-turn or multi-turn conversation to be executed by a worker |
+| **Credit** | Token representing the right to make a single request to an inference server |
 | **Ephemeral Port** | Temporary port assigned by the OS for outbound connections, limited to ~28K-60K per source IP (default Linux range: 32768-60999) |
 | **Indexed Job** | K8s Job with stable pod identity via `JOB_COMPLETION_INDEX` |
 | **JobSet** | Kubernetes API for managing groups of Jobs as a unit with shared lifecycle |
@@ -745,535 +723,3 @@ AIPerf is NVIDIA's AI inference performance benchmarking tool. The current imple
 - **ZMQ**: ZeroMQ Messaging Protocol
 
 ---
-
-# Appendix
-
-> [!IMPORTANT]
-> The appendices contain implementation reference material (YAML specs, code examples, API definitions) and are **not required reading for design review**. They are included here for completeness and to aid implementation.
-
-## A. ZMQ Address Tables
-
-### Controller Pod Proxies (Dual-Bind)
-
-Proxies bind to both IPC and TCP. Local services connect via IPC; remote workers connect via TCP.
-
-| Channel | Pattern | IPC Bind (local) | TCP Bind (remote) |
-|---------|---------|------------------|-------------------|
-| EVENT_BUS_PROXY_FRONTEND | XSUB | `ipc:///aiperf/event_bus_proxy_frontend.ipc` | `tcp://0.0.0.0:5663` |
-| EVENT_BUS_PROXY_BACKEND | XPUB | `ipc:///aiperf/event_bus_proxy_backend.ipc` | `tcp://0.0.0.0:5664` |
-| CREDIT_ROUTER | ROUTER | `ipc:///aiperf/credit_router.ipc` | `tcp://0.0.0.0:5564` |
-| RECORDS | PULL | `ipc:///aiperf/records_push_pull.ipc` | `tcp://0.0.0.0:5557` |
-
-### Worker Pod (IPC to Sidecar)
-
-Direct PUSH/PULL connection (no proxy needed for 1:1 sidecar pattern):
-
-| Channel | Pattern | IPC Address |
-|---------|---------|-------------|
-| RAW_INFERENCE | PUSH (Worker) → PULL (RecordProcessor) | `ipc:///aiperf/raw_inference.ipc` |
-
-### Remote Connection (Workers → Controller)
-
-Workers connect to controller via TCP using JobSet DNS:
-
-| Channel | Pattern | TCP Address |
-|---------|---------|-------------|
-| EVENT_BUS_PROXY_FRONTEND | PUB | `tcp://aiperf-benchmark-{job_id}-controller-0-0:5663` |
-| EVENT_BUS_PROXY_BACKEND | SUB | `tcp://aiperf-benchmark-{job_id}-controller-0-0:5664` |
-| CREDIT_ROUTER | DEALER | `tcp://aiperf-benchmark-{job_id}-controller-0-0:5564` |
-| RECORDS | PUSH | `tcp://aiperf-benchmark-{job_id}-controller-0-0:5557` |
-
-## B. ConfigMap Code Examples
-
-**1. CLI creates ConfigMap with serialized configs:**
-
-```python
-# CLI-side: serialize Pydantic models to JSON
-config_data = {
-    "service_config.json": service_config.model_dump_json(indent=2, exclude_none=True, exclude_unset=True),
-    "user_config.json": user_config.model_dump_json(indent=2, exclude_none=True, exclude_unset=True),
-}
-
-# Create ConfigMap via Kubernetes API
-configmap = V1ConfigMap(
-    metadata=V1ObjectMeta(name=f"aiperf-config-{job_id}"),
-    data=config_data,
-)
-core_v1.create_namespaced_config_map(namespace, configmap)
-```
-
-**2. Pod spec mounts ConfigMap as files:**
-
-```yaml
-containers:
-  - name: controller
-    command: ["aiperf", "service", "--type", "system-controller", ...]
-    volumeMounts:
-      - name: config
-        mountPath: /etc/aiperf
-        readOnly: true
-volumes:
-  - name: config
-    configMap:
-      name: aiperf-config-{job_id}
-```
-
-**3. Service loads config from files:**
-
-```python
-# In environment.py - follows existing AIPERF_ prefix pattern
-class _ConfigSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="AIPERF_CONFIG_")
-
-    BASE_PATH: Path = Field(
-        default=Path("/etc/aiperf"),
-        description="Directory containing configuration files",
-    )
-    SERVICE_FILE: str = Field(default="service_config.json")
-    USER_FILE: str = Field(default="user_config.json")
-
-# Usage in config loading
-def load_service_config() -> ServiceConfig:
-    config_file = Environment.CONFIG.BASE_PATH / Environment.CONFIG.SERVICE_FILE
-    if config_file.exists():
-        return ServiceConfig.model_validate_json(config_file.read_text())
-    return ServiceConfig()  # Fall back to defaults for local execution
-```
-
-## C. Container & Pod Examples
-
-### Controller Pod Spec (4 containers)
-
-```yaml
-# Controller pod - hybrid container strategy, shared IPC volume
-containers:
-  - name: control-plane
-    image: ghcr.io/nvidia/aiperf:latest
-    # Base: system-controller,worker-manager
-    # With telemetry: system-controller,worker-manager,gpu-telemetry-manager,server-metrics-manager
-    command: ["aiperf", "service", "--type", "system-controller,worker-manager", "--health-port", "8080"]
-    ports:
-      - containerPort: 8080
-        name: health
-    volumeMounts:
-      - name: ipc
-        mountPath: /aiperf
-      - name: config
-        mountPath: /etc/aiperf
-        readOnly: true
-
-  - name: timing-manager
-    image: ghcr.io/nvidia/aiperf:latest
-    command: ["aiperf", "service", "--type", "timing-manager", "--health-port", "8081"]
-    ports:
-      - containerPort: 8081
-        name: health
-    volumeMounts:
-      - name: ipc
-        mountPath: /aiperf
-      - name: config
-        mountPath: /etc/aiperf
-        readOnly: true
-
-  - name: dataset-manager
-    image: ghcr.io/nvidia/aiperf:latest
-    command: ["aiperf", "service", "--type", "dataset-manager", "--health-port", "8082", "--api-port", "9090"]
-    ports:
-      - containerPort: 8082
-        name: health
-      - containerPort: 9090
-        name: api-dataset
-    volumeMounts:
-      - name: ipc
-        mountPath: /aiperf
-      - name: config
-        mountPath: /etc/aiperf
-        readOnly: true
-
-  - name: records-manager
-    image: ghcr.io/nvidia/aiperf:latest
-    command: ["aiperf", "service", "--type", "records-manager", "--health-port", "8083", "--api-port", "9091"]
-    ports:
-      - containerPort: 8083
-        name: health
-      - containerPort: 9091
-        name: api-records
-    volumeMounts:
-      - name: ipc
-        mountPath: /aiperf
-      - name: config
-        mountPath: /etc/aiperf
-        readOnly: true
-
-volumes:
-  - name: ipc
-    emptyDir:
-      medium: Memory  # tmpfs for fast IPC sockets
-  - name: config
-    configMap:
-      name: aiperf-config-{job_id}
-```
-
-### Worker Pod Spec (2 containers)
-
-```yaml
-# Worker pod - worker + record-processor sidecar
-containers:
-  - name: worker
-    image: ghcr.io/nvidia/aiperf:latest
-    command: ["aiperf", "service", "--type", "worker", "--health-port", "8080"]
-    # JOB_COMPLETION_INDEX is auto-injected by Kubernetes for Indexed Jobs
-    ports:
-      - containerPort: 8080
-        name: health
-    volumeMounts:
-      - name: ipc
-        mountPath: /aiperf
-      - name: config
-        mountPath: /etc/aiperf
-        readOnly: true
-
-  - name: record-processor
-    image: ghcr.io/nvidia/aiperf:latest
-    command: ["aiperf", "service", "--type", "record-processor", "--health-port", "8081"]
-    # JOB_COMPLETION_INDEX is auto-injected by Kubernetes for Indexed Jobs
-    ports:
-      - containerPort: 8081
-        name: health
-    volumeMounts:
-      - name: ipc
-        mountPath: /aiperf
-      - name: config
-        mountPath: /etc/aiperf
-        readOnly: true
-
-volumes:
-  - name: ipc
-    emptyDir:
-      medium: Memory  # tmpfs for fast IPC sockets
-  - name: config
-    configMap:
-      name: aiperf-config-{job_id}
-```
-
-## D. Interface Evolution Details
-
-### Mermaid Diagram
-
-```mermaid
-flowchart TB
-    subgraph POC["Phase 0: Manual YAML"]
-        P0[kubectl apply -f jobset.yaml]
-    end
-
-    subgraph MVP["Phase 1: CLI + Flags"]
-        P1[aiperf profile --kubernetes --url ...]
-    end
-
-    subgraph Config["Phase 3: CLI + Config"]
-        P2[aiperf profile --config perf.yaml]
-    end
-
-    subgraph Future["Phase 4: Operator"]
-        P3[kubectl apply -f aiperf-job.yaml]
-    end
-
-    P0 -->|Manual| JobSet
-    P1 -->|Kubernetes API| JobSet
-    P2 -->|Kubernetes API| JobSet
-    P3 -->|Creates AIPerfJob| Operator[AIPerf Operator]
-    Operator -->|Kubernetes API| JobSet
-
-    JobSet["JobSet (same for all)"]
-
-    JobSet --> ControllerPod[Controller Pod]
-    JobSet --> Workers[Worker Pods 1..N]
-```
-
-### Manual YAML (Phase 0)
-
-```bash
-# Create ConfigMap with config files
-kubectl create configmap aiperf-config \
-  --from-file=service_config.json \
-  --from-file=user_config.json
-
-# Deploy JobSet
-kubectl apply -f jobset.yaml
-
-# Monitor pods
-kubectl get pods -l jobset.sigs.k8s.io/jobset-name=aiperf-benchmark -w
-
-# Retrieve results manually
-kubectl cp aiperf-benchmark-controller-0-0:/artifacts ./artifacts
-
-# Cleanup
-kubectl delete jobset aiperf-benchmark
-```
-
-### CLI with Config File (Phase 3)
-
-**perf.yaml:**
-```yaml
-endpoints:
-  - url: http://llm-service:8080/v1/chat/completions
-    type: chat
-
-workload:
-  dataset:
-    type: synthetic
-    promptTokens: 128
-    outputTokens: 256
-
-loadgen:
-  type: poisson
-  targetQPS: 100
-  duration: 300s
-
-scaling:
-  workers: 8
-```
-
-```bash
-aiperf profile --config perf.yaml --kubernetes
-```
-
-### Operator with CRD (Phase 4)
-
-```yaml
-apiVersion: aiperf.nvidia.com/v1
-kind: AIPerfJob
-metadata:
-  name: llama-benchmark
-  namespace: benchmarks
-spec:
-  # Same schema as CLI config, nested under "spec:"
-  endpoints:
-    - url: http://llm-service:8080/v1/chat/completions
-      type: chat
-  workload:
-    dataset:
-      type: synthetic
-      promptTokens: 128
-      outputTokens: 256
-  loadgen:
-    type: poisson
-    targetQPS: 100
-    duration: 300s
-  scaling:
-    workers: 8
-```
-
-### Comparison Table
-
-| Aspect | Manual YAML (Phase 0) | CLI + Flags (Phase 1) | CLI + Config (Phase 3) | Operator (Phase 4) |
-|--------|----------------------|----------------------|------------------------|-------------------|
-| **User command** | `kubectl apply -f jobset.yaml` | `aiperf profile --kubernetes ...` | `aiperf profile --config ...` | `kubectl apply -f aiperf-job.yaml` |
-| **Config format** | Raw JobSet + ConfigMap | CLI arguments | YAML (job spec) | YAML (CRD) |
-| **Creates** | JobSet (manual) | JobSet (automated) | JobSet (automated) | CRD → Operator → JobSet |
-| **Results retrieval** | `kubectl cp` | Automated HTTP | Automated HTTP | Automated HTTP |
-| **Interactive** | No | Yes (Ctrl+C) | Yes (Ctrl+C) | No (declarative) |
-| **Best for** | POC validation | Quick tests, debugging | CI/CD, reproducibility | Platform teams, GitOps |
-
-## E. Pre-flight Check Example
-
-```
-$ aiperf profile --kubernetes --url http://llm-api.example.com --workers-max 100
-
-Running pre-flight checks...
-  ✓ cluster-connectivity: Connected to Kubernetes v1.33.7
-  ✓ rbac-permissions: All required RBAC permissions present
-  ✓ endpoint-reachability: Endpoint is reachable from cluster
-All checks passed.
-
-Starting benchmark...
-```
-
-## F. YAML Definitions
-
-### RBAC Role
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: aiperf-role
-  namespace: benchmarks
-rules:
-  - apiGroups: [""]
-    resources: ["configmaps", "services"]
-    verbs: ["create", "delete", "get", "list", "patch", "update"]
-  - apiGroups: [""]
-    resources: ["pods", "pods/log"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["pods/exec"]
-    verbs: ["create"]
-  - apiGroups: ["batch"]
-    resources: ["jobs"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["jobset.sigs.k8s.io"]
-    resources: ["jobsets"]
-    verbs: ["create", "delete", "get", "list", "watch", "patch", "update"]
-```
-
-### Controller Service
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: aiperf-benchmark-{job_id}-controller
-  namespace: benchmarks
-spec:
-  selector:
-    jobset.sigs.k8s.io/jobset-name: aiperf-benchmark-{job_id}
-    jobset.sigs.k8s.io/replicatedjob-name: controller
-  type: ClusterIP
-  ports:
-    - name: event-bus-frontend
-      port: 5663
-    - name: event-bus-backend
-      port: 5664
-    - name: credit-router
-      port: 5564
-    - name: records
-      port: 5557
-    - name: api-dataset
-      port: 9090
-    - name: api-records
-      port: 9091
-    - name: health
-      port: 8080
-```
-
-## G. HTTP API Endpoints
-
-| Endpoint | Method | Service | Port | Purpose |
-|----------|--------|---------|------|---------|
-| `/api/progress` | GET | RecordsManager | 9091 | Current benchmark progress (requests, latencies, errors) |
-| `/api/metrics` | GET | RecordsManager | 9091 | Real-time metrics snapshot |
-| `/api/artifacts` | GET | RecordsManager | 9091 | List available result files |
-| `/api/artifacts/{file}` | GET | RecordsManager | 9091 | Download specific artifact file |
-| `/api/artifacts/archive` | GET | RecordsManager | 9091 | Download all artifacts as compressed archive |
-| `/ws` | WebSocket | RecordsManager | 9091 | Push-based real-time progress updates |
-| `/api/dataset` | POST | DatasetManager | 9090 | Upload dataset file (multipart/form-data, supports LZ4/ZSTD) |
-| `/api/dataset` | GET | DatasetManager | 9090 | Download dataset file (used by workers at startup) |
-| `/health` | GET | Both | 9090, 9091 | Health check endpoint |
-
-**Compression:** The `/api/artifacts/archive` endpoint supports `Accept-Encoding: lz4` or `Accept-Encoding: zstd` headers for fast, efficient transfers. LZ4 prioritizes speed (>500 MB/s per core, decompression >3 GB/s), while ZSTD provides better compression ratios (typically 3-5x for JSON/CSV artifacts). Default is ZSTD if no preference specified.
-
-## H. Health Probe Configuration
-
-**Controller pod containers (e.g., control-plane on port 8080):**
-```yaml
-startupProbe:
-  httpGet:
-    path: /healthz
-    port: 8080
-  initialDelaySeconds: 5
-  periodSeconds: 5
-  failureThreshold: 12  # Allow up to 60s for startup
-
-livenessProbe:
-  httpGet:
-    path: /healthz
-    port: 8080
-  periodSeconds: 10
-  failureThreshold: 3
-
-readinessProbe:
-  httpGet:
-    path: /readyz
-    port: 8080
-  periodSeconds: 5
-  successThreshold: 2
-```
-
-**Worker pod - worker container (port 8080):**
-```yaml
-startupProbe:
-  httpGet:
-    path: /healthz
-    port: 8080
-  initialDelaySeconds: 3
-  periodSeconds: 3
-  failureThreshold: 20  # Allow up to 60s for dataset download
-
-livenessProbe:
-  httpGet:
-    path: /healthz
-    port: 8080
-  periodSeconds: 10
-  failureThreshold: 3
-
-readinessProbe:
-  httpGet:
-    path: /readyz
-    port: 8080
-  periodSeconds: 5
-  successThreshold: 1
-```
-
-**Worker pod - record-processor sidecar (port 8081):**
-```yaml
-startupProbe:
-  httpGet:
-    path: /healthz
-    port: 8081
-  initialDelaySeconds: 2
-  periodSeconds: 3
-  failureThreshold: 10
-
-livenessProbe:
-  httpGet:
-    path: /healthz
-    port: 8081
-  periodSeconds: 10
-  failureThreshold: 3
-
-readinessProbe:
-  httpGet:
-    path: /readyz
-    port: 8081
-  periodSeconds: 5
-  successThreshold: 1
-```
-
-## I. Scaling Guidelines
-
-| Workers | Est. QPS | Total CPU (requests) | Total Memory (requests) |
-|---------|----------|----------------------|-------------------------|
-| 10 | 500-1,000 | ~4 cores | ~6Gi |
-| 100 | 5,000-10,000 | ~36 cores | ~51Gi |
-| 500 | 25,000-50,000 | ~176 cores | ~251Gi |
-| 1,000 | 50,000-100,000 | ~351 cores | ~501Gi |
-
-**Example:** 100K concurrency with 500 connections/worker = `ceil(100000 / 500)` = 200 worker pods
-
-Lower connections per worker improves measurement accuracy at the cost of more pods.
-
-## J. Service Command Reference
-
-### Command Options
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `--type` | str | required | Service type(s), comma-separated for multi-service containers (e.g., `system-controller,worker-manager`) |
-| `--api-port` | int | None | Port for HTTP API (DatasetManager or RecordsManager) |
-| `--health-port` | int | None | Port for `/healthz` and `/readyz` endpoints |
-| `--id` | str | auto | Service identifier (auto-generated from `JOB_COMPLETION_INDEX`) |
-
-### Available Service Types
-
-| Type | Description |
-|------|-------------|
-| `system-controller` | Orchestrates benchmark lifecycle |
-| `worker` | Executes LLM API requests |
-| `record-processor` | Processes raw responses into metrics |
-| `timing-manager` | Controls request timing and credit distribution |
-| `dataset-manager` | Manages dataset loading and distribution |
-| `worker-manager` | Monitors worker lifecycle and health |
-| `records-manager` | Aggregates processed records, hosts HTTP API for progress/artifacts |
-| `gpu-telemetry-manager` | Collects GPU metrics via DCGM (optional, enabled with `--gpu-telemetry`) |
-| `server-metrics-manager` | Collects server metrics via Prometheus (optional, enabled with `--server-metrics`) |
