@@ -1,12 +1,41 @@
 # A Python-first frontend for Dynamo
 
-**Status**: Draft
+**Status**: Active
 
 **Authors**: Graham King
 
 **Category**: Architecture
 
 **Replaces** (partially): https://github.com/ai-dynamo/enhancements/pull/50
+
+**Implements Pull Requests**:
+    - https://github.com/ai-dynamo/dynamo/pull/4999
+    - https://github.com/ai-dynamo/dynamo/pull/5544
+
+# TODO (updated)
+
+- Copy over all the possible sampling params between Dynamo and Vllm.
+
+- Handle all vllm cmd line flags, pass to ModelConfig and/or VllmConfig. Do it similar to the vllm wrapper component.
+
+- Try mistral
+
+- Add KV routing (see section in this document)
+
+- Tell vllm when the model is unloaded so it can stop (do we still need that with given that we're not using the engine?)
+
+- Handle other types of request, is Chat Completions only right now:
+    - Completions
+    - Embeddings
+    - Prompt embeddings
+
+- Verify:
+    - Can you run multiple requests at once?
+    - Does it load prompt templates from external files, or always from tokenizer_config.json?
+    - Does tool calling / parsing / etc work?
+
+- Compare perf vs regular Dynamo
+
 
 # Summary
 
@@ -135,25 +164,9 @@ and
     dynamo_stream: dynamo.AsyncResponseStream = await endpoint_client.round_robin(our_preproc)
 ```
 
-## What we need
-
-### Python engine factory called from Rust
-
-The Rust type for the engine is `Arc<dyn AsyncEngine<Context<NvCreateChatCompletionRequest>, Pin<Box<dyn AsyncEngineStream<Annotated<CreateChatCompletionStreamResponse>>>>, Error>>`, but when talking to Python it might be `serde::Json` instead of `NvCreateChatCompletion...`.
-
-Pass `ModelWatcher` a function to make the engine, instead of calling `build_routed_pipeline`. Pass it in through `LocalModel` (created in Python bindings `run_input`, so that's our entry point), `entrypoint/http.rs::run_watcher`, `discovery/watcher.rs::ModelWatcher::new`.
-
-This function will be called from `discovery/watcher.rs::handle_put` where it now calls `build_routed_pipeline`.
-
-### Type conversion
-
-To call the vllm input and output processors we need to convert the types, the imaginary `convert` functions in the pseudo-code.
-
 # Open questions
 
 1. The example handler takes `NvCreateChatCompletionRequest`. What about Completions, Requests, Embeddings, and Tensors? Do we have a separate handler for each? Should a single handler be able to cope with all of them, and we indicate in the call which type it is? Or it could take a union and figure it out.
-
-2. Can we get a vllm InputProcessor / OutputProcessor without loading the weights into memory? The frontend can't load the weights for mulitple models concurrently. Maybe we don't need to create the AsyncLLM, can directly call InputProcessor.new ?
 
 # Misc
 
@@ -193,13 +206,14 @@ The current frontend will remain, allowing users to choose.
 
 https://github.com/ai-dynamo/enhancements/pull/50
 
-===============================================================================================
-============================= Appendix ========================================================
-===============================================================================================
+----------
 
-=== Appendix A.
-=== spec.md for injecting the Python engine factory callback
-=== Opus 4.5 Thinking implemented this to create https://github.com/ai-dynamo/dynamo/pull/4999
+# Appendix
+
+## Appendix A.
+
+spec.md for injecting the Python engine factory callback
+Opus 4.5 Thinking implemented this to create https://github.com/ai-dynamo/dynamo/pull/4999
 
 # Spike: Python Engine Factory Callback
 
