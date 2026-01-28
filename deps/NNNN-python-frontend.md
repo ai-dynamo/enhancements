@@ -14,7 +14,9 @@
 
 # TODO (updated)
 
-- DONE ~Copy over all the possible sampling params between Dynamo and Vllm.~
+- DONE: ~Copy over all the possible sampling params between Dynamo and Vllm.~
+
+- DONE: ~Accept all vllm flags~
 
 - Handle all vllm cmd line flags, pass to ModelConfig and/or VllmConfig. Do it similar to the vllm wrapper component.
 
