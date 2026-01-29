@@ -12,15 +12,15 @@
     - https://github.com/ai-dynamo/dynamo/pull/4999
     - https://github.com/ai-dynamo/dynamo/pull/5544
 
+# Done (move from TODO)
+
+- ~Copy over all the possible sampling params between Dynamo and Vllm.~
+- ~Accept all vllm flags~
+- ~Try mistral~
+
 # TODO (updated)
 
-- DONE: ~Copy over all the possible sampling params between Dynamo and Vllm.~
-
-- DONE: ~Accept all vllm flags~
-
 - Handle all vllm cmd line flags, pass to ModelConfig and/or VllmConfig. Do it similar to the vllm wrapper component.
-
-- Try mistral
 
 - Add KV routing (see section in this document)
 
