@@ -14,15 +14,14 @@
 
 # Done (move from TODO)
 
-- ~Copy over all the possible sampling params between Dynamo and Vllm.~
-- ~Accept all vllm flags~
-- ~Try mistral~
+- Copy over all the possible sampling params between Dynamo and Vllm.
+- Accept all vllm flags
+- Try mistral
+- Add KV routing (see section in this document)
 
 # TODO (updated)
 
 - Handle all vllm cmd line flags, pass to ModelConfig and/or VllmConfig. Do it similar to the vllm wrapper component.
-
-- Add KV routing (see section in this document)
 
 - Tell vllm when the model is unloaded so it can stop (do we still need that with given that we're not using the engine?)
 
