@@ -1,4 +1,3 @@
-Lora Placement Proposal
 # Optimal LoRA Placement & Routing
 
 This proposal defines a churn-minimizing LoRA placement and routing system for a cluster of N inference servers, each with S LoRA slots and a load/unload API. The system routes requests per LoRA to a stable subset of servers using Rendezvous/HRW hashing for deterministic placement stability.
