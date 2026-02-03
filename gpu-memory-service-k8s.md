@@ -330,7 +330,6 @@ Cons:
 **Cons:**
 - Pod failures are not isolated
 - Number of containers is fixed (can't be arbitrarily scaled)
-- Potentially, the coordinator can just be a sidecar container on the leader rank pod.
 
 ---
 
