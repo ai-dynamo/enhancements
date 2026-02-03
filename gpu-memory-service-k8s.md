@@ -4,7 +4,7 @@
 
 **Goal:** Enable resiliency against software failures for large multi-node model setups like DeepSeek R1 using shadow engines.
 
-We propose exposing an API on the DynamoGraphDeployment (DGD) CRD that allows multiple parallel engine deployments to be ready on the same set of GPUs. When a software failure is detected on the primary, a sleeping, shadow engine can wake up and take over serving requests.
+We propose exposing an API on the DynamoGraphDeployment (DGD) CRD that allows multiple parallel engine deployments to be co-located on the same set of GPUs. When a software failure is detected on the active instance, a "shadow" engine can wake up and take over serving requests.
 
 At a high level this is enabled by:
 - **GPU Memory Service (GMS)** - Zero-copy weight sharing between engines
