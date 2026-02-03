@@ -125,7 +125,7 @@ For this design, GMS enables a shadow engine to wake up and start serving reques
 
 ### Dynamic Resource Allocation (DRA)
 
-DRA (Kubernetes 1.31+) allows multiple pods to claim the same physical devices. This is the foundation for GPU sharing between primary and shadow engines.
+DRA (Kubernetes 1.31+) allows multiple pods to claim the same physical devices. This is the foundation for GPU sharing between primary and shadow engines. This is required for both inter-pod and intra-pod GPU sharing.
 
 ```yaml
 # ResourceClaim that can be shared across pods
@@ -174,7 +174,7 @@ spec:
 
 ### GMS Shadow Mode
 
-Shadow engines initialize differently from primary engines. To prevent OOMs while there is another engine serving inference on the same device, KV cache allocation for the shadow engineis deferred to wake.
+Shadow engines initialize differently from primary engines. To prevent OOMs while there is another engine serving inference on the same device, KV cache allocation for the shadow engine is deferred until the shadow becomes active.
 
 | Aspect | Primary | Shadow |
 |--------|---------|--------|
@@ -237,7 +237,7 @@ Shadow engines initialize differently from primary engines. To prevent OOMs whil
 
 ### Weight Loading Phase
 
-Weight loading happens once per DGD, performed by the primary replica set. Each primary rank acquires an exclusive RW lock on its node's GMS, loads weights from disk/network, and commits them to GMS-managed memory.
+Weight loading happens once per DGD, performed by the primary replica across ranks. Each primary rank acquires an exclusive RW lock on its node's GMS, loads weights from disk/network, and commits them to GMS-managed memory.
 
 Once all ranks have committed weights, a deployment-wide signal (e.g., a ConfigMap) indicates weight loading is complete. Shadow pods use an init container that waits on this signal before starting their main container. When shadows start, they import the already-loaded weights from GMS (no disk I/O), compile CUDA graphs, and enter sleep state.
 
@@ -250,14 +250,14 @@ The shadow engines sleep until they acquire this mutex. On failover, the mutex i
 ### Failure Detection
 
 A canary endpoint can serve as the liveness/readiness probe. The probe behavior should differ based on replica mode:
-- **Primary (serving):** Probe checks inference health by sending a minimal request and waiting for a response. Probe proxies the health of all ranks.
+- **Primary (serving):** Probe checks inference health by sending a minimal request and waiting for a response. A canary set on the leader should indicate health of all ranks.
 - **Shadow (sleeping):** Probe returns healthy as long as process is alive and weights are mapped
 
 The Kubernetes controller uses these probes to manage pod lifecycle. The Coordinator watches pods and EndpointSlices to detect when any set might have failed.
 
 ### Coordinator Responsibilities
 
-The coordinator is a single pod in the DGD that is responsible for detecting failures in any of the engines and initiating failover (see the section below).
+The coordinator is a single instance in the DGD that is responsible for detecting failures in any of the engines and initiating failover (see the section below).
 
 ### Failover Process
 
