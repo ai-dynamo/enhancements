@@ -20,6 +20,10 @@
 - Add KV routing (see section in this document)
 - Can you run multiple requests at once? Yes.
 - Basic perf shake-out: On a local dual RTX 6000 system vllm processing (this proposal) performance is identical to Dynamo processing, because the GPU is the bottleneck.
+- Tool call parsing (tested on mistral and qwen3)
+- Reasoning parsing (tested on qwen3)
+- generation_config.json population of SamplingParams
+- Usage dict (how many tokens were used)
 
 # TODO (updated)
 
@@ -34,7 +38,6 @@
 
 - Verify:
     - Does it load prompt templates from external files, or always from tokenizer_config.json?
-    - Does tool calling / parsing / etc work?
 
 
 # Summary
