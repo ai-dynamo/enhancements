@@ -1,5 +1,8 @@
 # Responses API
 
+> **Linear Ticket**: [DYN-2045](https://linear.app/nvidia/issue/DYN-2045) - Investigate `v1/responses` being stateful
+> **Implementation PR**: [dynamo#5854](https://github.com/ai-dynamo/dynamo/pull/5854) - Branch `responses-api-compliance`
+
 ## Current State (PR #5854)
 
 Dynamo implements the OpenAI Responses API (`POST /v1/responses`) as a translation layer
@@ -25,12 +28,24 @@ over the existing chat completions pipeline. All 6 OpenResponses compliance test
 
 | Feature | Notes |
 |---------|-------|
-| `previous_response_id` | Requires storage (Phase A) |
-| `store` / `GET` / `DELETE` | Requires storage (Phase A) |
 | `text.format` (json_object, json_schema) | Needs `response_format` forwarding |
 | `reasoning` config | Needs `reasoning.effort` forwarding |
 | `truncation` (auto) | Needs context window management |
 | `background` execution | Needs async task + storage + polling |
+
+### Recently Implemented (Phase A Complete)
+
+| Feature | Status | PR |
+|---------|--------|-----|
+| `previous_response_id` | ✅ Working | dynamo#5854 |
+| `store: true/false` | ✅ Working | dynamo#5854 |
+| `GET /v1/responses/{id}` | ✅ Working | dynamo#5854 |
+| `DELETE /v1/responses/{id}` | ✅ Working | dynamo#5854 |
+| Streaming + storage | ✅ Working | dynamo#5854 |
+| Session/tenant isolation | ✅ Working | dynamo#5854 |
+| Cursor-based pagination | ✅ Working | dynamo#5854 |
+| Session forking (`fork_session`) | ✅ Working | dynamo#5854 |
+| Redis backend | ✅ Behind feature flag | dynamo#5854 |
 
 ---
 
@@ -101,51 +116,86 @@ bun run test:compliance --base-url http://localhost:9000/v1 --api-key test --mod
 
 ## Roadmap
 
-### Phase A: Storage + `previous_response_id` + GET/DELETE
+### Phase A: Storage + `previous_response_id` + GET/DELETE ✅ IMPLEMENTED
+
+> **Status**: Complete. See dynamo#5854 branch `responses-api-compliance`.
+> 57+ tests passing including 1000-session concurrent load test.
 
 The goal is to enable multi-turn conversations where the client passes
 `previous_response_id` instead of re-sending the full message history. This requires
 persisting responses and walking the chain at request time.
 
-#### Storage trait
+#### Storage trait (Implemented)
 
 ```rust
+/// Located at: lib/llm/src/storage/response_storage.rs
 #[async_trait]
-pub trait ResponseStore: Send + Sync {
-    /// Persist a completed response with its original input and instructions.
-    async fn store(&self, response: StoredResponse) -> Result<()>;
+pub trait ResponseStorage: Send + Sync {
+    /// Store a response with tenant/session isolation
+    async fn store_response(
+        &self,
+        tenant_id: &str,
+        session_id: &str,
+        response_id: Option<&str>,
+        response: serde_json::Value,
+        ttl: Option<Duration>,
+    ) -> Result<String, StorageError>;
 
-    /// Look up a single response by ID.
-    async fn get(&self, id: &str) -> Result<Option<StoredResponse>>;
+    /// Get a response, validating tenant and session
+    async fn get_response(
+        &self,
+        tenant_id: &str,
+        session_id: &str,
+        response_id: &str,
+    ) -> Result<StoredResponse, StorageError>;
 
-    /// Delete a response by ID.
-    async fn delete(&self, id: &str) -> Result<()>;
+    /// Delete a response
+    async fn delete_response(
+        &self,
+        tenant_id: &str,
+        session_id: &str,
+        response_id: &str,
+    ) -> Result<(), StorageError>;
 
-    /// Walk the `previous_response_id` chain up to `max_depth` hops.
-    /// Returns responses in chronological order (oldest first).
-    async fn get_chain(&self, id: &str, max_depth: usize) -> Result<Vec<StoredResponse>>;
+    /// List responses with cursor-based pagination
+    async fn list_responses(
+        &self,
+        tenant_id: &str,
+        session_id: &str,
+        limit: Option<usize>,
+        after: Option<&str>,  // Cursor for pagination
+    ) -> Result<Vec<StoredResponse>, StorageError>;
+
+    /// Fork a session (branch conversation from a point)
+    async fn fork_session(
+        &self,
+        tenant_id: &str,
+        source_session_id: &str,
+        target_session_id: &str,
+        up_to_response_id: Option<&str>,
+    ) -> Result<usize, StorageError>;
 }
 ```
 
-#### StoredResponse
-
-This is not part of the OpenResponses spec (which only defines the API contract and
-compliance tests, not storage). The struct is modeled after SGLang's `StoredResponse`
-in `data_connector/core.rs`, trimmed to the minimum fields needed for chain resolution.
-SGLang's version includes additional fields (`safety_identifier`, `tool_calls`,
-`conversation_id`, `raw_response`) that we can add later as needed.
+#### StoredResponse (Implemented)
 
 ```rust
+/// Located at: lib/llm/src/storage/response_storage.rs
 pub struct StoredResponse {
-    pub id: String,                          // resp_<uuid>
-    pub previous_response_id: Option<String>,
-    pub input: serde_json::Value,            // original Input enum as JSON
-    pub instructions: Option<String>,
-    pub output: serde_json::Value,           // output items as JSON
-    pub model: String,
-    pub created_at: u64,
+    pub response_id: String,        // Unique response identifier
+    pub tenant_id: String,          // Tenant isolation
+    pub session_id: String,         // Session/conversation context
+    pub response: serde_json::Value, // The actual response data
+    pub created_at: u64,            // Unix epoch seconds
+    pub expires_at: Option<u64>,    // TTL expiration (optional)
 }
 ```
+
+Key differences from the original design:
+- Added `tenant_id` and `session_id` for multi-tenant isolation
+- Uses key pattern `{tenant_id}:{session_id}:responses:{response_id}`
+- TTL-based expiration support
+- `previous_response_id` stored in response metadata, not as a separate field
 
 #### Context resolution
 
@@ -175,31 +225,54 @@ Messages built:
   [current request.input as user]
 ```
 
-#### Default backend: in-memory (DashMap)
+#### Default backend: in-memory (Implemented)
 
 ```rust
-pub struct InMemoryResponseStore {
-    responses: DashMap<String, StoredResponse>,
+/// Located at: lib/llm/src/storage/manager.rs
+pub struct InMemoryResponseStorage {
+    storage: Arc<RwLock<HashMap<String, StoredResponse>>>,
 }
 ```
 
 This is the default for single-process deployments. No config needed. Data is lost on
-restart, which is fine for dev/testing.
+restart, which is fine for dev/testing. Uses tokio `RwLock` for async-safe concurrent access.
 
-#### Pluggable backends
+#### Pluggable backends (Implemented)
 
-The `ResponseStore` trait is object-safe, so backends can be swapped at startup:
+The `ResponseStorage` trait is object-safe, so backends can be swapped at startup:
 
-- `InMemoryResponseStore` - default, zero-config
-- `RedisResponseStore` - for multi-instance deployments, TTL-based retention
-- `PostgresResponseStore` - for durable storage, SQL queries
+- `InMemoryResponseStorage` - default, zero-config ✅
+- `RedisResponseStorage` - for multi-instance deployments, TTL-based retention ✅ (behind `redis-storage` feature)
+- `PostgresResponseStorage` - for durable storage, SQL queries (future)
 
-Backend selection via config (env var or YAML):
+Backend selection via environment variables:
+```bash
+DYNAMO_RESPONSES_BACKEND=memory          # default
+DYNAMO_RESPONSES_BACKEND=redis
+DYNAMO_RESPONSES_REDIS_URL=redis://host:6379
+DYNAMO_RESPONSES_DEFAULT_TTL_SECS=86400  # 24 hours
+DYNAMO_RESPONSES_MAX_TTL_SECS=604800     # 7 days
+DYNAMO_RESPONSES_MAX_PER_SESSION=1000
 ```
-DYN_RESPONSE_STORE=memory   # default
-DYN_RESPONSE_STORE=redis    # redis://host:port
-DYN_RESPONSE_STORE=postgres # postgres://...
+
+#### Session Locking (Implemented)
+
+Added `SessionLock` trait for concurrent access control when multiple requests target
+the same session with `previous_response_id`:
+
+```rust
+/// Located at: lib/llm/src/storage/session_lock.rs
+#[async_trait]
+pub trait SessionLock: Send + Sync {
+    async fn acquire(&self, key: &str, timeout: Duration) -> Result<LockGuard, LockError>;
+    async fn try_acquire(&self, key: &str) -> Result<LockGuard, LockError>;
+    async fn is_locked(&self, key: &str) -> bool;
+}
 ```
+
+Implementations:
+- `InMemorySessionLock` - per-key semaphores, single-process ✅
+- `RedisSessionLock` - distributed locking via Redis ✅ (behind `redis-storage` feature)
 
 #### Integration points
 
