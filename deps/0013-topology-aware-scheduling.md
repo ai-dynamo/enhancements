@@ -71,7 +71,7 @@ When `enabled: true` and no explicit constraints are provided, the operator **MU
 - Multinode services (PCSG): `packDomain: rack`; child cliques inherit from PCSG (no explicit constraint)
 - Single-node services (PodClique): `packDomain: rack`
 
-These defaults **MUST** be configurable at the Dynamo operator level (e.g., via Helm values or operator configuration), so that cluster administrators can tune or change them per cluster without requiring users to modify their DGDs.
+Both the smart defaults and the list of allowed topology domain names **MUST** be configurable at the Dynamo operator level (e.g., via Helm values or operator configuration), so that cluster administrators can tune them per cluster without requiring users to modify their DGDs. For Grove, the Helm defaults ship with `[region, zone, datacenter, block, rack, host, numa]`; for other frameworks, the admin overrides the list to match the supported domains.
 
 **Note on constraint type:** Today, all topology constraints in the underlying framework (Grove) are hard/required constraints — there is no "preferred" or soft mode. This means that if the scheduler cannot satisfy the constraint, the workload will not be scheduled. This is acceptable because:
 1. TAS is explicitly opt-in; users choose to enable it knowing constraints will be enforced.
@@ -117,9 +117,6 @@ type TopologyConstraints struct {
 
     // Deployment-level constraint. If nil when enabled=true: smart default (block).
     Deployment *TopologyConstraint `json:"deployment,omitempty"`
-
-    // Per-service overrides. If nil for a service when enabled=true: smart default (rack).
-    ServiceOverrides map[string]*TopologyConstraint `json:"serviceOverrides,omitempty"`
 }
 
 type TopologyConstraint struct {
@@ -129,7 +126,20 @@ type TopologyConstraint struct {
 type TopologyDomain string  // region|zone|datacenter|block|rack|host|numa
 ```
 
-**User example (with named topology):**
+Per-service topology constraints are specified inline on each service definition:
+
+```go
+type ServiceSpec struct {
+    // ... existing fields (name, replicas, multinode, etc.) ...
+
+    // TopologyConstraint overrides the smart default for this service.
+    // If nil when TAS is enabled: smart default (rack).
+    // +optional
+    TopologyConstraint *TopologyConstraint `json:"topologyConstraint,omitempty"`
+}
+```
+
+**User example (with named topology and inline service constraints):**
 
 ```yaml
 spec:
@@ -138,17 +148,16 @@ spec:
     topologyName: aws-p5   # optional; omit for framework default
     deployment:
       packDomain: zone
-    serviceOverrides:
-      VllmWorker:
-        packDomain: block
-      Frontend:
-        packDomain: zone
   services:
     - name: VllmWorker
       multinode: { nodeCount: 4 }
       replicas: 2
+      topologyConstraint:
+        packDomain: block
     - name: Frontend
       replicas: 1
+      topologyConstraint:
+        packDomain: zone
 ```
 
 **Mapping from DGD to generated spec (Grove PCS):**
@@ -156,9 +165,9 @@ spec:
 | DGD | Grove | When | Value |
 |-----|-------|------|--------|
 | topologyName | PCS.Spec.Template.ClusterTopologyName | enabled=true and topologyName set | User-specified name |
-| deployment | PCS.Spec.Template.TopologyConstraint | enabled=true | Override or default (block) |
-| serviceOverrides[svc] | PCSG.TopologyConstraint | Multinode svc | Override or default (rack) |
-| serviceOverrides[svc] | PodClique.TopologyConstraint | Single-node svc | Override or default (rack) |
+| topologyConstraints.deployment | PCS.Spec.Template.TopologyConstraint | enabled=true | Override or default (block) |
+| service.topologyConstraint | PCSG.TopologyConstraint | Multinode svc | Override or default (rack) |
+| service.topologyConstraint | PodClique.TopologyConstraint | Single-node svc | Override or default (rack) |
 | — | PodClique (multinode) | Multinode svc | No explicit constraint (inherit PCSG) |
 
 ## Smart Defaults and Override Resolution
@@ -171,32 +180,64 @@ Dynamo does not read ClusterTopology or any framework-specific topology resource
 | PCSG (multinode service) | rack | Packs service replicas; cliques inherit so workers can span hosts within a rack |
 | Single-node clique | rack | Locality without over-constraining |
 
-These defaults are configurable at the Dynamo operator level (e.g., Helm values), allowing admins to adjust them per cluster.
+Both the smart defaults and the allowed domain list are configurable at the Dynamo operator level (e.g., Helm values), allowing admins to adjust them per cluster.
 
-For each level: if user set a value, use it; otherwise use the smart default. Validate hierarchy (service ≤ deployment) and service-name validity. Dynamo does not validate domain existence; the framework does.
+**Operator configuration example (Helm values):**
+
+```yaml
+operator:
+  topologyAwareScheduling:
+    defaults:
+      deployment: block
+      service: rack
+    allowedDomains:
+      - region
+      - zone
+      - datacenter
+      - block
+      - rack
+      - host
+      - numa
+```
+
+For each level: if user set a value (inline `topologyConstraint` on the service), use it; otherwise use the smart default. Validate `packDomain` against the configured `allowedDomains` list and validate hierarchy (service ≤ deployment). Dynamo does not validate domain existence in the cluster; the framework does.
 
 ## PCS Generation
 
 In `GenerateGrovePodCliqueSet` (or equivalent):
 
-1. If `topologyConstraints` is nil or `enabled=false` → generate PCS without topology constraints.
-2. If `enabled=true` → compute resolved constraints, validate hierarchy and service names, inject:
+1. If `topologyConstraints` is nil or `enabled=false` → generate PCS without topology constraints. Any `topologyConstraint` on services is ignored.
+2. If `enabled=true` → for each service, resolve its topology constraint (inline override or smart default), validate hierarchy, then inject:
    - If `topologyName` is set: set `PCS.Spec.Template.ClusterTopologyName`.
    - PCS template: deployment constraint (or default block).
-   - For each multinode service: set PCSG constraint (or default rack); no explicit constraint on child cliques.
-   - For each single-node service: set PodClique constraint (or default rack).
+   - For each multinode service: set PCSG constraint (service's `topologyConstraint` or default rack); no explicit constraint on child cliques.
+   - For each single-node service: set PodClique constraint (service's `topologyConstraint` or default rack).
 
 If the underlying framework rejects the PCS (e.g., ClusterTopology missing or invalid domain), the error surfaces at the framework level.
 
 ## Validation (Webhook)
 
-- **Enabled flag:** If `enabled=false` and (`topologyName` set, or constraints specified) → reject.
-- **Struct:** `PackDomain` **MUST** be set and be one of: region, zone, datacenter, block, rack, host, numa.
-- **Hierarchy:** Each service constraint **MUST** be ≤ deployment (narrower or equal).
-- **Service names:** Every key in `serviceOverrides` **MUST** exist in `spec.services`.
+### On CREATE
+
+- **Enabled flag:** If `enabled=false` and (`topologyName` set, or `deployment` set, or any service has `topologyConstraint`) → reject: "cannot specify topology constraints when TAS is disabled".
+- **Struct:** `PackDomain` **MUST** be set and be one of the allowed domain names configured at the operator level (defaults to Grove's domains: region, zone, datacenter, block, rack, host, numa).
+- **Hierarchy:** Each service's `topologyConstraint` **MUST** be ≤ deployment (narrower or equal).
 - **Topology name:** Dynamo does not validate that `topologyName` references an existing topology; the framework does that at PCS admission.
 
-Dynamo does not validate domain existence, topology name validity, or ClusterTopology presence.
+### On UPDATE
+
+All topology-related fields are **immutable** once the DGD is created, mirroring Grove's immutability of topology constraints on PCS. The following changes **MUST** be rejected:
+
+- **`enabled`:** Cannot change from `true` to `false` (would require removing constraints from PCS → Grove rejects) or from `false` to `true` (would require adding constraints to existing PCS → Grove rejects).
+- **`topologyName`:** Cannot be added, removed, or changed.
+- **`deployment`:** Cannot be added, removed, or have `packDomain` changed.
+- **Service `topologyConstraint`:** Cannot be added, removed, or have `packDomain` changed on any existing service.
+
+To change topology constraints, users must delete and recreate the DGD (which creates a new PCS). This aligns with Grove's model and avoids PCS update failures.
+
+### General
+
+Dynamo does not validate domain existence, topology name validity, or ClusterTopology presence. The underlying framework does that when the PCS is admitted or reconciled.
 
 ## Framework Agnosticism and Topology Ownership
 
@@ -224,7 +265,7 @@ Dynamo does not define or create topology CRs. When Grove is used, ClusterTopolo
 | Decision | Rationale |
 |----------|-----------|
 | `enabled: bool`, default false | Explicit opt-in; backward compatible; avoids immutability issues. |
-| `deployment` + `serviceOverrides`, nil = default | Clear override semantics; smart defaults reduce configuration. |
+| Inline `topologyConstraint` on services (not `serviceOverrides` map) | Co-locates constraint with service; eliminates name-key typos and service-name validation; mirrors Grove pattern. |
 | Multinode cliques inherit from PCSG | Avoids forcing many workers onto one host; respects capacity. |
 | Single-node clique default: rack | Good locality without over-constraining. |
 | Struct-based `TopologyConstraint` | Aligns with Grove; room for `FallbackDomain` later. |
@@ -232,12 +273,30 @@ Dynamo does not define or create topology CRs. When Grove is used, ClusterTopolo
 | Dynamo does not define or create topology CRs | Admins set up topology per framework docs; Dynamo only documents the requirement. |
 | `topologyName` at top level, not inside `TopologyConstraint` | Topology selection is per-deployment (maps to PCS-level `clusterTopologyName`), not per-service. |
 | Generic `topologyName` naming (not `clusterTopologyName`) | Framework-agnostic; avoids exposing Grove-specific resource names in DGD API. |
-| Smart defaults configurable at operator level | Admins can tune defaults per cluster without user DGD changes. |
+| Smart defaults and allowed domains configurable at operator level | Admins can tune defaults and domain vocabulary per cluster/framework without user DGD changes or code changes. |
 | Hard constraints (for now) | Only mode available in Grove today; preferred/soft mode can be adopted when the framework supports it. |
+| Topology fields immutable on UPDATE | Mirrors Grove's PCS immutability; avoids update failures. Delete and recreate to change. |
 
 # Alternate Solutions
 
-## Alt 1 Dynamo Reads ClusterTopology and Skips TAS When Missing
+## Alt 1 Top-Level serviceOverrides Map Instead of Inline
+
+**Pros:**
+
+* All topology configuration in one place (`topologyConstraints` block).
+* Easy to see at a glance all topology settings for the whole deployment.
+
+**Cons:**
+
+* Requires service name as map key — prone to typos, needs name-key validation.
+* Disconnects constraint from the service it applies to.
+* Less consistent with Grove's pattern (each level carries its own `topologyConstraint`).
+
+**Reason Rejected:**
+
+* Inline on services eliminates service-name validation, mirrors Grove's pattern, and is more consistent with Kubernetes API conventions (fields on the resource they configure).
+
+## Alt 2 Dynamo Reads ClusterTopology and Skips TAS When Missing
 
 **Pros:**
 
