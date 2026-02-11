@@ -1,4 +1,4 @@
-# Standardized Error System for Migration Detection and Network Propagation
+# Standardized Error System for Error Clarity, Migration Detection, and Network Propagation
 
 **Status**:  Draft <!-- Draft | Under Review | Approved | Replaced | Deferred | Rejected -->
 
@@ -22,158 +22,160 @@
 
 # Summary
 
-Introduce a standardized error system for Dynamo that replaces ad-hoc string-based error detection with structured, chainable error types. The system provides a `DynamoError` trait with built-in support for error chaining, migration status propagation, and serialization across network boundaries. This enables reliable migration decisions, clear error messages in logs and user-facing responses, and consistent error handling across the entire Dynamo pipeline.
+Introduce a standardized error struct for Dynamo with a fixed set of error categories defined via an `ErrorType` enum. The `DynamoError` struct is serializable, chainable via `std::error::Error::source()`, and transmittable across network boundaries through `Annotated` responses. Error categorization enables clear error messages for end users and logs, and allows consumers like the migration module to make reliable decisions based on error type.
 
 # Motivation
 
-Dynamo's current error handling has several deficiencies that lead to poor migration detection and unclear error reporting:
+Dynamo's current error handling has three deficiencies: poor migration detection, loss of error context across the network, and unclear error messages.
 
-**Unreliable migration detection.** The migration module (`migration.rs`) previously relied on matching a hardcoded string constant (`STREAM_ERR_MSG`) against error messages to decide whether a failed request should be retried on another worker. This approach is fragile: any upstream change to an error message, any wrapping of the error in a different format, or any new error condition that should also be migratable would silently break migration. In practice, migratable errors from new pipeline stages (e.g., disaggregated prefill) were not being detected, causing failures to be returned directly to the user instead of being retried.
+**Unreliable migration detection.** The migration module previously relied on matching a hardcoded string constant (`STREAM_ERR_MSG`) against error messages to decide whether a failed request should be retried on another worker. This approach is fragile: any change to an error message, any wrapping of the error in a different format, or any new error condition that should also be migratable would silently break migration. In practice, migratable errors from new pipeline stages (e.g., disaggregated prefill) were not being detected, causing failures to be returned directly to the user instead of being retried.
 
 **Loss of error context across the network.** Errors originating from remote engine workers are serialized through `Annotated` responses. Previously, errors were reduced to plain strings during this transmission, discarding the error type, cause chain, and any metadata. Once an error crossed a network boundary, the frontend could no longer determine what kind of error occurred or whether it was safe to retry.
 
-**Unclear error messages.** Without structured error types, log messages and user-facing error responses lacked consistency. It was difficult to tell from a log line what error type occurred, where it originated (frontend vs. remote engine), or what chain of sub-errors led to the failure.
+**Unclear error messages.** Without structured error types, log messages and user-facing error responses lacked consistency. A log line might show an opaque message like `"Stream ended before generation completed"` without indicating whether the error came from a remote engine or the local frontend, whether it was a connection issue or a logic error, or what chain of sub-errors led to the failure. End users received similarly unhelpful error messages that offered no indication of the error category.
 
 ## Goals
 
-* Enable reliable, flag-based migration decisions that do not depend on string matching.
+* Provide clear, categorized error types that are immediately understandable in logs and user-facing responses. The outermost error type (e.g., `Disconnected`, `CannotConnect`) **SHOULD** tell the reader what happened at a glance, while the full cause chain is available for debugging.
 
-* Preserve the full error chain, including error type names and migration flags, across network serialization boundaries.
+* Enable reliable migration decisions based on error type categories, not string matching.
 
-* Provide clear, structured error messages for both log output and user-facing responses, with the format `ErrorTypeName: message; Caused by: InnerErrorTypeName: inner_message`.
+* Preserve the full error chain — including error types and messages — across network serialization boundaries, so that errors from remote workers arrive at the frontend with complete context.
 
-* Make it easy for developers across different Dynamo modules to define custom error types with correct migration semantics, without needing to modify the migration module.
+* Keep the error type set centralized and fixed, so that consumers (e.g., migration, logging) can reason about the full set of possible error categories.
 
 ### Non Goals
 
 * Make error passing more performant. The focus is on correctness and clarity, not on reducing serialization overhead.
 
-* Make errors trivially easy to create for developers. The system standardizes error creation to produce clear, interoperable types that other modules can understand. While the `define_dynamo_error!` macro reduces boilerplate, this proposal does not aim to make the act of sending errors simpler, only to ensure that error information is not lost when errors are sent.
+* Make errors trivially easy to create for developers. The system enforces a standardized set of error types so that all modules produce errors that are clear and interoperable. While `DynamoError::new()` and `DynamoError::msg()` are straightforward constructors, this proposal does not aim to minimize the effort of sending errors, only to ensure that error information is not lost when they are sent.
+
+* Allow individual modules to define their own error types. Error categories are a fixed, centralized enum so that consumers can reason about the full set.
 
 ## Requirements
 
-### REQ 1 Migration Flag Propagation
+### REQ 1 Fixed Error Categories
 
-Every error type in the Dynamo pipeline **MUST** carry an intrinsic migration status (`migratable`, `not_migratable`, or `inherit`). The migration module **MUST** be able to resolve the effective migration status by walking the error chain without relying on error type names or message content.
+All errors in the Dynamo pipeline **MUST** be categorized using a fixed `ErrorType` enum. New error categories **MUST** be added to the central enum definition, not defined ad-hoc by individual modules.
 
 ### REQ 2 Network Serialization
 
-Errors **MUST** be serializable and deserializable for transmission across network boundaries via `Annotated` responses. The serialized form **MUST** preserve the error name, message, migration status, and the full cause chain so that the receiving end can reconstruct the error with complete information.
+Errors **MUST** be serializable and deserializable for transmission across network boundaries via `Annotated` responses. The serialized form **MUST** preserve the error type, message, and the full cause chain so that the receiving end can reconstruct the error with complete information.
 
 ### REQ 3 Error Chaining
 
-Errors **MUST** support chaining, where an outer error wraps an inner error as its cause. The `Display` format **MUST** render the full chain: `OuterError: outer message; Caused by: InnerError: inner message`.
+Errors **MUST** support chaining via the standard `std::error::Error::source()` method. Each error in the chain is a `DynamoError` with its own type and message. `Display` **MUST** render only the current error (standard Rust convention); callers walk `source()` for the full chain.
 
-### REQ 4 Custom Error Types
+### REQ 4 Consumer-Driven Action
 
-Developers **MUST** be able to define custom error types in their own modules that participate in the Dynamo error system. Custom types **MUST** implement the `DynamoError` trait and **SHOULD** use the `define_dynamo_error!` macro for consistency.
+The `DynamoError` struct **MUST NOT** carry migration flags. Instead, consumers (e.g., the migration module) **MUST** define which error types trigger which actions. This separation allows consumer policies to evolve independently of the error definitions.
 
-### REQ 5 Result-Level and Stream-Level Error Detection
+### REQ 5 Clear Error Reporting
 
-The migration module **MUST** detect migratable errors at both the stream level (errors inside `Annotated` responses) and the `Result` level (errors returned from pipeline `generate()` calls). Both paths **MUST** consult the `DynamoError` migration flag rather than relying on error type matching or string content.
+The error type name displayed to end users and in logs **MUST** be one of the fixed `ErrorType` variants (e.g., `Disconnected`, `CannotConnect`, `Unknown`). The `Display` output **MUST** follow the format `ErrorType: message`, providing immediate clarity about what category of error occurred without requiring the reader to parse the message text.
 
 # Proposal
 
 ## Overview
 
-The proposal introduces three core components:
+The proposal introduces two core components:
 
-1. **`DynamoError` trait** (`lib/runtime/src/error.rs`) - A trait extending `std::error::Error + Send + Sync + 'static` that adds error naming, chaining, and migration status to all Dynamo errors.
+1. **`ErrorType` enum** (`lib/runtime/src/error.rs`) — A fixed, centralized set of error categories. All Dynamo errors are classified into one of these categories. New categories are added to the enum, not defined by individual modules.
 
-2. **`AnyError` struct** (`lib/runtime/src/error.rs`) - A concrete, serializable implementation of `DynamoError` that serves as the universal wire format for transmitting errors across network boundaries and as a fallback error type for modules that have not yet defined custom errors.
+2. **`DynamoError` struct** (`lib/runtime/src/error.rs`) — A serializable error struct that carries an `ErrorType`, a human-readable message, and an optional cause chain. It implements `std::error::Error + Send + Sync + 'static` and `Serialize + Deserialize`.
 
-3. **`define_dynamo_error!` macro** (`lib/runtime/src/error.rs`) - An exported macro that generates boilerplate for custom error types, ensuring they correctly implement `DynamoError` with a `NAME` constant derived from the type name and a descriptive migration keyword.
+These integrate with the existing `Annotated` and `MaybeError` protocols for end-to-end structured error handling.
 
-These components integrate with the existing `Annotated` and `MaybeError` protocols to enable end-to-end structured error handling.
+## ErrorType Enum
 
-## DynamoError Trait
-
-The `DynamoError` trait is the foundation of the error system:
+The `ErrorType` enum defines the fixed set of error categories:
 
 ```rust
-pub trait DynamoError: std::error::Error + Send + Sync + 'static {
-    /// The error type name, automatically matching the struct name.
-    fn error_name(&self) -> &str;
-
-    /// The detailed error message.
-    fn error_message(&self) -> &str;
-
-    /// The inner cause of this error, if any.
-    fn caused_by(&self) -> Option<&dyn DynamoError> { None }
-
-    /// Intrinsic migration status of this error type alone.
-    /// - Some(true): migratable
-    /// - Some(false): not migratable
-    /// - None: inherit from cause
-    fn is_error_migratable(&self) -> Option<bool> { None }
-
-    /// Resolved migration status for the entire error chain.
-    /// Default implementation walks the chain - no need to override.
-    fn is_chain_migratable(&self) -> bool { /* ... */ }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ErrorType {
+    /// Uncategorized or unknown error.
+    Unknown,
+    /// Failed to establish a connection to a remote worker.
+    CannotConnect,
+    /// An established connection was lost unexpectedly.
+    Disconnected,
+    /// A connection or request timed out.
+    ConnectionTimeout,
+    // Future: Cancelled, ValidationError, ResourceExhausted, ...
 }
 ```
 
-The `is_chain_migratable()` method provides a default implementation that resolves migration status by walking the error chain. Developers only need to set `is_error_migratable()` on their error type; the chain resolution is handled automatically.
+Each variant represents an error category that is meaningful to both end users and consumers. The enum is centralized so that all consumers can reason about the full set of possible error types.
 
-## Migration Status Resolution
+## DynamoError Struct
 
-Each error type declares one of three migration statuses:
-
-- **`migratable`** (`Some(true)`): Transient failures where retrying on another worker is expected to help (e.g., stream disconnected, engine dead).
-- **`not_migratable`** (`Some(false)`): Permanent failures or intentional terminations where retrying would not help (e.g., cancelled by user, validation error).
-- **`inherit`** (`None`): Wrapper errors that delegate the decision to their inner cause (e.g., a prefill execution error wrapping a stream disconnection).
-
-The `is_chain_migratable()` default implementation resolves these through the chain:
-
-| This Error | Cause Present? | Cause Migratable? | Result |
-|:-----------|:---------------|:-------------------|:-------|
-| `migratable` | No | N/A | `true` |
-| `migratable` | Yes | `true` | `true` |
-| `migratable` | Yes | `false` | `false` (inner overrides) |
-| `not_migratable` | Any | Any | `false` (hard stop) |
-| `inherit` | No | N/A | `false` (conservative default) |
-| `inherit` | Yes | `true` | `true` (delegates to cause) |
-| `inherit` | Yes | `false` | `false` (delegates to cause) |
-
-This design means that a `not_migratable` error anywhere in the chain stops migration, a `migratable` error without a conflicting inner error allows migration, and an `inherit` error transparently passes the decision through to its cause.
-
-## AnyError
-
-`AnyError` is the serializable implementation of `DynamoError`:
+`DynamoError` is the standardized error type:
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AnyError {
-    pub name: String,
-    pub message: String,
-    pub migratable: Option<bool>,
-    pub cause: Option<Box<AnyError>>,
+pub struct DynamoError {
+    error_type: ErrorType,
+    message: String,
+    caused_by: Option<Box<DynamoError>>,
 }
 ```
 
-It serves two purposes:
+Fields are private. Public access is via:
+- `error_type()` — returns the `ErrorType`
+- `message()` — returns the error message
+- `source()` — returns the cause via `std::error::Error`
 
-1. **Network wire format.** When an error needs to cross a network boundary (via `Annotated`), the sender converts any `DynamoError` into an `AnyError` using `From<&dyn DynamoError>`. The entire cause chain is recursively converted. The receiver deserializes it back into an `AnyError` and can inspect the error name, message, and migration status.
+### Display
 
-2. **Fallback error type.** Modules that have not yet defined custom error types can use `AnyError::msg("message")` to create a simple error with `inherit` migration status. This provides a migration path from unstructured `anyhow::Error` usage.
+`Display` renders only the current error, following the standard Rust convention:
 
-Conversion from `DynamoError` preserves all fields:
-```rust
-let stream_err = StreamDisconnectedError::new("connection lost");
-let any_err = AnyError::from(&stream_err as &dyn DynamoError);
-// any_err.name == "StreamDisconnectedError"
-// any_err.migratable == Some(true)
+```
+Disconnected: Stream ended before generation completed
 ```
 
-Conversion from `std::error::Error` preserves the cause chain but uses "AnyError" as the name with `inherit` migration:
+This means the outermost error type is immediately visible in logs and user-facing responses. A `Disconnected` error tells the reader "a connection was lost" at a glance, without needing to parse the message text. The full cause chain is available for debugging by walking `source()`.
+
+### Constructors
+
 ```rust
-let io_err = std::io::Error::new(std::io::ErrorKind::Other, "disk full");
-let any_err: AnyError = (&io_err as &(dyn std::error::Error + 'static)).into();
+// Simple unknown error
+let err = DynamoError::msg("something failed");
+
+// Typed error with optional cause
+let err = DynamoError::new(ErrorType::Disconnected, "worker lost", None::<DynamoError>);
+
+// Typed error wrapping a cause
+let cause = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "reset by peer");
+let err = DynamoError::new(ErrorType::Disconnected, "worker lost", Some(cause));
 ```
+
+The `new()` constructor accepts any `impl std::error::Error + Send + Sync + 'static` as the optional cause. If the cause is already a `DynamoError`, it is preserved as-is. Otherwise, it is recursively converted to a `DynamoError` with `ErrorType::Unknown`.
+
+### Conversions
+
+`DynamoError` can be created from any `std::error::Error`:
+
+- **`From<Box<dyn Error + Send + Sync + 'static>>`** — If the boxed error is already a `DynamoError`, ownership is taken without cloning. Otherwise, it is wrapped as `Unknown` with the display string as the message, and the `source()` chain is recursively converted.
+
+- **`From<&(dyn Error + 'static)>`** — Reference-based conversion. If the error is a `DynamoError`, it is cloned. Otherwise, same wrapping as above.
+
+These conversions ensure that any `std::error::Error` in the pipeline — including `thiserror` enums, `anyhow::Error` contents, and I/O errors — can be converted to `DynamoError` for serialization, with any existing `DynamoError` instances in the `source()` chain preserved with their original `ErrorType`.
+
+## Error Clarity
+
+The standardized error types provide immediate clarity at multiple levels:
+
+**End-user responses.** When an error is returned from an API request, the outermost `DynamoError` is displayed. For example, `Disconnected: Stream ended before generation completed` tells the user that a connection was lost, without exposing internal details.
+
+**Log output.** Structured logging shows the error type first, making it easy to grep and filter. `Disconnected` errors are visually distinct from `CannotConnect` or `Unknown` errors.
+
+**Debugging.** The full cause chain is preserved via `source()`. A developer can walk the chain to see, for example, that a `Disconnected` error was caused by an `Unknown` error from a remote worker, which was in turn caused by an I/O error. Each level in the chain has its own `ErrorType` and message.
+
+**Cross-network context.** When an error is serialized through `Annotated` and deserialized on the other side, the `ErrorType` and full cause chain survive. The frontend can see that a `Disconnected` error originated from a remote engine worker, not from the local network layer.
 
 ## Integration with Annotated and MaybeError
 
-The `Annotated<R>` struct carries an optional `AnyError` field:
+The `Annotated<R>` struct carries an optional `DynamoError` field:
 
 ```rust
 pub struct Annotated<R> {
@@ -181,7 +183,7 @@ pub struct Annotated<R> {
     pub id: Option<String>,
     pub event: Option<String>,
     pub comment: Option<Vec<String>>,
-    pub error: Option<AnyError>,
+    pub error: Option<DynamoError>,
 }
 ```
 
@@ -189,112 +191,56 @@ The `MaybeError` trait provides the interface for types that may contain errors:
 
 ```rust
 pub trait MaybeError {
-    fn from_err(err: &dyn DynamoError) -> Self;
-    fn err(&self) -> Option<AnyError>;
+    fn from_err(err: Box<dyn std::error::Error + Send + Sync>) -> Self;
+    fn err(&self) -> Option<DynamoError>;
     fn is_ok(&self) -> bool { !self.is_err() }
     fn is_err(&self) -> bool { self.err().is_some() }
 }
 ```
 
-When a pipeline stage produces an error, it calls `Annotated::from_err(&err)` which serializes the `DynamoError` into an `AnyError` and stores it in the `error` field. Downstream consumers call `.err()` to retrieve the `AnyError` and `.is_chain_migratable()` to check migration status.
-
-## define_dynamo_error! Macro
-
-The macro generates a complete error type with a single invocation:
-
-```rust
-define_dynamo_error!(
-    /// Error indicating a stream was disconnected before completion.
-    StreamDisconnectedError,
-    migratable
-);
-```
-
-This generates:
-- A `pub struct StreamDisconnectedError` with `message` and `cause` fields
-- A `NAME` constant automatically set to `"StreamDisconnectedError"` via `stringify!`
-- `new(message)` and `with_cause(cause)` constructors
-- `Display`, `Error`, and `DynamoError` trait implementations
-- `source()` delegating to `caused_by()` for consistency
-
-The macro accepts three migration keywords: `migratable`, `not_migratable`, and `inherit`. Custom error types are defined in their own modules close to where they are used, not centrally in `error.rs`.
+The `from_err` signature accepts any boxed `std::error::Error`, matching the pre-existing interface. Internally, the error is converted to `DynamoError` for serialization. The `err()` method returns the deserialized `DynamoError` with its full cause chain intact.
 
 ## Migration Module Integration
 
-The migration module (`migration.rs`) checks for migratable errors at two levels:
+The migration module (`migration.rs`) defines its own policy for which error types are migratable:
 
-**Stream-level errors** (existing path): When processing responses from the stream, the `RetryManager` checks each `Annotated` response:
 ```rust
-let is_migratable = response.err().map(|e| e.is_chain_migratable()).unwrap_or(false);
+const MIGRATABLE_ERRORS: &[ErrorType] = &[
+    ErrorType::CannotConnect,
+    ErrorType::Disconnected,
+    ErrorType::ConnectionTimeout,
+];
+
+const NON_MIGRATABLE_ERRORS: &[ErrorType] = &[
+    // Future: ErrorType::Cancelled, etc.
+];
 ```
 
-**Result-level errors** (new path): When `generate()` returns an `Err`, the `RetryManager` now also checks if the error wraps a `DynamoError` with a migratable chain. Operators like `PrefillRouter` wrap stream errors in typed `DynamoError` values (e.g., `PrefillExecutionError` with `inherit` status and a `StreamDisconnectedError` cause). These are stored in `anyhow::Error` via `Box<dyn DynamoError>`, and the migration module recovers them via `downcast_ref`:
-```rust
-if let Some(dynamo_err) = err.downcast_ref::<Box<dyn DynamoError>>()
-    && dynamo_err.is_chain_migratable()
-{
-    // retry
-}
-```
+When the migration module encounters an error — whether from a stream response or a `Result` — it walks the error chain via `source()`, downcasting each error to check if it is a `DynamoError`. If any `DynamoError` in the chain has an `ErrorType` in the migratable set, and no `DynamoError` in the chain has an `ErrorType` in the non-migratable set, the request is retried on another worker. Errors that are not `DynamoError` instances (e.g., `thiserror` enums, I/O errors) are skipped during the walk but do not block migration — only an explicit non-migratable `DynamoError` prevents retry.
 
-# Implementation Details
+## Error Chain Preservation Across Existing Error Types
 
-## Custom Error Type Example
-
-A module that introduces new error conditions defines its types locally:
+Existing modules that define their own error types via `thiserror` (e.g., `PrefillError` in `prefill_router.rs`) continue to work. The key requirement is that when a module catches a `DynamoError` from a stream or sub-call, it **MUST** preserve it in the error chain via `#[source]` rather than stringifying it:
 
 ```rust
-use dynamo_runtime::{define_dynamo_error, error::DynamoError};
-
-define_dynamo_error!(
-    /// Prefill router has not been activated yet.
-    PrefillNotActivatedError,
-    not_migratable
-);
-
-define_dynamo_error!(
-    /// Error during prefill execution. Inherits migration from cause.
-    PrefillExecutionError,
-    inherit
-);
-```
-
-When a stream error occurs during prefill, the cause chain preserves migration semantics:
-```rust
-if let Some(err) = first_output.err() {
-    return Err(Box::new(
-        PrefillExecutionError::new("Prefill router returned error in output")
-            .with_cause(err),  // err is AnyError with StreamDisconnectedError cause
-    ) as Box<dyn DynamoError>);
-}
-```
-
-The `PrefillExecutionError` has `inherit` status. Its cause is a `StreamDisconnectedError` with `migratable` status. Walking the chain, `is_chain_migratable()` resolves to `true`, and the migration module retries the request.
-
-## Box<dyn DynamoError> as Internal Return Type
-
-Internal functions that produce errors from multiple error types return `Box<dyn DynamoError>` to preserve the trait interface:
-
-```rust
-async fn execute_prefill(...) -> std::result::Result<(...), Box<dyn DynamoError>> {
-    let router = router.ok_or_else(|| -> Box<dyn DynamoError> {
-        Box::new(PrefillNotActivatedError::new("Prefill router not yet activated"))
-    })?;
+#[derive(Debug, thiserror::Error)]
+pub enum PrefillError {
+    #[error("Prefill execution failed")]
+    PrefillError(#[source] DynamoError),  // preserves the DynamoError in source()
     // ...
 }
 ```
 
-At the `Operator::generate()` boundary, where the trait requires `anyhow::Result`, the error is wrapped:
-```rust
-return Err(anyhow::anyhow!(e));  // e: Box<dyn DynamoError>, stored as-is in anyhow
-```
+This allows the migration module to walk `source()` and find the `DynamoError` with its original `ErrorType`, even when it is wrapped in a module-specific error type.
 
-The migration module recovers it via `err.downcast_ref::<Box<dyn DynamoError>>()`.
+# Implementation Details
 
 ## Deferred to Implementation
 
 * Extending the pattern to Python bindings and other language interfaces.
 * Adding structured error reporting to HTTP/gRPC response bodies (currently errors are returned as plain text messages derived from `Display`).
+* Replacing legacy NATS `NoResponders` detection with `ErrorType::CannotConnect`.
+* Utility functions for walking error chains and matching against error type sets.
 
 # Implementation Phases
 
@@ -306,18 +252,18 @@ The migration module recovers it via `err.downcast_ref::<Box<dyn DynamoError>>()
 
 **Supported API / Behavior:**
 
-* `DynamoError` trait with `error_name()`, `error_message()`, `caused_by()`, `is_error_migratable()`, `is_chain_migratable()`
-* `AnyError` struct with serialization, `From<&dyn DynamoError>`, `From<&dyn std::error::Error>`
-* `define_dynamo_error!` macro with `migratable`, `not_migratable`, `inherit` keywords
-* `Annotated` and `MaybeError` updated to use `AnyError`
-* `StreamDisconnectedError` defined in `pipeline::network`
-* Migration module updated to use `is_chain_migratable()` at both stream and Result levels
+* `ErrorType` enum with `Unknown`, `CannotConnect`, `Disconnected`, `ConnectionTimeout`
+* `DynamoError` struct with serialization, `From<Box<dyn Error>>`, `From<&dyn Error>`
+* `Annotated` and `MaybeError` updated to use `DynamoError`
+* Network layer emits `ErrorType::Disconnected` for stream disconnections
+* Migration module with `MIGRATABLE_ERRORS` / `NON_MIGRATABLE_ERRORS` sets, checking both stream-level and Result-level errors
 
 **Not Supported:**
 
-* Custom error types in modules beyond `pipeline::network` (deferred to Phase 1)
+* Full replacement of all `anyhow::Error` usage across the codebase (incremental)
+* Additional `ErrorType` variants beyond the initial set
 
-## Phase 1: Module-Specific Error Types
+## Phase 1: Extended Error Types and Adoption
 
 **Release Target**: Subsequent
 
@@ -325,9 +271,10 @@ The migration module recovers it via `err.downcast_ref::<Box<dyn DynamoError>>()
 
 **Supported API / Behavior:**
 
-* Prefill router error types (`PrefillNotActivatedError`, `PrefillExecutionError`, `PrefillNoDisaggParamsError`)
-* Additional error types across other pipeline stages as modules are updated
-* Gradual replacement of `anyhow::Error` with typed errors in key pipeline paths
+* Additional `ErrorType` variants (e.g., `Cancelled`, `ValidationError`, `ResourceExhausted`)
+* Updated migration error sets as new types are added
+* Gradual adoption of `DynamoError::new(ErrorType::..., ...)` in place of `DynamoError::msg(...)` across pipeline stages
+* Replacement of NATS `NoResponders` detection with `ErrorType::CannotConnect`
 
 **Not Supported:**
 
@@ -345,19 +292,17 @@ The migration module recovers it via `err.downcast_ref::<Box<dyn DynamoError>>()
 
 **Pros:**
 
-* No new trait to learn; uses Rust's standard error trait.
+* No new struct to learn; uses Rust's standard error trait.
 * Broad ecosystem compatibility.
 
 **Cons:**
 
-* `std::error::Error` has no mechanism for custom flags like migration status. There is no way to attach a `migratable` flag to a standard error and have it propagate through a chain.
-* `std::error::Error` is not serializable. `source()` returns `&dyn Error` which cannot be serialized for network transmission. Similar bridging work to `AnyError` would be needed regardless.
-* No standardized error naming. `Display` output varies by implementation, making it impossible to programmatically identify error types across network boundaries.
+* `std::error::Error` is not serializable. `source()` returns `&dyn Error` which cannot be serialized for network transmission. A custom serializable wrapper would still be needed.
+* No standardized error categorization. `Display` output varies by implementation, making it impossible to programmatically identify error types across network boundaries. End users and log readers would see inconsistent, opaque error messages.
 
 **Reason Rejected:**
 
-* Cannot carry migration flags. The migration module would still need a separate mechanism to determine whether an error is migratable, which defeats the purpose of standardization.
-* Cannot be serialized over the network without a custom wrapper similar to `AnyError`, so the implementation effort is comparable while providing fewer guarantees.
+* Cannot be serialized over the network without a custom wrapper similar to `DynamoError`, so the implementation effort is comparable while providing neither clear error categories nor consistent user-facing messages.
 
 ## Alt 2: Use anyhow::Error
 
@@ -369,56 +314,52 @@ The migration module recovers it via `err.downcast_ref::<Box<dyn DynamoError>>()
 
 **Cons:**
 
-* `anyhow::Error` erases the trait surface. Once an error is wrapped in `anyhow`, you can no longer call trait methods like `is_chain_migratable()` without downcasting to a specific concrete type.
-* Cannot carry custom flags like migration status in a standardized way.
+* `anyhow::Error` erases type information. Once an error is wrapped in `anyhow`, you can no longer identify its category without downcasting to a specific concrete type, which requires knowing that type at the consumer site.
 * Not serializable for network transmission.
-* Downcasting requires knowing the exact concrete type, which creates tight coupling between modules. The migration module would need to enumerate and check every possible error type rather than relying on a common trait method.
+* No standardized error categorization. Error messages are free-form strings with no guaranteed structure for log filtering or user-facing display.
 
 **Reason Rejected:**
 
-* Erases the `DynamoError` trait surface, making it impossible to generically check migration status without enumerating concrete types. This was demonstrated in the PoC where `anyhow::anyhow!(e)` on a `Box<dyn DynamoError>` required `downcast_ref::<Box<dyn DynamoError>>()` to recover the trait, adding complexity.
-* Not serializable, so the same bridging work is needed for network transmission.
+* Not serializable, so a custom wrapper is still needed for network transmission.
+* No error categorization means end users and log readers see opaque messages like `"Stream ended before generation completed"` instead of clear categories like `Disconnected`.
 
 ## Alt 3: Use thiserror Enums
 
 **Pros:**
 
-* Generates `std::error::Error` implementations with less boilerplate.
-* Supports `#[from]` for automatic wrapping.
+* Generates `std::error::Error` implementations with less boilerplate via derive macros.
+* Supports `#[from]` for automatic wrapping and `#[source]` for error chaining.
 * Widely used in the Rust ecosystem.
 
 **Cons:**
 
-* Migration status can be embedded via custom fields, but there is no standardized way to access it. Each module could define migration flags slightly differently (e.g., a `bool` field vs. a method vs. an enum variant), making it impossible for the migration module to inspect migration status through a common interface.
-* Enum-based errors become a central dependency. Adding a new variant requires modifying the enum definition, which may live in a different module. This forces developers to constantly coordinate with the module that owns the enum.
-* Not serializable out of the box for network transmission.
+* Each module would define its own enum variants with potentially different error categories. There is no standardized set of error types, so consumers cannot reason about the full space of possible errors without inspecting every module's enum.
+* Not serializable out of the box for network transmission. Custom `Serialize`/`Deserialize` implementations or a serializable wrapper would still be required to transmit errors across network boundaries.
+* Error categories are scattered across the codebase rather than centralized, making it difficult to maintain consistent error reporting.
 
 **Reason Rejected:**
 
-* Lacks a standardized interface for migration flags. Without a common trait, the migration module would need to pattern-match on specific enum variants or error type names, reintroducing the fragile string/type matching that this proposal eliminates.
-* The `DynamoError` trait provides the standardized interface that `thiserror` cannot, while the `define_dynamo_error!` macro provides comparable boilerplate reduction.
+* The `DynamoError` struct is intentionally simple — a single struct with an `ErrorType` enum, a message, and a cause chain. Using `thiserror` would add a library dependency for functionality that is straightforward to implement directly. The `DynamoError` struct needs custom serialization behavior (recursive cause chain serialization, `From` conversions that preserve `DynamoError` instances via downcast) that would not benefit from `thiserror`'s derive macros.
+* The centralized `ErrorType` enum provides a single, consistent set of error categories that all modules share. `thiserror` enums are still usable within modules (e.g., `PrefillError`), but they wrap `DynamoError` via `#[source]` rather than replacing it, so the standardized categories are preserved through the error chain.
 
-## Alt 4: Migration Flag via Error Type Registration
+## Alt 4: Per-Error Migration Flags
 
-An alternative to embedding the migration flag in each error type would be to maintain a registry of error type names in the migration module. Each error type name would be mapped to its migration status. The `DynamoError` trait would still be needed for error naming and serialization, but the migration decision would be centralized.
+An alternative to having the migration module decide which error types are migratable is to embed migration flags directly in each error. Each error would carry a flag (e.g., `migratable`, `not_migratable`, or `inherit`) and the migration module would read the flag rather than maintaining its own error type sets.
 
 **Pros:**
 
-* Migration decisions are centralized in one place.
-* Error types do not need to carry a migration flag, saving a small amount of memory per error.
+* Migration semantics are co-located with the error definition, where the developer has the most context about whether an error is transient or permanent.
+* No coordination needed with the migration module when adding new error types.
 
 **Cons:**
 
-* Error type names must be globally unique and transmitted over the network for the registry to match them. The `DynamoError` trait (or equivalent) is still needed to provide the error name, so the implementation effort is comparable.
-* Name collisions are possible when different modules independently define error types. Two modules could define a `TimeoutError` with different migration semantics, and the registry would have no way to distinguish them.
-* Developers must register their error types with the migration module, creating cross-module coordination overhead. A developer working on the prefill module would need to go to the migration module to register `PrefillExecutionError`, breaking module isolation.
-* Adding a new error type requires a change in two places (the module defining the error and the migration registry), increasing the risk of the registry becoming stale.
+* The module defining the error decides migration behavior, not the module handling the error. This inverts the typical pattern where the handler decides what action to take (analogous to exception handling). The migration module should own migration policy, since it has the most context about retry budgets, request state, and system health.
+* Developers working on unrelated modules would need to understand migration semantics to set the correct flag on their errors, even though migration is not their concern. This distributes migration knowledge across the codebase rather than centralizing it.
+* Each error instance carries an extra field for the migration flag, consuming memory for a property that is a function of the error category, not the error instance. With a centralized `ErrorType` enum, the migration module can derive the same information from the type without per-instance storage.
 
 **Reason Rejected:**
 
-* Does not reduce implementation complexity since error naming and serialization are still required.
-* Introduces cross-module coupling and coordination overhead that the per-type flag avoids.
-* The per-type flag approach keeps the migration semantics co-located with the error definition, which is where the developer has the most context about whether an error is transient or permanent. The trade-off of a small amount of memory per error is negligible compared to the developer experience benefit.
+* Migration is a consumer-side decision, not an error-side property. The centralized `ErrorType` enum with consumer-defined error sets (e.g., `MIGRATABLE_ERRORS` in `migration.rs`) provides the same functionality without the per-error overhead and without distributing migration knowledge across modules.
 
 # Background
 
@@ -433,10 +374,9 @@ An alternative to embedding the migration flag in each error type would be to ma
 
 | Term | Definition |
 | :---- | :---- |
-| **DynamoError** | The core error trait for the Dynamo error system, extending `std::error::Error + Send + Sync + 'static` with error naming, chaining, and migration status. |
-| **AnyError** | A concrete, serializable implementation of `DynamoError` used as the wire format for network transmission and as a fallback for untyped errors. |
+| **ErrorType** | A fixed enum of standardized error categories (e.g., `Unknown`, `Disconnected`, `CannotConnect`). All Dynamo errors are classified into one of these categories. |
+| **DynamoError** | A serializable struct implementing `std::error::Error` that carries an `ErrorType`, a message, and an optional cause chain. The standardized error type for Dynamo. |
 | **Migration** | The process of retrying a failed LLM request on a different engine worker. |
-| **Migration status** | A per-error-type flag indicating whether a failed request should be retried: `migratable`, `not_migratable`, or `inherit`. |
-| **Error chain** | A linked sequence of errors where each error may have a `caused_by` inner error, forming a chain from the outermost wrapper to the root cause. |
-| **Stream-level error** | An error carried inside an `Annotated` response as an `AnyError`, detected by the migration module via `MaybeError::err()`. |
-| **Result-level error** | An error returned as `Err(anyhow::Error)` from a pipeline `generate()` call, detected by the migration module via `downcast_ref`. |
+| **Error chain** | A linked sequence of errors where each error may reference an inner cause via `std::error::Error::source()`, forming a chain from the outermost wrapper to the root cause. |
+| **Stream-level error** | An error carried inside an `Annotated` response as a `DynamoError`, detected by the migration module via `MaybeError::err()`. |
+| **Result-level error** | An error returned as `Err(anyhow::Error)` from a pipeline `generate()` call, detected by the migration module via `downcast_ref::<DynamoError>()`. |
