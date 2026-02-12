@@ -14,7 +14,7 @@
 
 **Required Reviewers**: [@grahamking](https://github.com/grahamking) [@PeaBrane](https://github.com/PeaBrane) <!-- [Names of technical leads that are required for acceptance] -->
 
-**Review Date**: [Date for review]
+**Review Date**: Feb 11 2026 <!-- [Date for review] -->
 
 **Pull Request**: [Link to Pull Request of the Proposal itself]
 
