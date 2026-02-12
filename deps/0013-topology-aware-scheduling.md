@@ -26,7 +26,7 @@ Add topology-aware scheduling (TAS) support to DynamoGraphDeployment (DGD) so th
 
 # Motivation
 
-AI inference workloads such as disaggregated vLLM benefit significantly from locality-aware placement. Packing related pods within the same network block or rack reduces inter-node latency and improves throughput. Today, the Dynamo operator generates Grove PodCliqueSet resources from DGDs with no topology constraints, leaving users unable to express placement preferences through the DGD API.
+AI inference workloads such as disaggregated serving benefit significantly from locality-aware placement. Packing related pods within the same network block or rack reduces inter-node latency and improves throughput. Today, the Dynamo operator generates Grove PodCliqueSet resources from DGDs with no topology constraints, leaving users unable to express placement preferences through the DGD API.
 
 Grove already provides Topology Aware Scheduling via its ClusterTopology CRD and TopologyConstraint fields on PCS, PCSG, and PodClique resources (GREP-244). Grove is also adding multi-topology support (GREP-369), allowing multiple named ClusterTopology resources per cluster for heterogeneous hardware (e.g., H100 vs GB200 node pools with different network hierarchies). The missing piece is a user-facing API on DGD that abstracts away Grove internals and translates deployment/service-level topology preferences—including topology selection—into the correct PCS fields.
 
