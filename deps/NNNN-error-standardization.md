@@ -88,9 +88,15 @@ These integrate with the existing `Annotated` and `MaybeError` protocols for end
 
 ## ErrorType Enum
 
-The `ErrorType` enum defines the fixed set of error categories:
+The `ErrorType` enum defines the fixed set of error categories. It supports subcategories via nested enums for grouping related error types under a common prefix:
 
 ```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BackendError {
+    /// The engine process has shut down.
+    EngineShutdown,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ErrorType {
     /// Uncategorized or unknown error.
@@ -101,11 +107,27 @@ pub enum ErrorType {
     Disconnected,
     /// A connection or request timed out.
     ConnectionTimeout,
-    // Future: Cancelled, ValidationError, ResourceExhausted, ...
+    /// Error originating from a backend engine.
+    Backend(BackendError),
+    // Future: Router(PrefillError), ...
 }
 ```
 
 Each variant represents an error category that is meaningful to both end users and consumers. The enum is centralized so that all consumers can reason about the full set of possible error types.
+
+### Subcategories
+
+Top-level variants like `Unknown`, `CannotConnect`, `Disconnected`, and `ConnectionTimeout` represent common error categories that stand on their own. For domains with multiple related error types, a nested enum groups them under a shared prefix. For example, `Backend(BackendError)` groups all backend engine errors, displayed as `Backend.EngineShutdown`.
+
+Nested enums preserve `Copy`, `Eq`, and `Serialize`/`Deserialize` since all inner variants are unit types. New subcategories are added by defining a new inner enum and adding a variant to `ErrorType`.
+
+Consumers match on subcategories naturally:
+```rust
+const MIGRATABLE_ERRORS: &[ErrorType] = &[
+    ErrorType::Disconnected,
+    ErrorType::Backend(BackendError::EngineShutdown),
+];
+```
 
 ## DynamoError Struct
 
@@ -131,9 +153,14 @@ Fields are private. Public access is via:
 
 ```
 Disconnected: Stream ended before generation completed
+Backend.EngineShutdown: engine shutting down
 ```
 
-This means the outermost error type is immediately visible in logs and user-facing responses. A `Disconnected` error tells the reader "a connection was lost" at a glance, without needing to parse the message text. The full cause chain is available for debugging by walking `source()`.
+This means the outermost error type is immediately visible in logs and user-facing responses.
+- A `Disconnected` error tells the reader "a connection was lost" at a glance
+- A `Backend.EngineShutdown` error tells the reader "a backend engine process exited"
+
+All without needing to parse the message text. The full cause chain is available for debugging by walking `source()`.
 
 ### Constructors
 
@@ -252,10 +279,11 @@ This allows the migration module to walk `source()` and find the `DynamoError` w
 
 **Supported API / Behavior:**
 
-* `ErrorType` enum with `Unknown`, `CannotConnect`, `Disconnected`, `ConnectionTimeout`
+* `ErrorType` enum with `Unknown`, `CannotConnect`, `Disconnected`, `ConnectionTimeout`, and `Backend(BackendError)` subcategory with `EngineShutdown`
 * `DynamoError` struct with serialization, `From<Box<dyn Error>>`, `From<&dyn Error>`
 * `Annotated` and `MaybeError` updated to use `DynamoError`
 * Network layer emits `ErrorType::Disconnected` for stream disconnections
+* Python bindings emit `ErrorType::Backend(BackendError::EngineShutdown)` on engine process exit
 * Migration module with `MIGRATABLE_ERRORS` / `NON_MIGRATABLE_ERRORS` sets, checking both stream-level and Result-level errors
 
 **Not Supported:**
