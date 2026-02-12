@@ -22,13 +22,13 @@
 
 # Summary
 
-Add topology-aware scheduling (TAS) support to DynamoGraphDeployment (DGD) so that users can express topology placement preferences (e.g., pack pods within a block or rack) at the deployment and service level, and optionally select which named topology definition to use for heterogeneous clusters. The Dynamo operator resolves these preferences—using smart defaults and user overrides—and injects them into the generated PodCliqueSet (PCS) spec. The underlying framework (e.g., Grove) owns topology validation and enforcement; Dynamo remains framework-agnostic.
+Add topology-aware scheduling (TAS) support to DynamoGraphDeployment (DGD) so that users can express topology placement preferences (e.g., pack pods within a block or rack) at the deployment and service level. The Dynamo operator resolves these preferences—using smart defaults and user overrides—and injects them into the generated PodCliqueSet (PCS) spec. The underlying framework (e.g., Grove) owns topology validation and enforcement; Dynamo remains framework-agnostic.
 
 # Motivation
 
 AI inference workloads such as disaggregated serving benefit significantly from locality-aware placement. Packing related pods within the same network block or rack reduces inter-node latency and improves throughput. Today, the Dynamo operator generates Grove PodCliqueSet resources from DGDs with no topology constraints, leaving users unable to express placement preferences through the DGD API.
 
-Grove already provides Topology Aware Scheduling via its ClusterTopology CRD and TopologyConstraint fields on PCS, PCSG, and PodClique resources (GREP-244). Grove is also adding multi-topology support (GREP-369), allowing multiple named ClusterTopology resources per cluster for heterogeneous hardware (e.g., H100 vs GB200 node pools with different network hierarchies). The missing piece is a user-facing API on DGD that abstracts away Grove internals and translates deployment/service-level topology preferences—including topology selection—into the correct PCS fields.
+Grove already provides Topology Aware Scheduling via its ClusterTopology CRD and TopologyConstraint fields on PCS, PCSG, and PodClique resources (GREP-244). The missing piece is a user-facing API on DGD that abstracts away Grove internals and translates deployment/service-level topology preferences into the correct PCS fields.
 
 ## Goals
 
@@ -38,21 +38,21 @@ Grove already provides Topology Aware Scheduling via its ClusterTopology CRD and
 
 * Support per-service overrides for fine-grained control.
 
-* Support multi-topology clusters by allowing users to specify which named topology definition applies to their deployment (e.g., for heterogeneous hardware or multi-cloud environments).
-
 * Maintain full backward compatibility with existing DGDs (no TAS unless explicitly enabled).
 
-* Keep Dynamo free of framework-specific logic (no ClusterTopology reads, no Grove-specific validation).
+* Validate topology at DGD creation time (webhook) so users get immediate feedback; when TAS is enabled, the webhook must validate against the framework's topology CRD and reject the DGD with an error if validation fails or the CRD cannot be read.
 
 ### Non Goals
 
 * Dynamo will not define, create, or manage topology CRs (e.g., Grove ClusterTopology). Admins configure topology in the underlying framework per its documentation.
 
-* Dynamo will not validate that topology domains exist in the cluster; the framework handles that at admission or reconciliation.
-
 * Dynamic updates to topology constraints after PCS creation are out of scope (blocked by Grove's immutability).
 
 * Backend- or framework-specific default strategies (e.g., different defaults for vLLM vs TRT-LLM) are out of scope for the initial implementation.
+
+* Generalizing the domain vocabulary for non-Grove backends is out of scope. The abstract domain names (region, zone, datacenter, block, rack, host, numa) align with Grove today. For backends that use node labels (e.g., Kueue Topology CRD), a `domainToLabelMapping` in operator config (e.g., `rack` → `cloud.provider.com/topology-rack`) can be introduced so the webhook can validate and translate; only needed when that backend is supported.
+
+* Multi-topology support (selecting a named topology definition per deployment) is out of scope for the initial implementation; it is still in design at the Grove/KAI scheduler level. See Future Work.
 
 ## Requirements
 
@@ -71,7 +71,7 @@ When `enabled: true` and no explicit constraints are provided, the operator **MU
 - Multinode services (PCSG): `packDomain: rack`; child cliques inherit from PCSG (no explicit constraint)
 - Single-node services (PodClique): `packDomain: rack`
 
-Both the smart defaults and the list of allowed topology domain names **MUST** be configurable at the Dynamo operator level (e.g., via Helm values or operator configuration), so that cluster administrators can tune them per cluster without requiring users to modify their DGDs. For Grove, the Helm defaults ship with `[region, zone, datacenter, block, rack, host, numa]`; for other frameworks, the admin overrides the list to match the supported domains.
+The smart defaults **MUST** be configurable at the Dynamo operator level (e.g., via Helm values or operator configuration), so that cluster administrators can tune them per cluster without requiring users to modify their DGDs.
 
 **Note on constraint type:** Today, all topology constraints in the underlying framework (Grove) are hard/required constraints — there is no "preferred" or soft mode. This means that if the scheduler cannot satisfy the constraint, the workload will not be scheduled. This is acceptable because:
 1. TAS is explicitly opt-in; users choose to enable it knowing constraints will be enforced.
@@ -88,15 +88,11 @@ Service-level constraints **MUST** be equal to or narrower than the deployment-l
 
 ### REQ 6 Framework Agnosticism
 
-Dynamo **MUST NOT** read or depend on framework-specific topology resources (e.g., Grove ClusterTopology). It **MUST** only inject resolved constraints into the generated spec. The underlying framework is responsible for validating domain existence and topology availability.
+The high-level DGD API (topology constraints, `packDomain`) **MUST** be the same for all supported frameworks. Users express topology in Dynamo's abstract vocabulary (e.g., `region`, `zone`, `block`, `rack`, `host`, `numa`), not in framework-specific terms. Future internal work may be required to translate this API to certain frameworks (e.g., mapping abstract domains to framework-specific node labels); the DGD API itself does not change.
 
 ### REQ 7 Backward Compatibility
 
 No automatic TAS application on existing DGDs. Users **MUST** explicitly enable TAS before first deployment or recreate their DGD with `enabled: true`.
-
-### REQ 8 Multi-Topology Support
-
-Users **SHOULD** be able to specify an optional topology name to select which topology definition applies to their deployment (e.g., for clusters with heterogeneous hardware). The topology name **MUST** be at the deployment level (not per-service), since topology selection applies to the entire generated PCS. If omitted, the framework's default topology **MUST** be used. Dynamo **MUST NOT** validate that the topology name references an existing resource; the framework does that.
 
 # Proposal
 
@@ -108,12 +104,6 @@ Add an optional `TopologyConstraints` section to `DynamoGraphDeploymentSpec`:
 type TopologyConstraints struct {
     // Enabled controls whether TAS is applied. Default: false.
     Enabled bool `json:"enabled"`
-
-    // TopologyName references a specific topology definition (e.g., a named
-    // ClusterTopology in Grove). If omitted, the framework's default topology is used.
-    // Useful for heterogeneous clusters with multiple topology hierarchies.
-    // +optional
-    TopologyName string `json:"topologyName,omitempty"`
 
     // Deployment-level constraint. If nil when enabled=true: smart default (block).
     Deployment *TopologyConstraint `json:"deployment,omitempty"`
@@ -139,13 +129,12 @@ type ServiceSpec struct {
 }
 ```
 
-**User example (with named topology and inline service constraints):**
+**User example (inline service constraints):**
 
 ```yaml
 spec:
   topologyConstraints:
     enabled: true
-    topologyName: aws-p5   # optional; omit for framework default
     deployment:
       packDomain: zone
   services:
@@ -164,7 +153,6 @@ spec:
 
 | DGD | Grove | When | Value |
 |-----|-------|------|--------|
-| topologyName | PCS.Spec.Template.ClusterTopologyName | enabled=true and topologyName set | User-specified name |
 | topologyConstraints.deployment | PCS.Spec.Template.TopologyConstraint | enabled=true | Override or default (block) |
 | service.topologyConstraint | PCSG.TopologyConstraint | Multinode svc | Override or default (rack) |
 | service.topologyConstraint | PodClique.TopologyConstraint | Single-node svc | Override or default (rack) |
@@ -172,7 +160,7 @@ spec:
 
 ## Smart Defaults and Override Resolution
 
-Dynamo does not read ClusterTopology or any framework-specific topology resource. It computes resolved constraints from user overrides and smart defaults only.
+The controller computes resolved constraints from user overrides and smart defaults only; it does not read the topology CRD. The webhook (see Validation) may read the topology CRD for admission-time validation.
 
 | Level | Default | Rationale |
 |-------|--------|-----------|
@@ -180,7 +168,7 @@ Dynamo does not read ClusterTopology or any framework-specific topology resource
 | PCSG (multinode service) | rack | Packs service replicas; cliques inherit so workers can span hosts within a rack |
 | Single-node clique | rack | Locality without over-constraining |
 
-Both the smart defaults and the allowed domain list are configurable at the Dynamo operator level (e.g., Helm values), allowing admins to adjust them per cluster.
+The smart defaults are configurable at the Dynamo operator level (e.g., Helm values), allowing admins to adjust them per cluster.
 
 **Operator configuration example (Helm values):**
 
@@ -190,17 +178,14 @@ operator:
     defaults:
       deployment: block
       service: rack
-    allowedDomains:
-      - region
-      - zone
-      - datacenter
-      - block
-      - rack
-      - host
-      - numa
+    # Future (non-Grove backends, e.g. Kueue): map abstract domains to node labels for validation.
+    # domainToLabelMapping:
+    #   block: "cloud.provider.com/topology-block"
+    #   rack: "cloud.provider.com/topology-rack"
+    #   host: "kubernetes.io/hostname"
 ```
 
-For each level: if user set a value (inline `topologyConstraint` on the service), use it; otherwise use the smart default. Validate `packDomain` against the configured `allowedDomains` list and validate hierarchy (service ≤ deployment). Dynamo does not validate domain existence in the cluster; the framework does.
+For each level: if user set a value (inline `topologyConstraint` on the service), use it; otherwise use the smart default. Validate `packDomain` against the known `TopologyDomain` values and validate hierarchy (service ≤ deployment). When the webhook can read the framework's topology CRD, it also validates that each `packDomain` is a valid level in the referenced topology (see Validation); otherwise the framework surfaces errors at reconciliation.
 
 ## PCS Generation
 
@@ -208,7 +193,6 @@ In `GenerateGrovePodCliqueSet` (or equivalent):
 
 1. If `topologyConstraints` is nil or `enabled=false` → generate PCS without topology constraints. Any `topologyConstraint` on services is ignored.
 2. If `enabled=true` → for each service, resolve its topology constraint (inline override or smart default), validate hierarchy, then inject:
-   - If `topologyName` is set: set `PCS.Spec.Template.ClusterTopologyName`.
    - PCS template: deployment constraint (or default block).
    - For each multinode service: set PCSG constraint (service's `topologyConstraint` or default rack); no explicit constraint on child cliques.
    - For each single-node service: set PodClique constraint (service's `topologyConstraint` or default rack).
@@ -219,17 +203,17 @@ If the underlying framework rejects the PCS (e.g., ClusterTopology missing or in
 
 ### On CREATE
 
-- **Enabled flag:** If `enabled=false` and (`topologyName` set, or `deployment` set, or any service has `topologyConstraint`) → reject: "cannot specify topology constraints when TAS is disabled".
-- **Struct:** `PackDomain` **MUST** be set and be one of the allowed domain names configured at the operator level (defaults to Grove's domains: region, zone, datacenter, block, rack, host, numa).
+- **Enabled flag:** If `enabled=false` and (`deployment` set, or any service has `topologyConstraint`) → reject: "cannot specify topology constraints when TAS is disabled".
+- **Struct:** `PackDomain` **MUST** be set and be one of the known `TopologyDomain` values: `region`, `zone`, `datacenter`, `block`, `rack`, `host`, `numa`.
 - **Hierarchy:** Each service's `topologyConstraint` **MUST** be ≤ deployment (narrower or equal).
-- **Topology name:** Dynamo does not validate that `topologyName` references an existing topology; the framework does that at PCS admission.
+- **Topology CRD validation:** When TAS is enabled, the webhook **MUST** read the framework's topology CRD (e.g., Grove ClusterTopology) to validate that each `packDomain` (deployment and per-service) is a valid level in the cluster's topology (single/default topology). For Grove, domain names match 1:1 (rack = rack). If the CRD cannot be read (e.g., RBAC missing, CRD not installed) or validation fails, the webhook **MUST** reject the DGD with an error.
+- **RBAC:** The Dynamo operator needs read-only access to the framework's topology CRD (e.g., `clustertopologies.grove.io`) for webhook validation when that backend is in use.
 
 ### On UPDATE
 
 All topology-related fields are **immutable** once the DGD is created, mirroring Grove's immutability of topology constraints on PCS. The following changes **MUST** be rejected:
 
 - **`enabled`:** Cannot change from `true` to `false` (would require removing constraints from PCS → Grove rejects) or from `false` to `true` (would require adding constraints to existing PCS → Grove rejects).
-- **`topologyName`:** Cannot be added, removed, or changed.
 - **`deployment`:** Cannot be added, removed, or have `packDomain` changed.
 - **Service `topologyConstraint`:** Cannot be added, removed, or have `packDomain` changed on any existing service.
 
@@ -237,15 +221,15 @@ To change topology constraints, users must delete and recreate the DGD (which cr
 
 ### General
 
-Dynamo does not validate domain existence, topology name validity, or ClusterTopology presence. The underlying framework does that when the PCS is admitted or reconciled.
+When TAS is enabled, the webhook must validate domain existence against the topology CRD; if the CRD cannot be read or validation fails, the webhook rejects the DGD with an error.
 
 ## Framework Agnosticism and Topology Ownership
 
-Dynamo does not read or check ClusterTopology (or any framework-specific topology resource). It injects resolved constraints and the optional topology name into the generated PCS when `enabled=true`. The framework that owns the generated resource (e.g., Grove) is responsible for validation and error reporting if topology is missing or invalid.
+**Abstract vocabulary:** `PackDomain` uses Dynamo's own abstract topology vocabulary (`region`, `zone`, `datacenter`, `block`, `rack`, `host`, `numa`) — defined as a `TopologyDomain` type in the DGD API. This is not "Grove's domains leaked into Dynamo"; it aligns with Grove today because these are natural, user-friendly terms. Dynamo's webhook validates that `packDomain` is one of these known names (catches typos at admission). The framework validates that the domain is a valid level in the cluster's topology. For future non-Grove backends (e.g., Kueue), a translation layer (e.g., operator config mapping abstract domains to framework-specific node labels) can translate without changing the DGD API.
 
-**Multi-topology support:** Clusters may have multiple topology definitions for heterogeneous hardware (e.g., H100 vs GB200 node pools with different network hierarchies; see GREP-369). The optional `topologyName` field allows users (or external systems like Run:ai) to specify which topology applies to a DGD. Dynamo passes this through to the generated PCS (`clusterTopologyName`); the framework resolves it. If omitted, the framework uses its default topology.
+**Webhook vs controller:** The webhook reads the framework's topology CRD when TAS is enabled and rejects the DGD with an error if the CRD cannot be read or validation fails. The controller does not read the topology CRD; it injects resolved constraints when `enabled=true`.
 
-Dynamo does not define or create topology CRs. When Grove is used, ClusterTopology resources (default and additional named topologies) are configured by the admin per Grove's documentation. Dynamo documents this prerequisite. No Dynamo RBAC for ClusterTopology is required.
+Dynamo does not define or create topology CRs. When Grove is used, the cluster's topology (ClusterTopology) is configured by the admin per Grove's documentation. Dynamo requires read-only RBAC for the framework's topology CRD when that backend is in use (for webhook validation).
 
 ## Status and Observability
 
@@ -256,7 +240,7 @@ Dynamo does not define or create topology CRs. When Grove is used, ClusterTopolo
 ## Migration and Backward Compatibility
 
 - No `topologyConstraints` block or `enabled=false` → no TAS (backward compatible).
-- TAS is applied only when `enabled=true`. The framework may fail if topology is not configured; Dynamo does not check.
+- TAS is applied only when `enabled=true`. The webhook must validate topology when TAS is enabled and rejects the DGD with an error if the topology CRD cannot be read or validation fails.
 - Existing DGDs are unchanged; no automatic topology constraints on existing PCS.
 - Rollout: deploy updated operator; when using Grove, admins configure ClusterTopology per Grove docs; users set `enabled=true` on new or recreated DGDs.
 
@@ -269,13 +253,16 @@ Dynamo does not define or create topology CRs. When Grove is used, ClusterTopolo
 | Multinode cliques inherit from PCSG | Avoids forcing many workers onto one host; respects capacity. |
 | Single-node clique default: rack | Good locality without over-constraining. |
 | Struct-based `TopologyConstraint` | Aligns with Grove; room for `FallbackDomain` later. |
-| Dynamo does not read ClusterTopology | Keeps Dynamo framework-agnostic; framework validates and surfaces errors. |
+| Webhook reads topology CRD for validation; rejects on failure | Gives users immediate feedback at DGD creation; controller does not read CRD. Rejects DGD with error if topology CRD unreadable or validation fails. |
 | Dynamo does not define or create topology CRs | Admins set up topology per framework docs; Dynamo only documents the requirement. |
-| `topologyName` at top level, not inside `TopologyConstraint` | Topology selection is per-deployment (maps to PCS-level `clusterTopologyName`), not per-service. |
-| Generic `topologyName` naming (not `clusterTopologyName`) | Framework-agnostic; avoids exposing Grove-specific resource names in DGD API. |
-| Smart defaults and allowed domains configurable at operator level | Admins can tune defaults and domain vocabulary per cluster/framework without user DGD changes or code changes. |
+| Smart defaults configurable at operator level | Admins can tune default `packDomain` values per cluster without user DGD changes. |
+| `TopologyDomain` is a fixed enum, not configurable | Domain names (region, zone, etc.) are Dynamo's own abstract vocabulary; the framework validates that a domain exists in the referenced topology. For non-Grove backends, a translation layer can map abstract domains to framework-specific values. |
 | Hard constraints (for now) | Only mode available in Grove today; preferred/soft mode can be adopted when the framework supports it. |
 | Topology fields immutable on UPDATE | Mirrors Grove's PCS immutability; avoids update failures. Delete and recreate to change. |
+
+## Future Work
+
+* **Multi-topology support:** Multiple named topology definitions per cluster (e.g., one for H100, one for GB200 node pools) is still in design at the Grove/KAI scheduler level. Once that is available, Dynamo could add an optional field (e.g., `topologyName`) to the DGD API so users can select which topology applies to their deployment; the operator would pass it through to the generated PCS (e.g., `clusterTopologyName` in Grove).
 
 # Alternate Solutions
 
