@@ -22,7 +22,7 @@
 
 # Summary
 
-Add topology-aware scheduling (TAS) support to DynamoGraphDeployment (DGD) so that users can express topology placement preferences (e.g., pack pods within a block or rack) at the deployment and service level. The Dynamo operator resolves these preferences—using smart defaults and user overrides—and injects them into the generated PodCliqueSet (PCS) spec. The underlying framework (e.g., Grove) owns topology validation and enforcement; Dynamo remains framework-agnostic.
+Add topology-aware scheduling (TAS) support to DynamoGraphDeployment (DGD) so that users can express topology placement preferences (e.g., pack pods within a block or rack) at the deployment and service level. The Dynamo operator injects these user-specified constraints into the generated PodCliqueSet (PCS) spec. The underlying framework (e.g., Grove) owns topology validation and enforcement; Dynamo remains framework-agnostic.
 
 # Motivation
 
@@ -34,9 +34,7 @@ Grove already provides Topology Aware Scheduling via its ClusterTopology CRD and
 
 * Allow DGD users to opt in to topology-aware scheduling via a simple, framework-agnostic API.
 
-* Provide smart defaults (PCS=block, PCSG=rack) so users do not have to configure every level.
-
-* Support per-service overrides for fine-grained control.
+* Require explicit deployment-level and per-service topology constraints when TAS is enabled (no defaults).
 
 * Maintain full backward compatibility with existing DGDs (no TAS unless explicitly enabled).
 
@@ -64,23 +62,11 @@ TAS **MUST** be opt-in via a boolean `enabled` field (default `false`). Existing
 
 The DGD API **MUST NOT** expose Grove-specific terms (PCS, PCSG, PodClique). Users **SHOULD** specify constraints in terms of "deployment" and "services" only.
 
-### REQ 3 Smart Defaults
+### REQ 3 Explicit Constraints When TAS Enabled
 
-When `enabled: true` and no explicit constraints are provided, the operator **MUST** apply sensible defaults:
-- Deployment level (PCS): `packDomain: block`
-- Multinode services (PCSG): `packDomain: rack`; child cliques inherit from PCSG (no explicit constraint)
-- Single-node services (PodClique): `packDomain: rack`
+When `enabled: true`, the deployment-level constraint (`deployment`) and each service's `topologyConstraint` **MUST** be explicitly set by the user. There are no defaults; the operator uses only the user-specified values.
 
-The smart defaults **MUST** be configurable at the Dynamo operator level (e.g., via Helm values or operator configuration), so that cluster administrators can tune them per cluster without requiring users to modify their DGDs.
-
-**Note on constraint type:** Today, all topology constraints in the underlying framework (Grove) are hard/required constraints — there is no "preferred" or soft mode. This means that if the scheduler cannot satisfy the constraint, the workload will not be scheduled. This is acceptable because:
-1. TAS is explicitly opt-in; users choose to enable it knowing constraints will be enforced.
-2. Users can override defaults per service or disable the feature entirely if constraints cause scheduling issues.
-3. When the underlying framework adds support for preferred/soft constraints, the smart defaults could be changed to preferred mode, reducing scheduling failure risk while still providing best-effort topology placement.
-
-### REQ 4 User Overrides
-
-Users **MUST** be able to override the deployment-level constraint and per-service constraints. When an override is provided, it **MUST** be used instead of the smart default.
+**Note on constraint type:** Today, all topology constraints in the underlying framework (Grove) are hard/required constraints — there is no "preferred" or soft mode. If the scheduler cannot satisfy the constraint, the workload will not be scheduled. This is acceptable because TAS is explicitly opt-in and users specify constraints knowingly. When the underlying framework adds support for preferred/soft constraints, the API could be extended accordingly.
 
 ### REQ 5 Hierarchy Validation
 
@@ -105,7 +91,7 @@ type TopologyConstraints struct {
     // Enabled controls whether TAS is applied. Default: false.
     Enabled bool `json:"enabled"`
 
-    // Deployment-level constraint. If nil when enabled=true: smart default (block).
+    // Deployment-level constraint. Required when enabled=true.
     Deployment *TopologyConstraint `json:"deployment,omitempty"`
 }
 
@@ -122,8 +108,7 @@ Per-service topology constraints are specified inline on each service definition
 type ServiceSpec struct {
     // ... existing fields (name, replicas, multinode, etc.) ...
 
-    // TopologyConstraint overrides the smart default for this service.
-    // If nil when TAS is enabled: smart default (rack).
+    // TopologyConstraint for this service. Required when TAS is enabled.
     // +optional
     TopologyConstraint *TopologyConstraint `json:"topologyConstraint,omitempty"`
 }
@@ -153,31 +138,20 @@ spec:
 
 | DGD | Grove | When | Value |
 |-----|-------|------|--------|
-| topologyConstraints.deployment | PCS.Spec.Template.TopologyConstraint | enabled=true | Override or default (block) |
-| service.topologyConstraint | PCSG.TopologyConstraint | Multinode svc | Override or default (rack) |
-| service.topologyConstraint | PodClique.TopologyConstraint | Single-node svc | Override or default (rack) |
+| topologyConstraints.deployment | PCS.Spec.Template.TopologyConstraint | enabled=true | User-specified |
+| service.topologyConstraint | PCSG.TopologyConstraint | Multinode svc | User-specified |
+| service.topologyConstraint | PodClique.TopologyConstraint | Single-node svc | User-specified |
 | — | PodClique (multinode) | Multinode svc | No explicit constraint (inherit PCSG) |
 
-## Smart Defaults and Override Resolution
+## Constraint Resolution
 
-The controller computes resolved constraints from user overrides and smart defaults only; it does not read the topology CRD. The webhook (see Validation) may read the topology CRD for admission-time validation.
+The controller uses only user-specified constraints when `enabled=true`; it does not read the topology CRD. The webhook (see Validation) reads the topology CRD for admission-time validation. When TAS is enabled, `deployment` and each service's `topologyConstraint` are required; the controller injects these values into the generated PCS. Validate `packDomain` against the known `TopologyDomain` values and validate hierarchy (service ≤ deployment). The webhook validates that each `packDomain` is a valid level in the cluster's topology (see Validation).
 
-| Level | Default | Rationale |
-|-------|--------|-----------|
-| PCS (deployment) | block | Good capacity/locality balance for the whole deployment |
-| PCSG (multinode service) | rack | Packs service replicas; cliques inherit so workers can span hosts within a rack |
-| Single-node clique | rack | Locality without over-constraining |
-
-The smart defaults are configurable at the Dynamo operator level (e.g., Helm values), allowing admins to adjust them per cluster.
-
-**Operator configuration example (Helm values):**
+**Operator configuration (optional, for future use):**
 
 ```yaml
 operator:
   topologyAwareScheduling:
-    defaults:
-      deployment: block
-      service: rack
     # Future (non-Grove backends, e.g. Kueue): map abstract domains to node labels for validation.
     # domainToLabelMapping:
     #   block: "cloud.provider.com/topology-block"
@@ -185,17 +159,15 @@ operator:
     #   host: "kubernetes.io/hostname"
 ```
 
-For each level: if user set a value (inline `topologyConstraint` on the service), use it; otherwise use the smart default. Validate `packDomain` against the known `TopologyDomain` values and validate hierarchy (service ≤ deployment). When the webhook can read the framework's topology CRD, it also validates that each `packDomain` is a valid level in the referenced topology (see Validation); otherwise the framework surfaces errors at reconciliation.
-
 ## PCS Generation
 
 In `GenerateGrovePodCliqueSet` (or equivalent):
 
 1. If `topologyConstraints` is nil or `enabled=false` → generate PCS without topology constraints. Any `topologyConstraint` on services is ignored.
-2. If `enabled=true` → for each service, resolve its topology constraint (inline override or smart default), validate hierarchy, then inject:
-   - PCS template: deployment constraint (or default block).
-   - For each multinode service: set PCSG constraint (service's `topologyConstraint` or default rack); no explicit constraint on child cliques.
-   - For each single-node service: set PodClique constraint (service's `topologyConstraint` or default rack).
+2. If `enabled=true` → for each service, use its `topologyConstraint` (required), validate hierarchy, then inject:
+   - PCS template: deployment constraint (user-specified).
+   - For each multinode service: set PCSG constraint from service's `topologyConstraint`; no explicit constraint on child cliques (they inherit from PCSG).
+   - For each single-node service: set PodClique constraint from service's `topologyConstraint`.
 
 If the underlying framework rejects the PCS (e.g., ClusterTopology missing or invalid domain), the error surfaces at the framework level.
 
@@ -204,6 +176,7 @@ If the underlying framework rejects the PCS (e.g., ClusterTopology missing or in
 ### On CREATE
 
 - **Enabled flag:** If `enabled=false` and (`deployment` set, or any service has `topologyConstraint`) → reject: "cannot specify topology constraints when TAS is disabled".
+- **Required when enabled:** If `enabled=true`, `deployment` **MUST** be set and each service **MUST** have `topologyConstraint` set.
 - **Struct:** `PackDomain` **MUST** be set and be one of the known `TopologyDomain` values: `region`, `zone`, `datacenter`, `block`, `rack`, `host`, `numa`.
 - **Hierarchy:** Each service's `topologyConstraint` **MUST** be ≤ deployment (narrower or equal).
 - **Topology CRD validation:** When TAS is enabled, the webhook **MUST** read the framework's topology CRD (e.g., Grove ClusterTopology) to validate that each `packDomain` (deployment and per-service) is a valid level in the cluster's topology (single/default topology). For Grove, domain names match 1:1 (rack = rack). If the CRD cannot be read (e.g., RBAC missing, CRD not installed) or validation fails, the webhook **MUST** reject the DGD with an error.
@@ -250,12 +223,11 @@ Dynamo does not define or create topology CRs. When Grove is used, the cluster's
 |----------|-----------|
 | `enabled: bool`, default false | Explicit opt-in; backward compatible; avoids immutability issues. |
 | Inline `topologyConstraint` on services (not `serviceOverrides` map) | Co-locates constraint with service; eliminates name-key typos and service-name validation; mirrors Grove pattern. |
-| Multinode cliques inherit from PCSG | Avoids forcing many workers onto one host; respects capacity. |
-| Single-node clique default: rack | Good locality without over-constraining. |
+| Multinode cliques inherit from PCSG | Constraint set on PCSG; child cliques have no explicit constraint, avoiding over-constraining many workers to one host. |
 | Struct-based `TopologyConstraint` | Aligns with Grove; room for `FallbackDomain` later. |
 | Webhook reads topology CRD for validation; rejects on failure | Gives users immediate feedback at DGD creation; controller does not read CRD. Rejects DGD with error if topology CRD unreadable or validation fails. |
 | Dynamo does not define or create topology CRs | Admins set up topology per framework docs; Dynamo only documents the requirement. |
-| Smart defaults configurable at operator level | Admins can tune default `packDomain` values per cluster without user DGD changes. |
+| No smart defaults; user must set all constraints when TAS enabled | Explicit configuration; no implicit defaults. |
 | `TopologyDomain` is a fixed enum, not configurable | Domain names (region, zone, etc.) are Dynamo's own abstract vocabulary; the framework validates that a domain exists in the referenced topology. For non-Grove backends, a translation layer can map abstract domains to framework-specific values. |
 | Hard constraints (for now) | Only mode available in Grove today; preferred/soft mode can be adopted when the framework supports it. |
 | Topology fields immutable on UPDATE | Mirrors Grove's PCS immutability; avoids update failures. Delete and recreate to change. |
@@ -263,6 +235,8 @@ Dynamo does not define or create topology CRs. When Grove is used, the cluster's
 ## Future Work
 
 * **Multi-topology support:** Multiple named topology definitions per cluster (e.g., one for H100, one for GB200 node pools) is still in design at the Grove/KAI scheduler level. Once that is available, Dynamo could add an optional field (e.g., `topologyName`) to the DGD API so users can select which topology applies to their deployment; the operator would pass it through to the generated PCS (e.g., `clusterTopologyName` in Grove).
+
+* **Smart defaults enablement:** Smart defaults (e.g., deployment=block, service=rack when constraints are omitted) were considered but deferred. Block and rack domains vary from cluster to cluster, and optimal placement varies by workload, making a single good default difficult; for an opt-in feature, defaults are nice-to-have rather than a requirement, and the design errs on the side of not introducing defaults that could cause issues. Once Grove has support for auto-packing (or equivalent), Dynamo could introduce smart defaults—for example, making that framework behavior the default when TAS is enabled and the user does not specify constraints.
 
 # Alternate Solutions
 
