@@ -203,9 +203,36 @@ Dynamo does not define or create topology CRs. When Grove is used, the cluster's
 
 ## Status and Observability
 
-- **Status:** Add `AppliedTopologyConstraints` to DGD status reporting the applied constraints when `spec.topologyConstraint` is set.
-- **Events:** Normal when constraints are applied; Warning/Error on validation failures.
-- **Logging:** Info when constraints are applied; Error when validation fails.
+**Topology condition on DGD status:**
+
+When `spec.topologyConstraint` is set, the controller surfaces a `TopologyConstraintsEnforced` condition on the DGD status. The controller reads topology-related conditions from the underlying workload resource (framework-specific) and translates them into this Dynamo-level condition:
+
+| Condition Type | Status | Reason | When |
+|----------------|--------|--------|------|
+| `TopologyConstraintsEnforced` | `True` | `AllTopologyLevelsAvailable` | TAS active and all required topology levels are available in the cluster topology |
+| `TopologyConstraintsEnforced` | `False` | `TopologyLevelsUnavailable` | The framework reports that one or more required topology levels are no longer available |
+| `TopologyConstraintsEnforced` | `False` | `TopologyDefinitionNotFound` | The framework reports that the topology definition resource was not found |
+| *(absent)* | — | — | `spec.topologyConstraint` is nil (no TAS) |
+
+This condition is necessary because the underlying framework may not fail the deployment when a topology level becomes unavailable — it may keep pods running but silently stop enforcing the constraint. Without propagating this, the DGD would appear `Ready` with no indication that topology enforcement stopped.
+
+**Framework translation (Grove):** The controller reads the PCS `Conditions` and maps Grove's `TopologyLevelsUnavailable` condition (with reasons `ClusterTopologyLevelsUnavailable` and `ClusterTopologyNotFound`) to the `TopologyConstraintsEnforced` condition above. Other frameworks would implement equivalent mappings from their topology health signals.
+
+Example DGD status when a topology level becomes unavailable:
+
+```yaml
+status:
+  conditions:
+    - type: Ready
+      status: "True"
+    - type: TopologyConstraintsEnforced
+      status: "False"
+      reason: TopologyLevelsUnavailable
+      message: "Topology level 'rack' is no longer available in the cluster topology"
+```
+
+- **Events:** Normal when constraints are applied; Warning when `TopologyConstraintsEnforced` transitions to `False`.
+- **Logging:** Info when constraints are applied; Warning when topology levels become unavailable.
 
 ## Migration and Backward Compatibility
 
