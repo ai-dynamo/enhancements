@@ -10,8 +10,8 @@ About 65 classes and functions, with no obvious organization, mainly in modules 
 
   | Category | Classes/Functions | Used By |
   |----------|------------------|---------|
-  | Core Runtime | DistributedRuntime, Namespace, Component, Endpoint, Client, CancellationToken, Context | All |
-  | Model Registration | register_llm, unregister_llm, fetch_llm, ModelType, ModelInput, ModelDeploymentCard, ModelRuntimeConfig | Backends |
+  | Core Runtime | DistributedRuntime, Endpoint, Client, Context | All |
+  | Model Registration | register_model, unregister_model, fetch_model, ModelType, ModelInput, ModelDeploymentCard, ModelRuntimeConfig | Backends |
   | Router Config | RouterMode, RouterConfig, KvRouterConfig | Frontend |
   | KV Indexing | KvIndexer, ApproxKvIndexer, RadixTree, OverlapScores | Router |
   | KV Publishing | KvEventPublisher, ZmqKvEventPublisher, ZmqKvEventPublisherConfig, ZmqKvEventListener | Backends |
@@ -40,7 +40,7 @@ Action: Identify more removals. This is challenging, we don't know what people a
 
 ## Move internal bindings (meaning used by `components/` but not intended for public use otherwise) under new `_internal` module.
 
-There should not be exposed: Namespace, Component, CancellationToken, Context, ModelDeploymentCard, ModelRuntimeConfig.
+There should not be exposed: Namespace, Component, CancellationToken, ModelDeploymentCard
 
 What about Endpoint? Can we merge creating an endpoint with serving it?
 
@@ -76,6 +76,5 @@ ACTIONS: Design the interface. Don't let it just happen. Ideally a single type t
 
 ## Misc tidy ups
 
-. `register_llm` has a lot of required params, simplify.
 . Look at `Client` (router) interface. Simplify, possibly rename. Merge with KV Router?
 
