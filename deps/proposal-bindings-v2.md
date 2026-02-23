@@ -11,7 +11,7 @@ About 65 classes and functions, with no obvious organization, mainly in modules 
   | Category | Classes/Functions | Used By |
   |----------|------------------|---------|
   | Core Runtime | DistributedRuntime, Endpoint, Client, Context | All |
-  | Model Registration | register_model, unregister_model, fetch_model, ModelType, ModelInput, ModelDeploymentCard, ModelRuntimeConfig | Backends |
+  | Model Registration | register_model, unregister_model, fetch_model, ModelType, ModelInput, ModelRuntimeConfig | Backends |
   | Router Config | RouterMode, RouterConfig, KvRouterConfig | Frontend |
   | KV Indexing | KvIndexer, ApproxKvIndexer, RadixTree, OverlapScores | Router |
   | KV Publishing | KvEventPublisher, ZmqKvEventPublisher, ZmqKvEventPublisherConfig, ZmqKvEventListener | Backends |
@@ -76,5 +76,5 @@ ACTIONS: Design the interface. Don't let it just happen. Ideally a single type t
 
 ## Misc tidy ups
 
-. Look at `Client` (router) interface. Simplify, possibly rename. Merge with KV Router?
+- . Look at `Client` (router) interface. Simplify, possibly rename. Merge with KV Router?
 
