@@ -164,25 +164,34 @@ All without needing to parse the message text. The full cause chain is available
 
 ### Constructors
 
+`DynamoError` uses a builder pattern for flexible construction:
+
 ```rust
-// Simple unknown error
+// Simple unknown error (shorthand)
 let err = DynamoError::msg("something failed");
 
-// Typed error with optional cause
-let err = DynamoError::new(ErrorType::Disconnected, "worker lost", None::<DynamoError>);
+// Typed error via builder
+let err = DynamoError::builder()
+    .error_type(ErrorType::Disconnected)
+    .message("worker lost")
+    .build();
 
-// Typed error wrapping a cause
+// Typed error with cause
 let cause = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "reset by peer");
-let err = DynamoError::new(ErrorType::Disconnected, "worker lost", Some(cause));
+let err = DynamoError::builder()
+    .error_type(ErrorType::Disconnected)
+    .message("worker lost")
+    .cause(cause)
+    .build();
 ```
 
-The `new()` constructor accepts any `impl std::error::Error + Send + Sync + 'static` as the optional cause. If the cause is already a `DynamoError`, it is preserved as-is. Otherwise, it is recursively converted to a `DynamoError` with `ErrorType::Unknown`.
+The builder's `cause()` method accepts any `impl std::error::Error + 'static`. If the cause is already a `DynamoError`, it is preserved as-is. Otherwise, it is recursively converted to a `DynamoError` with `ErrorType::Unknown`. All builder fields are optional: `error_type` defaults to `Unknown`, `message` defaults to `""`, and `cause` defaults to `None`.
 
 ### Conversions
 
 `DynamoError` can be created from any `std::error::Error`:
 
-- **`From<Box<dyn Error + Send + Sync + 'static>>`** — If the boxed error is already a `DynamoError`, ownership is taken without cloning. Otherwise, it is wrapped as `Unknown` with the display string as the message, and the `source()` chain is recursively converted.
+- **`From<Box<dyn Error + 'static>>`** — If the boxed error is already a `DynamoError`, ownership is taken without cloning. Otherwise, it is wrapped as `Unknown` with the display string as the message, and the `source()` chain is recursively converted.
 
 - **`From<&(dyn Error + 'static)>`** — Reference-based conversion. If the error is a `DynamoError`, it is cloned. Otherwise, same wrapping as above.
 
@@ -218,29 +227,32 @@ The `MaybeError` trait provides the interface for types that may contain errors:
 
 ```rust
 pub trait MaybeError {
-    fn from_err(err: Box<dyn std::error::Error + Send + Sync>) -> Self;
+    fn from_err(err: impl std::error::Error + 'static) -> Self;
     fn err(&self) -> Option<DynamoError>;
     fn is_ok(&self) -> bool { !self.is_err() }
     fn is_err(&self) -> bool { self.err().is_some() }
 }
 ```
 
-The `from_err` signature accepts any boxed `std::error::Error`, matching the pre-existing interface. Internally, the error is converted to `DynamoError` for serialization. The `err()` method returns the deserialized `DynamoError` with its full cause chain intact.
+The `from_err` signature accepts any `impl std::error::Error + 'static`, allowing callers to pass any owned error type directly without boxing. Internally, the error is converted to `DynamoError` for serialization. The `err()` method returns the deserialized `DynamoError` with its full cause chain intact.
 
 ## Migration Module Integration
 
 The migration module (`migration.rs`) defines its own policy for which error types are migratable:
 
 ```rust
-const MIGRATABLE_ERRORS: &[ErrorType] = &[
-    ErrorType::CannotConnect,
-    ErrorType::Disconnected,
-    ErrorType::ConnectionTimeout,
-];
-
-const NON_MIGRATABLE_ERRORS: &[ErrorType] = &[
-    // Future: ErrorType::Cancelled, etc.
-];
+fn is_migratable(err: &dyn std::error::Error) -> bool {
+    const MIGRATABLE: &[ErrorType] = &[
+        ErrorType::CannotConnect,
+        ErrorType::Disconnected,
+        ErrorType::ConnectionTimeout,
+        ErrorType::Backend(BackendError::EngineShutdown),
+    ];
+    const NON_MIGRATABLE: &[ErrorType] = &[
+        // Future: ErrorType::Backend(BackendError::InvalidRequest), etc.
+    ];
+    error::match_error_chain(err, MIGRATABLE, NON_MIGRATABLE)
+}
 ```
 
 When the migration module encounters an error — whether from a stream response or a `Result` — it walks the error chain via `source()`, downcasting each error to check if it is a `DynamoError`. If any `DynamoError` in the chain has an `ErrorType` in the migratable set, and no `DynamoError` in the chain has an `ErrorType` in the non-migratable set, the request is retried on another worker. Errors that are not `DynamoError` instances (e.g., `thiserror` enums, I/O errors) are skipped during the walk but do not block migration — only an explicit non-migratable `DynamoError` prevents retry.
@@ -252,8 +264,8 @@ Existing modules that define their own error types via `thiserror` (e.g., `Prefi
 ```rust
 #[derive(Debug, thiserror::Error)]
 pub enum PrefillError {
-    #[error("Prefill execution failed")]
-    PrefillError(#[source] DynamoError),  // preserves the DynamoError in source()
+    #[error("Prefill execution failed: {0}")]
+    PrefillError(String, #[source] Option<Box<dyn std::error::Error + Send + Sync + 'static>>),
     // ...
 }
 ```
@@ -280,11 +292,15 @@ This allows the migration module to walk `source()` and find the `DynamoError` w
 **Supported API / Behavior:**
 
 * `ErrorType` enum with `Unknown`, `CannotConnect`, `Disconnected`, `ConnectionTimeout`, and `Backend(BackendError)` subcategory with `EngineShutdown`
-* `DynamoError` struct with serialization, `From<Box<dyn Error>>`, `From<&dyn Error>`
-* `Annotated` and `MaybeError` updated to use `DynamoError`
+* `DynamoError` struct with `From<Box<dyn Error>>`, `From<&dyn Error>`
+* `DynamoErrorBuilder` with `error_type()`, `message()`, `cause()`, `build()`
+* `Annotated` and `MaybeError` updated to use `DynamoError` for network transmission
+* All three transport planes (NATS, TCP, HTTP) wrap connection errors as `DynamoError` at the source
 * Network layer emits `ErrorType::Disconnected` for stream disconnections
 * Python bindings emit `ErrorType::Backend(BackendError::EngineShutdown)` on engine process exit
-* Migration module with `MIGRATABLE_ERRORS` / `NON_MIGRATABLE_ERRORS` sets, checking both stream-level and Result-level errors
+* Migration module with `is_migratable()` using scoped `MIGRATABLE` / `NON_MIGRATABLE` error sets and `match_error_chain()` utility
+* Network communication module with `is_inhibited()` using scoped `INHIBITED` error set and `match_error_chain()` utility
+* `match_error_chain()` utility for walking error chains and matching against error type sets
 
 **Not Supported:**
 
@@ -299,10 +315,9 @@ This allows the migration module to walk `source()` and find the `DynamoError` w
 
 **Supported API / Behavior:**
 
-* Additional `ErrorType` variants (e.g., `Cancelled`, `ValidationError`, `ResourceExhausted`)
-* Updated migration error sets as new types are added
-* Gradual adoption of `DynamoError::new(ErrorType::..., ...)` in place of `DynamoError::msg(...)` across pipeline stages
-* Replacement of NATS `NoResponders` detection with `ErrorType::CannotConnect`
+* Additional `ErrorType` variants (e.g., `Backend(BackendError::InvalidRequest)`, `ResourceExhausted`)
+* Updated migration and network communication error sets as new types are added
+* Gradual adoption of `DynamoError::builder().error_type(ErrorType::...).message(...)` in place of `DynamoError::msg(...)` across pipeline stages
 
 **Not Supported:**
 
