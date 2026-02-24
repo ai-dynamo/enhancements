@@ -1,6 +1,6 @@
 # Standardized Error System for Error Clarity, Migration Detection, and Network Propagation
 
-**Status**:  Draft <!-- Draft | Under Review | Approved | Replaced | Deferred | Rejected -->
+**Status**:  Approved <!-- Draft | Under Review | Approved | Replaced | Deferred | Rejected -->
 
 **Authors**: [@nnshah1](https://github.com/nnshah1) [@kthui](https://github.com/kthui) <!-- [Name/Team] -->
 
@@ -10,15 +10,15 @@
 
 **Replaced By**: N/A <!-- [Link of previous proposal if applicable] -->
 
-**Sponsor**: [@ryanolson](https://github.com/ryanolson) [@grahamking](https://github.com/grahamking) <!-- [Name of code owner or maintainer to shepard process] -->
+**Sponsor**: [@ryanolson](https://github.com/ryanolson) [@grahamking](https://github.com/grahamking) [@PeaBrane](https://github.com/PeaBrane) <!-- [Name of code owner or maintainer to shepard process] -->
 
-**Required Reviewers**: [@grahamking](https://github.com/grahamking) [@PeaBrane](https://github.com/PeaBrane) <!-- [Names of technical leads that are required for acceptance] -->
+**Required Reviewers**: [@grahamking](https://github.com/grahamking) <!-- [Names of technical leads that are required for acceptance] -->
 
 **Review Date**: Feb 11 2026 <!-- [Date for review] -->
 
-**Pull Request**: [Link to Pull Request of the Proposal itself]
+**Pull Request**: https://github.com/ai-dynamo/enhancements/pull/70 <!-- [Link to Pull Request of the Proposal itself] -->
 
-**Implementation PR / Tracking Issue**: [Link to Pull Request or Tracking Issue for Implementation]
+**Implementation PR / Tracking Issue**: https://github.com/ai-dynamo/dynamo/pull/6303 <!-- [Link to Pull Request or Tracking Issue for Implementation] -->
 
 # Summary
 
