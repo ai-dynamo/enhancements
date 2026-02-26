@@ -1,6 +1,6 @@
 # Dynamo Deployment Flow with DGDRs
 
-**Status**: Draft
+**Status**: Implemented (v1.0.0+, with ongoing work)
 
 **Authors**: Hannah Zhang
 
@@ -16,9 +16,68 @@
 
 **Review Date**: TBD
 
-**Pull Request**: TBD
+**Pull Request**: https://github.com/ai-dynamo/enhancements/pull/62
 
-**Implementation PR / Tracking Issue**: TBD
+**Implementation PR / Tracking Issue**: https://github.com/ai-dynamo/dynamo/issues/6129
+
+---
+
+# Implementation Status
+
+This enhancement was implemented as the `v1beta1` DynamoGraphDeploymentRequest API, shipped in **Dynamo 1.0.0** (GTC 2026).
+
+## Shipped in 1.0.0
+
+| Feature | Status | Notes |
+| :---- | :---- | :---- |
+| `v1beta1` DGDR API | ✅ Done | Replaced v1alpha1; `+kubebuilder:storageversion` |
+| Rapid search (AIC-based) | ✅ Done | `searchStrategy: rapid` |
+| Thorough search (online profiling) | ✅ Done | `searchStrategy: thorough`; disaggregated only |
+| `modelCache` (PVC for local models) | ✅ Done | `pvcName`, `pvcModelPath`, `pvcMountPath` |
+| Hardware auto-discovery | ✅ Done | Via cluster-wide operator or `gpuDiscovery.enabled` Helm flag |
+| `spec.hardware` manual override | ✅ Done | User-provided GPU SKU, VRAM, count |
+| Overrides: `profilingJob` | ✅ Done | Full `batchv1.JobSpec` merge with allowlist |
+| Overrides: `dgd` base template | ✅ Done | Embedded DGD resource merged with profiling results |
+| `features.planner` config | ✅ Done | Object presence enables Planner; content configures it |
+| `features.mocker` | ✅ Done | Mocker deployment for GPU-less testing |
+| `autoApply` | ✅ Done | Auto-creates DGD after profiling (`default: true`) |
+| `spec immutability` during active phases | ✅ Done | Webhook blocks changes during Profiling/Deploying/Deployed |
+| Profiling sub-phase tracking (`status.profilingPhase`) | ✅ Done | 7 sub-phases (see below) |
+| Structured conditions | ✅ Done | `Validation`, `Profiling`, `SpecGenerated`, `DeploymentReady`, `Succeeded` |
+| `kubectl get dgdr` shortname | ✅ Done | `+kubebuilder:resource:shortName=dgdr` |
+
+## Deferred to 1.1.0 / Future Releases
+
+| Feature | Target | Notes |
+| :---- | :---- | :---- |
+| Web UI / GUI for exploring Pareto configs | 1.1.0+ | The `autoApply: false` GUI portforward flow |
+| `features.kvRouter` | 1.1.0+ | KV-cache-aware routing; type defined but not yet wired |
+| SLA achievability analysis in status | 1.1.0+ | `status.profilingResults.slaAnalysis` with per-target achievability |
+| Aggregated (non-disaggregated) profiling | Future | `searchStrategy: thorough` currently disaggregated only |
+| Mutable DGDRs (re-profiling on spec change) | Future | Currently requires delete + recreate |
+| Resource/budget constraints | Future | `constraints.maxGpuCount`, `maxGpuHours`, timeout |
+| Hardware discovery migration to Dynamo Operator | Future | Operator-level GPU discovery (issue #6135) |
+| Optional SLAs with dynamic default presets | Future | Auto-select sensible SLA defaults (issue #6134) |
+| Retry/recovery from transient failures | Future | Currently DGDR stays `Failed`; user must delete + recreate |
+| Progress monitoring improvements | Future | Further observability beyond `profilingPhase` (issue #5470) |
+| Error surfacing with structured status messages | Future | More granular error codes and remediation hints (issue #6138) |
+| Docs recommending DGDR as primary workflow | Future | Update CLI/profiler docs to point to DGDR (issue #6136) |
+
+## Profiling Sub-Phases (`status.profilingPhase`)
+
+When `status.phase` is `Profiling`, the `status.profilingPhase` field tracks the current step:
+
+| Sub-Phase | Description |
+| :---- | :---- |
+| `Initializing` | Loading DGD template, detecting GPU hardware, resolving model architecture |
+| `SweepingPrefill` | Sweeping parallelization strategies (TP/TEP/DEP) for prefill, measuring TTFT |
+| `SweepingDecode` | Sweeping strategies and concurrency for decode, measuring ITL |
+| `SelectingConfig` | Filtering against SLA targets; selecting most cost-efficient config |
+| `BuildingCurves` | Building ISL→TTFT and KV-usage×context-length→ITL interpolation curves |
+| `GeneratingDGD` | Packaging data into ConfigMap and generating final DGD YAML |
+| `Done` | Profiling pipeline finished successfully |
+
+On failure, `status.conditions[type=Profiling].reason` is set to `<Phase>Failed` (e.g., `SweepingDecodeFailed`).
 
 ---
 
@@ -147,7 +206,7 @@ DGD running in cluster
 ### API Overview
 
 ```yaml
-apiVersion: nvidia.com/v1alpha1
+apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeploymentRequest
 metadata:
   name: my-deployment
@@ -164,20 +223,30 @@ spec:
   
   # Optional: Workload parameters
   workload:
-    isl: 512                        # Input sequence length (default: 512)
-    osl: 128                        # Output sequence length (default: 128)
+    isl: 512                        # Input sequence length (default: 4000)
+    osl: 128                        # Output sequence length (default: 1000)
+    concurrency: 10                 # Target concurrency level (required if planner disabled)
+    requestRate: 5.0               # Target request rate in req/s (alternative to concurrency)
   
   # Optional: SLA targets
   sla:
-    optimizationType: throughput    # What to optimize: hybrid, throughput, or latency (default: hybrid)
+    optimizationType: throughput    # What to optimize: latency or throughput
     ttft: 100.0                     # Time-To-First-Token (ms, default: 100)
-    itl: 15.0                       # Inter-Token Latency (ms, default: 15)
+    itl: 15.0                       # Inter-Token Latency (ms, default: 30)
+    e2eLatency: 200.0              # Alternative: end-to-end latency target (ms)
   
   # Optional: Model cache (for large models on PVC)
   modelCache:
     pvcName: "model-cache"
-    pvcPath: "deepseek-r1"
+    pvcModelPath: "deepseek-r1"      # path within the PVC
   
+  # Optional: Hardware info (auto-detected by operator if not provided)
+  hardware:
+    gpuSku: "H100_SXM"            # GPU SKU identifier
+    vramMb: 81920                  # VRAM per GPU in MiB
+    totalGpus: 8                   # Total GPUs in cluster
+    numGpusPerNode: 8              # GPUs per node
+
   # Optional: Kubernetes resource overrides
   overrides:
     profilingJob: {}                # Job template overrides (e.g., securityContext)
@@ -188,16 +257,20 @@ spec:
   
   # Optional: extra features
   features:
-      planner: false           # Enable autoscaling via Planner (default: false)
-      kvRouter: false          # Enable KV router (default: false)
-      mocker: false            # Enable mocker deployment for testing (default: false)
+      planner: {}              # Presence enables Planner; content is PlannerConfig (default: null/disabled)
+      # kvRouter: {}           # KV-cache-aware routing (not yet implemented, planned for future)
+      mocker:
+        enabled: false         # Enable mocker deployment for testing (default: false)
   
   # Auto-deploy resulting DGD after profiling
   autoApply: true
 
 status: # theoretical
   # Current phase in the lifecycle
-  phase: Ready                       # enum: [Pending, Profiling, Ready, Deploying, Deployed, Failed]
+  phase: Profiling                   # enum: [Pending, Profiling, Ready, Deploying, Deployed, Failed]
+  
+  # Current profiling sub-phase (only set when phase=Profiling)
+  profilingPhase: SweepingDecode     # enum: [Initializing, SweepingPrefill, SweepingDecode, SelectingConfig, BuildingCurves, GeneratingDGD, Done]
   
   # Reference to generated DGD
   dgdName: "my-deployment-dgd-abc123"
@@ -205,11 +278,17 @@ status: # theoretical
   # Reference to profiling job
   profilingJobName: "my-deployment-prof-abc123"
   
-  # Detailed status conditions
+  # Structured lifecycle conditions
   conditions:
-    - type: ProfilingComplete
+    - type: Succeeded              # Aggregate: True=done, False=in-progress/failed
+      status: "False"
+      reason: "SweepingDecode"
+      message: "Profiling sweep in progress"
+    - type: Validation
       status: "True"
-      message: "AIC profiling completed successfully"
+    - type: Profiling
+      status: "False"
+      reason: "SweepingDecode"    # mirrors profilingPhase
   
   # Profiling results (example)
   profilingResults:
@@ -252,7 +331,7 @@ status: # theoretical
 | :---- | :---- | :---- |
 | `workload` | User-set ISL and OSL. | No – reasonable defaults are used initially and can be explored via GUI later. |
 | `sla` | Target SLAs | No – reasonable defaults are used initially and can be explored via GUI later. |
-| `sla.optimizationType` | What to optimize when deciding a config: `hybrid`, `throughput`, or `latency` | No – hybrid is the default |
+| `sla.optimizationType` | What to optimize when deciding a config: `latency` or `throughput` | No |
 
 **Purpose**: Defines how the system finds an optimal configuration.
 
@@ -261,7 +340,8 @@ status: # theoretical
 | Field | Description | Required |
 | :---- | :---- | :---- |
 | `modelCache.pvcName` | Name of PVC containing model weights | No |
-| `modelCache.pvcPath` | Subpath within PVC where model is stored | No |
+| `modelCache.pvcModelPath` | Path to model checkpoint directory within the PVC (e.g. `"deepseek-r1"` or `"models/Llama-3.1-405B-FP8"`) | No |
+| `modelCache.pvcMountPath` | Mount path for the PVC inside the container | No | `"/opt/model-cache"` |
 
 **Purpose**: Allows users to attach and use PVCs for local storage of models.
 
@@ -274,13 +354,15 @@ status: # theoretical
 
 **Purpose**: Allows users to customize profiling jobs and generated DGDs with cluster-specific requirements (e.g., security contexts, secrets).
 
+> **Note**: `overrides.profilingJob` uses an allowlist-based merge strategy. Supported `JobSpec` fields: `backoffLimit`, `activeDeadlineSeconds`, `ttlSecondsAfterFinished`, `completions`, `parallelism`, `suspend`. Pod template labels/annotations and `PodSpec` fields (resources, tolerations, nodeSelector, env vars, volumes, security contexts) are also supported. Controller-managed labels (`dgdr.nvidia.com/name`, etc.) cannot be overridden.
+
 ### Deployment Features
 
 | Field | Description | Required | Default |
 | :---- | :---- | :---- | :---- |
-| `features.planner` | Whether to enable Planner in the final deployment | No | false |
-| `features.kvRouter` | Whether to enable KV Router in the final deployment | No | false |
-| `features.mocker` | Whether to have the final deployment be a mocker deployment | No | false |
+| `features.planner` | SLA planner configuration object. **Presence of this field (non-null) enables Planner** in the generated DGD. Content is a `PlannerConfig` object validated by the Planner service. | No | null (disabled) |
+| `features.mocker.enabled` | Whether to deploy mocker workers instead of real inference workers (for GPU-less testing) | No | false |
+| `features.kvRouter` | **(Not yet implemented — planned for a future release)** KV-cache-aware routing | — | — |
 
 **Purpose**: Allows users to specify whether certain features should be included in their final deployment. Not guaranteed to strictly have better performance.
 
@@ -296,9 +378,11 @@ status: # theoretical
 
 | Field | Description | Required | Default |
 | :---- | :---- | :---- | :---- |
-| `autoApply` | If `true`, DGDR automatically creates and applies the DGD after profiling completes. If `false`, DGDR deploys a GUI that users can portforward to select a DGD. | No | `true` |
+| `autoApply` | If `true`, DGDR automatically creates and applies the DGD after profiling completes. If `false`, profiling results and recommended DGD are stored in `status` for manual inspection and deployment. | No | `true` |
 
-**Justification**: Controls whether DGDR is exploratory or commit-to-deploy. If users want to customize the deployment after profiling, they should set `autoApply: false`, open the GUI by portforwarding, select a configuration, export it, manually edit the DGD, and deploy with `kubectl apply -f`.
+**Justification**: Controls whether DGDR is exploratory or commit-to-deploy. If users want to customize the deployment after profiling, they should set `autoApply: false`, inspect `status.profilingResults`, export the generated DGD from `status`, manually edit it, and deploy with `kubectl apply -f`.
+
+> **Note (1.1.0+)**: A web UI for browsing Pareto configs and one-click export/deploy is planned for a future release. In 1.0.0, inspection is done via `kubectl get dgdr <name> -o yaml`.
 
 ## Search Strategies
 
@@ -364,16 +448,20 @@ DGDR created (autoApply: false)
     ↓
 Profiling runs
     ↓
-User inspects Pareto curves (GUI)
+User inspects Pareto curves via kubectl:
+  kubectl get dgdr <name> -o jsonpath='{.status.profilingResults}'
     ↓
-User selects a preferred DGD, edits as desired, deploys with a button
+User exports recommended DGD:
+  kubectl get dgdr <name> -o jsonpath='{.status.profilingResults.selectedConfig}' > dgd.yaml
     ↓
-(alternately) User exports recommended DGD, edits as desired
+User edits dgd.yaml as desired
     ↓
-kubectl apply -f edited-dgd.yaml
+kubectl apply -f dgd.yaml
     ↓
 DGD deployed
 ```
+
+> **Note (1.1.0+)**: A web UI for visualizing Pareto curves and one-click export is planned for a future release.
 
 ### Option B: Commit to SLAs (`autoApply: true`)
 
@@ -625,7 +713,7 @@ DGD Controller manages deployment
 **Scenario**: User does not know SLAs or what backend they want to use but wants a reasonable starting deployment.
 
 ```yaml
-apiVersion: nvidia.com/v1alpha1
+apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeploymentRequest
 metadata:
   name: no-sla-deployment
@@ -646,7 +734,7 @@ spec:
 **Scenario**: User wants quick deployment, knowing their SLAs.
 
 ```yaml
-apiVersion: nvidia.com/v1alpha1
+apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeploymentRequest
 metadata:
   name: aic-deployment
@@ -675,7 +763,7 @@ spec:
 **Scenario**: User wants online profiling sweeps for more accurate results.
 
 ```yaml
-apiVersion: nvidia.com/v1alpha1
+apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeploymentRequest
 metadata:
   name: online-autodeploy
@@ -697,7 +785,7 @@ spec:
 **Scenario**: User wants profiling but prefers to inspect the results and make their own changes before deploying.
 
 ```yaml
-apiVersion: nvidia.com/v1alpha1
+apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeploymentRequest
 metadata:
   name: online-exploratory
@@ -721,7 +809,7 @@ spec:
 **Scenario**: Large MoE model with model cache PVC and disaggregated deployment.
 
 ```yaml
-apiVersion: nvidia.com/v1alpha1
+apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeploymentRequest
 metadata:
   name: sla-moe
@@ -731,7 +819,7 @@ spec:
 
   modelCache:
     pvcName: "model-cache"
-    pvcPath: "deepseek-r1"  # will override model name within DGDs as local model path
+    pvcModelPath: "deepseek-r1"      # path within the PVC  # will override model name within DGDs as local model path
 ```
 
 **What happens**:
@@ -747,7 +835,7 @@ spec:
 **Scenario**: User has a private model (not on HuggingFace) that they want to use.
 
 ```yaml
-apiVersion: nvidia.com/v1alpha1
+apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeploymentRequest
 metadata:
   name: private-model
@@ -755,7 +843,7 @@ spec:
   model: "myPrivateModel"
   modelCache:
     pvcName: "model-cache"
-    pvcPath: "privateModel"  # will override model name within DGDs as local model path
+    pvcModelPath: "privateModel"  # will override model name within DGDs as local model path
 ```
 
 **What happens**:
@@ -771,7 +859,7 @@ spec:
 **Scenario**: User has a custom model/cluster and wants some overrides for security or authentication.
 
 ```yaml
-apiVersion: nvidia.com/v1alpha1
+apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeploymentRequest
 metadata:
   name: override-security
@@ -806,7 +894,7 @@ spec:
 **Scenario**: User wants a deployment with Planner for autoscaling and KV Router for improved routing.
 
 ```yaml
-apiVersion: nvidia.com/v1alpha1
+apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeploymentRequest
 metadata:
   name: planner-kvrouter
@@ -946,9 +1034,14 @@ DGDR controller requires:
 status:
   phase: Deployed
   conditions:
-    - type: SLAWarning
+    - type: Succeeded
       status: "True"
-      message: "Cannot meet TTFT=50ms. Closest achievable: TTFT=120ms"
+      reason: "DeploymentReady"
+      message: "DGD is running and healthy"
+  # SLA achievability warnings in conditions are planned for a future release (1.1.0+)
+  # Future: - type: SLAWarning
+  #            status: "True"
+  #            message: "Cannot meet TTFT=50ms. Closest achievable: TTFT=120ms"
 ```
 
 You can then decide whether to:
@@ -970,12 +1063,12 @@ You can then decide whether to:
 
 ## Can I update a DGDR after creating it?
 
-For **Phase 0 (GTC 2026)**: No, DGDRs are immutable. To change configuration:
-1. Delete the old DGDR
+In **1.0.0**: The DGDR spec is **immutable while the resource is in the `Profiling`, `Deploying`, or `Deployed` phase**. The webhook will reject spec changes during these phases. To change configuration:
+1. Delete the old DGDR (note: this does **not** delete the generated DGD)
 2. Create a new DGDR with updated specs
-3. Or export the generated DGD and edit it directly
+3. Or export the generated DGD from `status.profilingResults.selectedConfig` and edit it directly
 
-For **Phase 1 and beyond**: Mutable DGDRs may be supported, allowing you to update the spec and trigger re-profiling. This is still up for discussion.
+In **future releases**: Mutable DGDRs may be supported, allowing spec updates to trigger re-profiling. This is still under design.
 
 ## What's the relationship between DGDR and Planner?
 
@@ -995,7 +1088,7 @@ spec:
   model: "myPrivateModel"
   modelCache:
     pvcName: "model-cache"
-    pvcPath: "privateModel"
+    pvcModelPath: "privateModel"
 ```
 
 **Note**: Private models may not be supported by AIC. If you use `searchStrategy: rapid` with an unsupported model, DGDR will generate a working configuration with reasonable defaults, but include a warning that it may not be SLA-optimized. For SLA optimization with unsupported models, use `searchStrategy: thorough`.
@@ -1049,11 +1142,13 @@ Look for:
 
 **How to check**:
 ```bash
-# Check for warnings
-kubectl get dgdr my-deployment -o jsonpath='{.status.conditions[?(@.type=="ConfigurationWarning")]}'
-kubectl get dgdr my-deployment -o jsonpath='{.status.conditions[?(@.type=="SLAWarning")]}'
+# Check overall lifecycle status
+kubectl get dgdr my-deployment -o jsonpath='{.status.conditions[?(@.type=="Succeeded")]}'
 
-# Check phase
+# Check profiling progress
+kubectl get dgdr my-deployment -o jsonpath='{.status.profilingPhase}'
+
+# Check current phase
 kubectl get dgdr my-deployment -o jsonpath='{.status.phase}'
 ```
 
@@ -1062,7 +1157,7 @@ kubectl get dgdr my-deployment -o jsonpath='{.status.phase}'
 # Complete DGDR Schema
 
 ```yaml
-apiVersion: nvidia.com/v1alpha1
+apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeploymentRequest
 metadata:
   name: string
@@ -1072,38 +1167,57 @@ spec:
   image: string
 
   workload:
-    isl: int     # Input sequence length
-    osl: int     # Output sequence length
+    isl: int           # Input sequence length (default: 4000)
+    osl: int           # Output sequence length (default: 1000)
+    concurrency: float # Target concurrency level
+    requestRate: float # Target request rate (req/s; alternative to concurrency)
   sla:
-    optimizationType: string    # enum: hybrid, latency, throughput
+    optimizationType: string    # enum: latency, throughput
     ttft: float                 # Time To First Token target (milliseconds)
     itl: float                  # Inter-Token Latency target (milliseconds)
+    e2eLatency: float           # End-to-end latency target (ms; alternative to ttft+itl)
 
   # Optional: Model cache PVC for large models
   modelCache:
-    pvcName: string    # Name of PVC containing model weights
-    pvcPath: string    # Subpath within PVC where model is stored
+    pvcName: string        # Name of PVC containing model weights
+    pvcModelPath: string   # Subpath within PVC where model is stored
+    pvcMountPath: string   # Mount path inside container (default: /opt/model-cache)
+
+  hardware:               # Typically auto-filled by operator from cluster discovery
+    gpuSku: string        # GPU SKU identifier (e.g., "H100_SXM", "A100_80GB")
+    vramMb: float         # VRAM per GPU in MiB
+    totalGpus: int        # Total GPUs in cluster
+    numGpusPerNode: int   # GPUs per node
 
   overrides:
-    profilingJob: *corev1.JobSpec
-    dgd: DynamoGraphDeployment
+    profilingJob: batchv1.JobSpec   # Merged into controller-generated Job (allowlist-based)
+    dgd: DynamoGraphDeployment       # Base DGD template; profiling results merged on top
 
   features:
-    planner: bool
-    kvRouter: bool
-    mocker: bool
+    planner: object   # Presence enables Planner; content is PlannerConfig (null = disabled)
+    mocker:
+      enabled: bool   # Deploy mocker workers instead of real inference workers
+    # kvRouter: future - not yet implemented
 
   searchStrategy: string    # enum: [rapid, thorough]
   autoApply: bool
 
 status:
-  phase: string         # Pending, Profiling, Ready, Deploying, Deployed, Failed
-  dgdName: string
-  profilingJobName: string
-  conditions: []        # e.g. profiling status/step
+  phase: string                # Pending, Profiling, Ready, Deploying, Deployed, Failed
+  profilingPhase: string       # Current profiling sub-phase (only set when phase=Profiling)
+                               # enum: Initializing, SweepingPrefill, SweepingDecode,
+                               #       SelectingConfig, BuildingCurves, GeneratingDGD, Done
+  dgdName: string              # Name of generated/created DGD
+  profilingJobName: string     # Name of Kubernetes Job running profiler
+  conditions:                  # Structured lifecycle conditions
+    - type: Succeeded          # Aggregate condition; reason/message reflect current stage
+    - type: Validation
+    - type: Profiling          # reason mirrors profilingPhase; <Phase>Failed on error
+    - type: SpecGenerated
+    - type: DeploymentReady
   profilingResults:
-    pareto: []          # list of Pareto-optimal configs
-    selectedConfig: {}  # recommended config
+    pareto: []                 # List of Pareto-optimal configs (raw extension per entry)
+    selectedConfig: {}         # Recommended configuration (raw extension)
   deploymentInfo:
     replicas: int
     availableReplicas: int
@@ -1242,3 +1356,4 @@ Planner is a powerful feature for autoscaling and SLA monitoring, but it's not r
 **AIC:** AI Configurator
 
 **DPP:** Dynamo Planner Profiler
+
