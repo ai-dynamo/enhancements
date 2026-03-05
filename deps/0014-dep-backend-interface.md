@@ -18,7 +18,7 @@
 
 # Summary
 
-This proposal introduces a standardized `Backend` and `Handler` abstract base class interface for all Dynamo LLM backend workers. The interface centralizes common lifecycle management, request handling, cancellation monitoring, metrics collection, and cleanup logic that is currently duplicated across the TensorRT-LLM, vLLM, and SGLang backends. The `dynamo.backend` package re-exports the canonical `DynamoRuntimeConfig` and `DynamoRuntimeArgGroup` from `dynamo.common.configuration.groups.runtime_args`, providing consistent runtime configuration and CLI argument handling. Backend-specific fields (model, component, disaggregation mode, etc.) are added by each backend's own config subclass.
+This proposal introduces a standardized `Backend` and `Handler` abstract base class interface for all Dynamo LLM backend workers. The interface centralizes common lifecycle management, request handling, cancellation monitoring, metrics collection, and cleanup logic that is currently duplicated across the TensorRT-LLM, vLLM, and SGLang backends. Configuration is organized into three tiers: `DynamoRuntimeConfig` (re-exported from `dynamo.common.configuration.groups.runtime_args`) provides shared runtime infrastructure fields; `DynamoBackendConfig` extends it with fields common to all backends (model identity, disaggregation mode, component name); and each backend adds engine-specific fields on a separate `config.extra` object. Corresponding `DynamoRuntimeArgGroup` and `DynamoBackendArgGroup` provide reusable CLI argument definitions for each tier.
 
 The interface achieves feature parity with existing backends by supporting multiple modalities — text-only LLM generation, multimodal (vision/image inputs), image/video diffusion, and embeddings — through a multi-handler architecture where each modality is served by a separate `Handler` subclass registered on its own endpoint.
 
@@ -32,9 +32,9 @@ Today, each backend (TensorRT-LLM, vLLM, SGLang) independently implements its ow
 
 3. **High maintenance burden.** Bug fixes and feature additions to common logic (e.g., adding a new metrics label, changing cancellation semantics) must be applied to each backend independently, risking drift and regressions.
 
-4. **Difficult onboarding.** Writing a new backend requires understanding the full Dynamo runtime setup, component registration, model registration, metrics, and KV publisher patterns from scratch. There is no reference architecture or minimal example to follow.
+4. **Limited testability.** Without a clear interface boundary, unit testing backend logic requires standing up the full runtime stack. A well-defined interface enables mocking and isolated testing.
 
-5. **Limited testability.** Without a clear interface boundary, unit testing backend logic requires standing up the full runtime stack. A well-defined interface enables mocking and isolated testing.
+5. **Difficult onboarding.** Writing a new backend requires understanding the full Dynamo runtime setup, component registration, model registration, metrics, and KV publisher patterns from scratch. There is no reference architecture or minimal example to follow.
 
 ## Goals
 
@@ -51,6 +51,7 @@ Today, each backend (TensorRT-LLM, vLLM, SGLang) independently implements its ow
 * Modifying the request/response wire format between frontend and backend.
 * Unifying engine-specific configuration (e.g., TensorRT-LLM build profiles, vLLM scheduler settings). Each backend retains its own engine-specific config.
 * Replacing existing backend entry points. Backends can migrate incrementally.
+* Error Handling with dynamo error.
 
 ## Requirements
 
@@ -64,7 +65,15 @@ The `Backend` base class **MUST** orchestrate the complete worker lifecycle in a
 
 ### REQ 3 Shared Configuration
 
-A canonical `DynamoRuntimeConfig` class extending `ConfigBase` (defined in `dynamo.common.configuration.groups.runtime_args`) **MUST** provide all common runtime configuration fields (namespace, discovery_backend, request_plane, event_plane, connectors, etc.). Backend-specific configs **MUST** extend this base class and add their own fields (e.g., `model`, `component`, `served_model_name`, engine-specific options) so that the shared runtime fields are clearly separated from backend-specific fields. A `DynamoRuntimeArgGroup` extending `ArgGroup` **MUST** provide reusable argparse argument definitions for all common runtime fields. The `dynamo.backend` package re-exports both from the canonical location for convenience.
+Configuration **MUST** be organized in three tiers:
+
+1. **`DynamoRuntimeConfig`** (defined in `dynamo.common.configuration.groups.runtime_args`) **MUST** provide all common runtime infrastructure fields (namespace, discovery_backend, request_plane, event_plane, connectors, etc.). A corresponding `DynamoRuntimeArgGroup` **MUST** provide reusable argparse argument definitions for these fields.
+
+2. **`DynamoBackendConfig`** (defined in `dynamo.backend.args`) **MUST** extend `DynamoRuntimeConfig` with fields common to all backends: `model`, `served_model_name`, `disaggregation_mode`, `component`, and `use_kv_events`. A corresponding `DynamoBackendArgGroup` **MUST** provide CLI flags for these fields (`--model`, `--served-model-name`, `--disaggregation-mode`, `--component`).
+
+3. Backend-specific configs **MUST** extend `DynamoBackendConfig` and store engine-specific options on a separate `config.extra` object so that shared fields are clearly separated from backend-specific ones.
+
+The `dynamo.backend` package re-exports all four classes from the canonical locations for convenience.
 
 ### REQ 4 Cancellation and Shutdown
 
@@ -116,6 +125,8 @@ The Backend Interface introduces four public components in the `dynamo.backend` 
 | `Handler` | Abstract base class defining the request handling contract with built-in utilities |
 | `DynamoRuntimeConfig` | Base config class for shared runtime fields (re-exported from `dynamo.common.configuration.groups.runtime_args`) |
 | `DynamoRuntimeArgGroup` | Reusable argparse group for common runtime CLI flags (re-exported from same) |
+| `DynamoBackendConfig` | Extends `DynamoRuntimeConfig` with fields common to all backends (model, disaggregation mode, component) |
+| `DynamoBackendArgGroup` | Reusable argparse group for common backend CLI flags (`--model`, `--served-model-name`, `--disaggregation-mode`, `--component`) |
 
 ### Architecture
 
@@ -326,7 +337,11 @@ The base class utilities (`process_generation_output()`, etc.) are available for
 
 ## Shared Configuration
 
-`DynamoRuntimeConfig` (defined canonically in `dynamo.common.configuration.groups.runtime_args`, re-exported by `dynamo.backend`) provides all common **runtime** fields shared across every backend:
+Configuration is organized in three tiers, each with a corresponding `ArgGroup` for CLI flags:
+
+### Tier 1: `DynamoRuntimeConfig`
+
+Defined canonically in `dynamo.common.configuration.groups.runtime_args` and re-exported by `dynamo.backend`. Provides common **runtime infrastructure** fields:
 
 ```python
 class DynamoRuntimeConfig(ConfigBase):
@@ -356,21 +371,34 @@ class DynamoRuntimeConfig(ConfigBase):
     media_output_http_url: Optional[str] = None
 ```
 
-Note that `component`, `model`, `served_model_name`, and `disaggregation_mode` are **not** in the shared config — they are backend-specific fields. The `Backend` base class provides `_get_component_name()` (default: `"backend"`) and `_get_endpoint_name()` (default: `"generate"`) hooks that backends can override or populate via their own config fields.
+### Tier 2: `DynamoBackendConfig`
 
-Backend-specific configs extend `DynamoRuntimeConfig` and add their own fields:
+Defined in `dynamo.backend.args`. Extends `DynamoRuntimeConfig` with fields common to **all backends** but not part of the runtime layer:
 
 ```python
-class VllmConfig(DynamoRuntimeConfig, DynamoVllmConfig):
-    component: str                       # Set dynamically based on mode
-    model: str                           # From vLLM engine args
-    served_model_name: Optional[str]
-    use_kv_events: bool
-    disaggregation_mode: str             # "aggregated", "prefill", "decode"
-    engine_args: AsyncEngineArgs         # vLLM-specific engine configuration
+class DynamoBackendConfig(DynamoRuntimeConfig):
+    model: Optional[str] = None                # Model name or path
+    served_model_name: Optional[str] = None    # Display name (defaults to model)
+    disaggregation_mode: str = "aggregated"    # "aggregated", "prefill", "decode"
+    component: str = "backend"                 # Component name for registration
+    use_kv_events: bool = False
+
+    def get_model_name(self) -> str:
+        return self.served_model_name or self.model or "unknown"
 ```
 
-This separation keeps `DynamoRuntimeConfig` focused on shared runtime infrastructure, while each backend adds the fields it needs for its specific engine, model management, and operational modes.
+The `Backend` base class provides `_get_component_name()` (default: `config.component`) and `_get_endpoint_name()` (default: `"generate"`) hooks that backends can override for dynamic component names.
+
+### Tier 3: Backend-Specific Config
+
+Each backend extends `DynamoBackendConfig` and stores engine-specific options on `config.extra`:
+
+```python
+class VllmConfig(DynamoBackendConfig):
+    extra: Optional[VllmExtraConfig] = None  # vLLM-specific engine configuration
+```
+
+With this pattern, `config.model` and `config.disaggregation_mode` are clearly standard backend fields, while `config.extra.gpu_memory_fraction` is immediately recognizable as backend-specific. The `Backend` base class reads `model`, `component`, `disaggregation_mode` etc. directly from the config without `getattr` fallbacks.
 
 ## Minimal Backend Example
 
@@ -414,14 +442,14 @@ async def _run():
 | Trace header creation | ~20-30 per backend | 0 (in base `Handler.get_trace_header()`) |
 | Metrics & publisher setup | ~100-200 per backend | 0 (in base `Backend.setup_metrics()`) |
 | Cleanup & shutdown | ~30-50 per backend | 0 (in base `Handler.cleanup()`) |
-| CLI argument definitions | ~80-120 per backend | 0 (in `DynamoRuntimeArgGroup`) |
+| CLI argument definitions | ~80-120 per backend | 0 (in `DynamoRuntimeArgGroup` + `DynamoBackendArgGroup`) |
 | **Total** | **~1,300-2,200 lines** | **Centralized in ~920 lines of base classes** |
 
 # Implementation Details
 
 ## Disaggregation Support
 
-The interface supports disaggregated inference modes via a backend-specific `disaggregation_mode` config field (`"aggregated"`, `"prefill"`, `"decode"`). This field is **not** part of the shared `DynamoRuntimeConfig` — it is added by backends that support disaggregation (e.g., vLLM, TRT-LLM).
+The interface supports disaggregated inference modes via the `disaggregation_mode` field on `DynamoBackendConfig` (`"aggregated"`, `"prefill"`, `"decode"`). This field is common to all backends and is set via `--disaggregation-mode` CLI flag or `DYN_DISAGGREGATION_MODE` environment variable.
 
 The `Backend` base class keeps disaggregation, endpoint types, and input types as separate concerns through distinct hook methods:
 
@@ -467,17 +495,6 @@ class VllmBackend(Backend):
             return VllmMultimodalHandler(engine, component, ...)
         return VllmLLMHandler(engine, component, ...)
 ```
-
-For disaggregated multimodal (separate encode/prefill/decode workers), each worker is a separate `Backend` instance with its own handler:
-
-```python
-# Launched as separate processes
-await VllmMultimodalEncodeBackend(config).run()   # Encode worker
-await VllmMultimodalPrefillBackend(config).run()  # Prefill worker
-await VllmMultimodalDecodeBackend(config).run()   # Decode worker
-```
-
-This matches the existing deployment pattern (separate processes per worker role) while standardizing each worker's lifecycle through the `Backend` interface.
 
 ## Image and Video Diffusion Support
 
@@ -653,7 +670,8 @@ This demonstrates that backend authors can write unit tests for their `Handler` 
 **Supported API / Behavior:**
 
 * `Backend` and `Handler` abstract base classes with full lifecycle orchestration
-* `DynamoRuntimeConfig` and `DynamoRuntimeArgGroup` for shared configuration
+* Three-tier configuration: `DynamoRuntimeConfig` → `DynamoBackendConfig` → per-backend config with `config.extra`
+* `DynamoRuntimeArgGroup` and `DynamoBackendArgGroup` for shared CLI flags
 * `example_backend` demonstrating minimal implementation
 * Unit tests for Handler base class (17 tests), DynamoRuntimeConfig (5 tests), and ExampleHandler (7 tests)
 * All hook methods with sensible defaults
