@@ -777,24 +777,8 @@ async def main():
 
 * The proposed `Backend` ABC internally uses utility-style methods for each lifecycle step, so the two approaches are not mutually exclusive. If a backend has a unique lifecycle that doesn't fit the template, it can use the underlying utilities directly (they are importable from `dynamo.backend`). The ABC is the recommended default, not the only option.
 
-## Alt 3: Mixin-Based Approach
 
-**Pros:**
-
-* More flexible composition - backends can pick and choose which mixins to use.
-* No rigid lifecycle ordering.
-
-**Cons:**
-
-* Harder to reason about execution order when multiple mixins interact.
-* Method resolution order (MRO) in Python can lead to surprising behavior.
-* Doesn't enforce a consistent lifecycle, which is the primary goal.
-
-**Reason Rejected:**
-
-* The Template Method pattern provides clearer guarantees about lifecycle ordering and is easier for new backend authors to follow.
-
-## Alt 4: Configuration-Driven Factory
+## Alt 3: Configuration-Driven Factory
 
 **Pros:**
 
@@ -811,7 +795,7 @@ async def main():
 
 * Real backends have enough framework-specific complexity that subclassing provides better ergonomics and maintainability than a callback-driven approach.
 
-## Alt 5: Status Quo
+## Alt 4: Status Quo
 
 **Pros:**
 
