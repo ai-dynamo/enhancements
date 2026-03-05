@@ -807,6 +807,11 @@ async def main():
 * Does not address code duplication.
 * Bug fixes must still be applied to each backend independently.
 * No standardized structure for new backends.
+* Concrete examples include:
+- New features support like Metrics and graceful shutdown.
+- Duplication leads to inconsistent behavior, eg. vllm supporting decode fallback while other backend do not support fallback.
+- Unable to test new features with mock backends/dynamo core. In other words, can not produce quick unit tests.
+- Maintaining consistent logging is considerably harder. 
 
 **Reason Rejected:**
 
