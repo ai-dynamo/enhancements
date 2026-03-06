@@ -10,7 +10,7 @@
 
 **Required Reviewers**: [alec-flowers](https://github.com/alec-flowers), [ishandhanani](https://github.com/ishandhanani), [nv-yna](https://github.com/nv-yna)
 
-**Review Date**: [TBD]
+**Review Date**: 03/11/2026
 
 **Pull Request**: [PR 6384](https://github.com/ai-dynamo/dynamo/pull/6384)
 
