@@ -33,60 +33,52 @@ PRs to retroactive design documentation.
 # Motivation
 
 The DEP process as defined in [DEP-0000](./0000-dep-process.md) has been
-successful in fostering thoughtful design when used. However, as Dynamo
-reaches 1.0 and opens to external governance, the informal approach that
-got us here will not scale to what comes next. With 1.0, Dynamo begins
-to prioritize stability as much as innovation — API compatibility,
-deprecation policies, and backward-compatible evolution all require that
-design decisions are recorded, reviewable, and traceable. At the same
-time, a larger team, external contributors who lack tribal knowledge,
-and a longer maintenance horizon mean today's decisions must be
-understood and respected years from now.
+successful in fostering thoughtful design when used. As Dynamo reaches
+1.0, the project is beginning to balance stability with innovation —
+API compatibility, deprecation policies, and backward-compatible
+evolution benefit from design decisions that are recorded and
+discoverable. At the same time, external governance means new
+contributors need to understand existing design direction without
+relying on tribal knowledge.
 
-Three systemic problems have emerged:
+The current process encourages thoughtful decisions but lacks the
+lightweight structure needed to keep up with the pace of development.
+Three patterns illustrate the gap:
 
-**1. Proposals filed but never driven to completion.** Of 72 enhancement
-PRs to date, 48 (67%) remain open. Twenty of these have been open for
-six or more months with near-zero engagement. No labels, no assigned
-reviewers, no review dates — the process steps prescribed in DEP-0000
-are not being followed because there is no one accountable for driving a
-given proposal through to a terminal state.
+**1. Proposals filed but not driven to completion.** Of 72 enhancement
+PRs to date, 48 (67%) remain open. Twenty have been open for six or
+more months with minimal engagement. Without clear ownership, proposals
+stall — not because the ideas lack merit, but because no one is
+accountable for shepherding them to a decision.
 
-**2. Substantial features landing without corresponding design review.**
-Recent examples include the KV router scheduling overhaul (PRs #7260,
-#7339, #7395, #7462), unix domain socket transport (#7197, +1,934
-lines), concurrent KV event consumer (#7293, +1,276 lines), and
-standalone KV indexer runtime (#7295, +1,139 lines). In each case
-design discussion happened inline in the PR body with Linear ticket
-references. The design work was done — but it is not captured in the
-enhancements repository where it can be discovered, reviewed broadly,
-and maintained.
+**2. Good design work happening outside the DEP process.** Recent
+examples include the KV router scheduling overhaul (PRs #7260, #7339,
+#7395, #7462), unix domain socket transport (#7197, +1,934 lines),
+concurrent KV event consumer (#7293, +1,276 lines), and standalone KV
+indexer runtime (#7295, +1,139 lines). In each case thoughtful design
+discussion happened in PR bodies and Linear tickets. The work was
+sound — it just isn't captured where the broader team and future
+contributors can find it.
 
-**3. Architectural decisions captured outside the project record.** The
+**3. Decisions captured in formats that aren't broadly accessible.** The
 decision to consolidate configuration parameters across Dynamo
 components — a cross-cutting change affecting every service — was
-discussed and captured in a Google Doc rather than a DEP. The rationale,
-alternatives considered, and migration plan are not discoverable in the
-enhancements repository or linked from the implementing PRs. When a new
-engineer or external contributor encounters the configuration system and
-asks "why was it done this way?", the answer lives in a document they
-don't know exists and may not have access to. This is exactly the kind
-of tribal knowledge that DEPs are meant to eliminate, and it illustrates
-what happens when the process is too heavy for the pace of work — teams
-route around it.
+discussed and captured in a Google Doc rather than a DEP. The rationale
+and alternatives considered aren't discoverable in the enhancements
+repository or linked from the implementing PRs. This illustrates what
+happens when the process feels too heavy for the pace of work — teams
+find other ways to get the job done.
 
-These are not failures of individual engineers. The current process lacks
-the ownership model, triage cadence, and lightweight on-ramps needed to
-scale with the team. Engineers move fast and make good decisions — we
-need the process to keep up by making the right thing the easy thing.
+These aren't failures — they're signals that the process needs to be
+lighter and better supported. Engineers are making good decisions and
+moving fast. The goal is to make it easy to capture those decisions
+transparently, encourage awareness across the team, and maintain
+consistency — without adding friction that slows anyone down.
 
-As Dynamo opens to external contributors and community governance, the
-stakes increase. External contributors need a discoverable record of
-architectural decisions to make meaningful contributions. Maintainers
-need a way to evaluate proposed changes against established design
-direction. Without this, external PRs will either be rejected for
-violating undocumented conventions or accepted without adequate design
-review — both outcomes erode trust and slow the project.
+As Dynamo opens to external contributors, a discoverable design record
+helps new contributors understand context and helps maintainers evaluate
+proposed changes. This benefits the project without requiring a
+heavyweight approval process.
 
 DEP-0000 itself deferred several decisions that are now load-bearing:
 
