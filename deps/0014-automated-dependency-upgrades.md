@@ -111,7 +111,7 @@ The solution consists of three components:
 
 1. **Version detection script** (`detect_latest_versions.py`) — queries upstream sources for latest releases
 2. **Version bump script** (`bump_dependency.py`) — performs coordinated multi-file version updates
-3. **GitHub Actions workflow** (`dep-upgrade-release.yml`) — orchestrates detection → branch → bump → dispatch post-merge CI → wait → PR/notify
+3. **GitHub Actions workflow** (`auto-dep-upgrade.yml`) — orchestrates detection → branch → bump → dispatch post-merge CI → wait → PR/notify
 
 The workflow is branch-based: it creates a temporary branch with the version bump changes, runs the existing build infrastructure against it, and either opens a PR (on success) or cleans up and notifies (on failure).
 
@@ -171,7 +171,7 @@ NIXL appears in both the `vllm` and `sglang` optional dependency sections of `py
 
 ## Workflow
 
-**Location**: `.github/workflows/dep-upgrade-release.yml`
+**Location**: `.github/workflows/auto-dep-upgrade.yml`
 
 A single workflow handles everything: detect → branch → dispatch post-merge CI → wait → PR/notify.
 
@@ -199,13 +199,14 @@ on:
         options: ['', vllm, sglang, trtllm]
 
 # Each framework pipeline gets a conditional:
+# github.event_name == 'push' preserves existing behavior on main/release branches
 vllm-pipeline:
-    if: inputs.framework == '' || inputs.framework == 'vllm'
+    if: github.event_name == 'push' || inputs.framework == '' || inputs.framework == 'vllm'
     ...
 
 # Dev/EFA/operator/deploy jobs skip on workflow_dispatch:
 vllm-dev-pipeline:
-    if: github.event_name != 'workflow_dispatch'
+    if: github.event_name == 'push'
     ...
 ```
 
@@ -261,16 +262,196 @@ When dispatched on the upgrade branch via `gh workflow run post-merge-ci.yml --r
      └────────────┘    └──────────────┘
 ```
 
+### `auto-dep-upgrade.yml` Structure
+
+```yaml
+name: Auto Dependency Upgrade
+
+on:
+  schedule:
+    # Tue: vllm, trtllm
+    - cron: '0 10 * * 2'
+    # Wed: sglang, nixl
+    - cron: '0 11 * * 3'
+  workflow_dispatch:
+    inputs:
+      framework:
+        description: 'Framework to upgrade'
+        required: true
+        type: choice
+        options: [vllm, sglang, trtllm, nixl]
+
+permissions:
+  contents: write
+  actions: write
+  pull-requests: write
+
+jobs:
+  # Map cron schedule to framework(s); workflow_dispatch uses input directly
+  resolve-frameworks:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.resolve.outputs.matrix }}
+    steps:
+      - id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo 'matrix=["${{ inputs.framework }}"]' >> $GITHUB_OUTPUT
+          else
+            DAY=$(date -u +%u)  # 1=Mon, 2=Tue, ...
+            case $DAY in
+              2) echo 'matrix=["vllm","trtllm"]' ;;
+              3) echo 'matrix=["sglang","nixl"]' ;;
+              *) echo 'matrix=[]' ;;
+            esac >> $GITHUB_OUTPUT
+          fi
+
+  # Run the full upgrade pipeline for each framework
+  upgrade:
+    needs: [resolve-frameworks]
+    if: needs.resolve-frameworks.outputs.matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: ${{ fromJson(needs.resolve-frameworks.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Detect ---
+      - name: Detect latest version
+        id: detect
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RESULT=$(python .github/scripts/detect_latest_versions.py \
+            --framework ${{ matrix.framework }})
+          echo "latest_version=$(echo $RESULT | jq -r '.latest')" >> $GITHUB_OUTPUT
+          echo "needs_update=$(echo $RESULT | jq -r '.needs_update')" >> $GITHUB_OUTPUT
+
+      - name: Check for existing PR
+        if: steps.detect.outputs.needs_update == 'true'
+        id: check-pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          EXISTING=$(gh pr list --label "dep-upgrade" \
+            --label "${{ matrix.framework }}" --json title --jq 'length')
+          if [ "$EXISTING" -gt 0 ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      # --- Prepare branch ---
+      - name: Create upgrade branch
+        if: steps.detect.outputs.needs_update == 'true' && steps.check-pr.outputs.skip != 'true'
+        id: branch
+        run: |
+          VERSION="${{ steps.detect.outputs.latest_version }}"
+          BRANCH="deps/upgrade-${{ matrix.framework }}-${VERSION}"
+          echo "branch_name=$BRANCH" >> $GITHUB_OUTPUT
+
+          git checkout -b $BRANCH
+          python .github/scripts/bump_dependency.py \
+            --framework ${{ matrix.framework }} --version $VERSION
+          git add -A
+          git commit -s -m "chore: bump ${{ matrix.framework }} to ${VERSION}"
+          git push origin $BRANCH
+
+      # --- Validate via post-merge CI ---
+      - name: Dispatch post-merge CI
+        if: steps.branch.outputs.branch_name != ''
+        id: dispatch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="${{ steps.branch.outputs.branch_name }}"
+
+          # For nixl, run all frameworks; otherwise filter
+          FRAMEWORK_ARG=""
+          if [ "${{ matrix.framework }}" != "nixl" ]; then
+            FRAMEWORK_ARG="-f framework=${{ matrix.framework }}"
+          fi
+
+          gh workflow run post-merge-ci.yml --ref $BRANCH $FRAMEWORK_ARG
+
+          # Wait for run to appear, then capture its ID
+          sleep 15
+          RUN_ID=$(gh run list --workflow=post-merge-ci.yml \
+            --branch=$BRANCH --limit=1 \
+            --json databaseId -q '.[0].databaseId')
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+
+      - name: Wait for completion
+        if: steps.dispatch.outputs.run_id != ''
+        id: wait
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run watch ${{ steps.dispatch.outputs.run_id }} --exit-status || true
+          CONCLUSION=$(gh run view ${{ steps.dispatch.outputs.run_id }} \
+            --json conclusion -q '.conclusion')
+          echo "conclusion=$CONCLUSION" >> $GITHUB_OUTPUT
+
+      # --- Create PR on success ---
+      - name: Create PR
+        if: steps.wait.outputs.conclusion == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.detect.outputs.latest_version }}"
+          RUN_ID="${{ steps.dispatch.outputs.run_id }}"
+
+          gh pr create \
+            --head "${{ steps.branch.outputs.branch_name }}" \
+            --title "chore: bump ${{ matrix.framework }} to ${VERSION}" \
+            --label "dep-upgrade" --label "${{ matrix.framework }}" \
+            --body "$(cat <<EOF
+          ## Dependency Upgrade
+
+          **Framework:** ${{ matrix.framework }}
+          **Version:** ${VERSION}
+          **Validation:** [Post-merge CI run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${RUN_ID})
+          EOF
+          )"
+
+      # --- Notify + cleanup on failure ---
+      - name: Notify Slack on failure
+        if: steps.wait.outputs.conclusion == 'failure'
+        uses: slackapi/slack-github-action@v2
+        with:
+          webhook: ${{ secrets.SLACK_NOTIFY_NIGHTLY_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            blocks:
+              - type: "section"
+                text:
+                  type: mrkdwn
+                  text: >-
+                    :alert: *Dependency upgrade failed*
+                    Framework: ${{ matrix.framework }}
+                    Version: ${{ steps.detect.outputs.latest_version }}
+                    <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ steps.dispatch.outputs.run_id }}|Build Logs>
+
+      - name: Cleanup branch on failure
+        if: steps.wait.outputs.conclusion == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push origin --delete ${{ steps.branch.outputs.branch_name }} || true
+```
+
 ### Schedule
 
 Staggered from nightly CI (08:00 UTC) and from each other to avoid BuildKit worker contention:
 
-| Framework | Schedule | Rationale |
-|-----------|----------|-----------|
-| vLLM | Mon + Thu 10:00 UTC | High upstream velocity |
-| SGLang | Tue 10:00 UTC | Moderate velocity |
-| TRTLLM | Wed 10:00 UTC | NVIDIA release cadence |
-| NIXL | Fri 10:00 UTC | Internal project |
+| Day | Frameworks | Schedule |
+|-----|-----------|----------|
+| Tuesday | vLLM, TRTLLM | 10:00 UTC |
+| Wednesday | SGLang, NIXL | 11:00 UTC |
+
+All schedules are mid-week to avoid weekend/Monday noise. Each scheduled run checks all frameworks for that day sequentially. The workflow also supports `workflow_dispatch` for manual triggers when someone wants to upgrade a specific framework outside of the regular cadence.
 
 ### Build and Test Configuration
 
@@ -280,7 +461,7 @@ For single-framework upgrades (vllm, sglang, trtllm), only that framework's pipe
 
 ### Permissions
 
-- `dep-upgrade-release.yml`: `contents: write` (to push/delete branches), `actions: write` (to dispatch post-merge CI via `gh workflow run`), `pull-requests: write` (to create PRs)
+- `auto-dep-upgrade.yml`: `contents: write` (to push/delete branches), `actions: write` (to dispatch post-merge CI via `gh workflow run`), `pull-requests: write` (to create PRs)
 
 The `GITHUB_TOKEN` is sufficient for same-repository operations.
 
@@ -298,9 +479,9 @@ Implement the full release detection and upgrade PR pipeline for all 4 framework
 **Deliverables:**
 - `.github/scripts/detect_latest_versions.py` — version detection from upstream sources
 - `.github/scripts/bump_dependency.py` — coordinated multi-file version bump
-- `.github/workflows/dep-upgrade-release.yml` — detect, branch, bump, dispatch post-merge CI, wait, create PR/notify
+- `.github/workflows/auto-dep-upgrade.yml` — detect, branch, bump, dispatch post-merge CI, wait, create PR/notify
 - `.github/workflows/post-merge-ci.yml` — **modified**: add `workflow_dispatch` trigger with framework filter
-- `.github/workflows/dep-upgrade-all.yml` — optional orchestrator for manual triggers
+- `.github/workflows/auto-dep-upgrade-all.yml` — optional orchestrator for manual triggers
 
 **Rollout:**
 1. Scripts developed and tested locally
