@@ -207,32 +207,38 @@ vllm-dev-pipeline:
 
 The two upgrade workflows are connected via GitHub's `workflow_run` trigger — no polling, no idle runners:
 
-```mermaid
-flowchart LR
-    subgraph trigger["auto-dep-upgrade-trigger.yml"]
-        direction TB
-        A[Schedule / dispatch] --> B[Detect latest version]
-        B --> C{New release?}
-        C -- No --> D[Exit]
-        C -- Yes --> E{PR exists?}
-        E -- Yes --> D
-        E -- No --> F[Create branch + bump]
-    end
+```
+auto-dep-upgrade-          post-merge-              auto-dep-upgrade-
+trigger.yml                ci.yml                   complete.yml
+──────────────────         ──────────────           ──────────────────
 
-    subgraph postmerge["post-merge-ci.yml"]
-        direction TB
-        H[Build + test\non upgrade branch]
-    end
-
-    subgraph complete["auto-dep-upgrade-complete.yml"]
-        direction TB
-        J{Conclusion?}
-        J -- success --> K[Create PR]
-        J -- failure --> L[Slack notify]
-    end
-
-    F -- "gh workflow run\n--ref branch" --> H
-    H -- "workflow_run\ntrigger" --> J
+schedule / dispatch
+        │
+        ▼
+ detect latest version
+        │
+  no update? ──→ exit
+        │
+        ▼
+  PR exists? ──→ exit
+        │
+        ▼
+ create branch + bump
+        │
+        ▼
+ gh workflow run            runs on upgrade
+ post-merge-ci  ─────────→ branch (full
+ --ref <branch>            build + test)
+        │                       │
+      exit                  completes
+                                │
+                         workflow_run ──────→ check conclusion
+                         trigger fires             │
+                                             ┌─────┴─────┐
+                                          success     failure
+                                             │           │
+                                             ▼           ▼
+                                         create PR   Slack notify
 ```
 
 ### `auto-dep-upgrade-trigger.yml`
