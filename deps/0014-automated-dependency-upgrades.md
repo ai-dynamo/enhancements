@@ -208,33 +208,33 @@ vllm-dev-pipeline:
 The two upgrade workflows are connected via GitHub's `workflow_run` trigger — no polling, no idle runners:
 
 ```
-  auto-dep-upgrade-trigger.yml              post-merge-ci.yml             auto-dep-upgrade-complete.yml
-  ─────────────────────────────             ─────────────────             ────────────────────────────
+  auto-dep-upgrade-trigger.yml         post-merge-ci.yml          auto-dep-upgrade-complete.yml
+  ────────────────────────────         ─────────────────          ────────────────────────────
   schedule / workflow_dispatch
-           │
-           ▼
-    detect latest version
-           │
-     no update? ──→ exit
-           │
-           ▼
-    create branch + bump
-           │
-           ▼
-    gh workflow run ─────────→  runs on upgrade branch
-    post-merge-ci.yml            (full build + test)
-    --ref <branch>                       │
-           │                             │
-         exit                        completes
+            │
+            ▼
+     detect latest version
+            │
+      no update? ──→ exit
+            │
+            ▼
+     create branch + bump
+            │
+            ▼
+     gh workflow run ──────────→ runs on upgrade branch
+     post-merge-ci.yml           (full build + test)
+     --ref <branch>                      │
+            │                            │
+          exit                       completes
                                          │
                                          ▼
-                               workflow_run trigger ──→  check conclusion
-                               (branches: deps/upgrade-*)     │
-                                                        ┌─────┴─────┐
-                                                     success     failure
-                                                        │           │
-                                                        ▼           ▼
-                                                    create PR   Slack notify
+                                  workflow_run ─────────→ check conclusion
+                                  trigger fires                │
+                                                         ┌─────┴─────┐
+                                                      success     failure
+                                                         │           │
+                                                         ▼           ▼
+                                                     create PR   Slack notify
 ```
 
 ### `auto-dep-upgrade-trigger.yml`
@@ -346,6 +346,7 @@ name: Auto Dependency Upgrade Complete
 
 on:
   workflow_run:
+    # TODO: fragile name coupling — consider repository_dispatch as alternative
     workflows: ["Post-Merge CI Pipeline"]
     types: [completed]
     branches:
@@ -483,14 +484,14 @@ This workflow would run on a separate schedule, report pass/fail to Slack, and w
 | vLLM install | `container/deps/vllm/install_vllm.sh` | `VLLM_VER="0.17.1"` |
 | NIXL install (container) | `container/deps/trtllm/install_nixl.sh` | `NIXL_COMMIT="0.10.1"` |
 | NIXL install (deploy) | `deploy/pre-deployment/nixl/build_and_deploy.sh` | `NIXL_VERSION="0.10.1"` |
-| Documentation | `docs/reference/support-matrix.md` | Version compatibility table |
+| NIXL deploy docs | `deploy/pre-deployment/nixl/README.md` | `version 0.10.1` |
+| Support matrix | `docs/reference/support-matrix.md` | `main (ToT)` row in Backend Dependencies table |
 
 ## Current CI Build Infrastructure
 
-The existing CI already supports the building blocks needed:
-- `build-test-distribute-flavor-matrix.yml` accepts `build_only: true` for build-without-test runs
-- `build-flavor` composite action supports `extra_build_args` and `sanitized_ref_name` for branch-tagged builds
-- BuildKit workers are routed by framework flavor
+The existing CI infrastructure is reused directly:
+- `post-merge-ci.yml` runs full build + test for all frameworks — dispatched on the upgrade branch via `workflow_dispatch`
+- `workflow_run` trigger enables the completion workflow to react when post-merge CI finishes
 - Slack notifications use `SLACK_NOTIFY_NIGHTLY_WEBHOOK_URL`
 
 ## Upstream Release Sources
@@ -502,11 +503,3 @@ The existing CI already supports the building blocks needed:
 | TRTLLM | [pypi.nvidia.com/tensorrt-llm](https://pypi.nvidia.com/tensorrt-llm/) | `1.3.0rc7` |
 | NIXL | [github.com/ai-dynamo/nixl/releases](https://github.com/ai-dynamo/nixl/releases) | `0.10.1` |
 | SGLang Docker | [hub.docker.com/r/lmsysorg/sglang](https://hub.docker.com/r/lmsysorg/sglang/tags) | `v0.5.9-runtime`, `v0.5.9-cu130-runtime` |
-
-## Acronyms & Abbreviations
-
-**TRTLLM**: TensorRT Large Language Model (NVIDIA's LLM inference engine)
-
-**NIXL**: NVIDIA Inference eXchange Library (GPU-to-GPU data transfer library)
-
-**DEP**: Dynamo Enhancement Proposal
