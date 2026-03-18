@@ -208,36 +208,36 @@ vllm-dev-pipeline:
 The two upgrade workflows are connected via GitHub's `workflow_run` trigger — no polling, no idle runners:
 
 ```
-auto-dep-upgrade-trigger.yml           post-merge-ci.yml              auto-dep-upgrade-complete.yml
-────────────────────────────           ─────────────────              ────────────────────────────
-
-  schedule / dispatch
-          │
-          ▼
-   detect latest version
-          │
-    no update? ──→ exit
-          │
-          ▼
-    PR exists? ──→ exit
-          │
-          ▼
-   create branch + bump
-          │
-          ▼
-   gh workflow run              runs on upgrade branch
-   post-merge-ci  ──────────→  (full build + test on
-   --ref <branch>               all platforms + CUDA)
-          │                            │
-        exit                       completes
-                                       │
-                                workflow_run ──────────→  check conclusion
-                                trigger fires                   │
-                                                          ┌─────┴─────┐
-                                                       success     failure
-                                                          │           │
-                                                          ▼           ▼
-                                                      create PR   Slack notify
+auto-dep-upgrade-trigger.yml    ┊  post-merge-ci.yml           ┊  auto-dep-upgrade-complete.yml
+────────────────────────────────┊──────────────────────────────┊───────────────────────────────
+                                ┊                              ┊
+  schedule / dispatch           ┊                              ┊
+          │                     ┊                              ┊
+          ▼                     ┊                              ┊
+   detect latest version        ┊                              ┊
+          │                     ┊                              ┊
+    no update? ──→ exit         ┊                              ┊
+          │                     ┊                              ┊
+          ▼                     ┊                              ┊
+    PR exists? ──→ exit         ┊                              ┊
+          │                     ┊                              ┊
+          ▼                     ┊                              ┊
+   create branch + bump         ┊                              ┊
+          │                     ┊                              ┊
+          ▼                     ┊                              ┊
+   gh workflow run ──────────────→  runs on upgrade branch     ┊
+   --ref <branch>               ┊  (full build + test on       ┊
+          │                     ┊   all platforms + CUDA)      ┊
+        exit                    ┊         │                    ┊
+                                ┊     completes                ┊
+                                ┊         │                    ┊
+                                ┊  workflow_run trigger ────────→  check conclusion
+                                ┊                              ┊        │
+                                ┊                              ┊  ┌─────┴─────┐
+                                ┊                              ┊  success  failure
+                                ┊                              ┊     │        │
+                                ┊                              ┊     ▼        ▼
+                                ┊                              ┊  create PR  Slack notify
 ```
 
 ### `auto-dep-upgrade-trigger.yml`
