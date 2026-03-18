@@ -207,34 +207,32 @@ vllm-dev-pipeline:
 
 The two upgrade workflows are connected via GitHub's `workflow_run` trigger — no polling, no idle runners:
 
-```
-  auto-dep-upgrade-trigger.yml         post-merge-ci.yml          auto-dep-upgrade-complete.yml
-  ────────────────────────────         ─────────────────          ────────────────────────────
-  schedule / workflow_dispatch
-            │
-            ▼
-     detect latest version
-            │
-      no update? ──→ exit
-            │
-            ▼
-     create branch + bump
-            │
-            ▼
-     gh workflow run ──────────→ runs on upgrade branch
-     post-merge-ci.yml           (full build + test)
-     --ref <branch>                      │
-            │                            │
-          exit                       completes
-                                         │
-                                         ▼
-                                  workflow_run ─────────→ check conclusion
-                                  trigger fires                │
-                                                         ┌─────┴─────┐
-                                                      success     failure
-                                                         │           │
-                                                         ▼           ▼
-                                                     create PR   Slack notify
+```mermaid
+flowchart LR
+    subgraph trigger["auto-dep-upgrade-trigger.yml"]
+        direction TB
+        A[Schedule / dispatch] --> B[Detect latest version]
+        B --> C{New release?}
+        C -- No --> D[Exit]
+        C -- Yes --> E{PR exists?}
+        E -- Yes --> D
+        E -- No --> F[Create branch + bump]
+    end
+
+    subgraph postmerge["post-merge-ci.yml"]
+        direction TB
+        H[Build + test\non upgrade branch]
+    end
+
+    subgraph complete["auto-dep-upgrade-complete.yml"]
+        direction TB
+        J{Conclusion?}
+        J -- success --> K[Create PR]
+        J -- failure --> L[Slack notify]
+    end
+
+    F -- "gh workflow run\n--ref branch" --> H
+    H -- "workflow_run\ntrigger" --> J
 ```
 
 ### `auto-dep-upgrade-trigger.yml`
