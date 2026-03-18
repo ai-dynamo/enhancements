@@ -6,7 +6,9 @@
 
 **Category**: Process
 
-**Replaces**: N/A (extends [DEP-0000: Dynamo Enhancement Proposals](./0000-dep-process.md))
+**Extends**: [DEP-0000: Dynamo Enhancement Proposals](./0000-dep-process.md)
+
+**Replaces**: N/A
 
 **Replaced By**: N/A
 
