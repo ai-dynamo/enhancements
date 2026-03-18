@@ -72,12 +72,13 @@ The system **MUST** update version references consistently across all files wher
 | `pyproject.toml` | `vllm==X.Y.Z` | `sglang==X.Y.Z` | `tensorrt-llm==X.Y.Z` | `nixl<=X.Y.Z` |
 | `container/deps/vllm/install_vllm.sh` | `VLLM_VER` (line 15) | — | — | — |
 | `container/deps/trtllm/install_nixl.sh` | — | — | — | `NIXL_COMMIT` (line 30) |
+| `deploy/pre-deployment/nixl/build_and_deploy.sh` | — | — | — | `NIXL_VERSION` (line 9) |
 
 The system **SHOULD** flag files requiring manual review in the PR body (docs, recipes, `requirements.common.txt`, trtllm torch versions).
 
-### REQ 3 Trial Build Validation
+### REQ 3 Trial Build and Test Validation
 
-The system **MUST** run a container build for the target framework on at least one platform (amd64) and one CUDA version before creating a PR. The build **MUST** reuse the existing `build-test-distribute-flavor-matrix.yml` workflow with `build_only: true`.
+The system **MUST** run a full build and test cycle for the target framework on at least one platform (amd64) and one CUDA version before creating a PR. This **MUST** include CPU-only, single GPU, and multi-GPU tests matching the post-merge CI test markers. The system **MUST** reuse the existing `build-test-distribute-flavor-matrix.yml` workflow with tests enabled (NOT `build_only`).
 
 ### REQ 4 Pull Request Creation
 
@@ -86,7 +87,7 @@ On successful build, the system **MUST** create a pull request with:
 - Labels: `dep-upgrade`, `{framework}`
 - Body containing: version change summary, build log link, manual review checklist
 
-If a prior open PR exists for the same framework, the system **SHOULD** close it and create a fresh one.
+If a prior open PR exists for the same framework and version, the system **SHOULD** skip creating a duplicate.
 
 ### REQ 5 Failure Notification
 
@@ -164,7 +165,13 @@ NIXL appears in both the `vllm` and `sglang` optional dependency sections of `py
 
 ## Workflow
 
+The workflow is split into two phases across two workflow files. This is necessary because GitHub Actions reusable workflows (`workflow_call`) check out code from the calling workflow's ref. If a single workflow running on `main` calls the build pipeline, it would build `main`'s code — not the upgrade branch with version bumps. By dispatching phase 2 on the upgrade branch, `actions/checkout` naturally picks up the bumped versions.
+
+### Phase 1: Detect and Prepare
+
 **Location**: `.github/workflows/dep-upgrade-release.yml`
+
+Triggered by schedule or `workflow_dispatch` on `main`. Detects new versions, creates the upgrade branch, and dispatches phase 2.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -191,12 +198,42 @@ NIXL appears in both the `vllm` and `sglang` optional dependency sections of `py
                        │
                        ▼
               ┌─────────────────────┐
-              │   trial-build       │
+              │   dispatch phase 2  │
+              │  gh workflow run    │
+              │  dep-upgrade-       │
+              │  test.yml           │
+              │  --ref <branch>     │
+              └─────────────────────┘
+```
+
+### Phase 2: Build, Test, and PR
+
+**Location**: `.github/workflows/dep-upgrade-test.yml`
+
+Triggered via `workflow_dispatch` on the upgrade branch. Since it runs in the context of the upgrade branch, all `actions/checkout` calls naturally pick up the bumped version files.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Trigger: workflow_dispatch on upgrade branch            │
+│  Inputs: framework, version                              │
+└────────────────────────┬────────────────────────────────┘
+                         │
+                         ▼
+              ┌─────────────────────┐
+              │   setup             │
+              │  (resolve framework │
+              │   → CUDA versions,  │
+              │   test markers)     │
+              └────────┬────────────┘
+                       │
+                       ▼
+              ┌─────────────────────┐
+              │   build-and-test    │
               │  (build-test-       │
               │   distribute-       │
               │   flavor-matrix)    │
-              │  build_only: true   │
-              │  amd64 only         │
+              │  per framework      │
+              │  (nixl → all 3)     │
               └────────┬────────────┘
                        │
               ┌────────┴────────┐
@@ -211,6 +248,146 @@ NIXL appears in both the `vllm` and `sglang` optional dependency sections of `py
      └────────────┘    └──────────────┘
 ```
 
+**Implementation**: The `setup` job resolves framework-specific configuration because `workflow_call` inputs cannot use conditionals. For NIXL upgrades, the workflow runs all three framework pipelines (vLLM, SGLang, TRTLLM) in parallel since NIXL is a shared dependency built into each framework's container.
+
+```yaml
+# dep-upgrade-test.yml (sketch)
+name: Dependency Upgrade Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      framework:
+        description: 'Framework being upgraded'
+        required: true
+        type: choice
+        options: [vllm, sglang, trtllm, nixl]
+      version:
+        description: 'Version being upgraded to'
+        required: true
+        type: string
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      # Which framework builds to run (nixl → all three)
+      run_vllm: ${{ steps.config.outputs.run_vllm }}
+      run_sglang: ${{ steps.config.outputs.run_sglang }}
+      run_trtllm: ${{ steps.config.outputs.run_trtllm }}
+    steps:
+      - id: config
+        run: |
+          case "${{ inputs.framework }}" in
+            vllm)
+              echo "run_vllm=true"   >> $GITHUB_OUTPUT
+              echo "run_sglang=false" >> $GITHUB_OUTPUT
+              echo "run_trtllm=false" >> $GITHUB_OUTPUT
+              ;;
+            sglang)
+              echo "run_vllm=false"  >> $GITHUB_OUTPUT
+              echo "run_sglang=true" >> $GITHUB_OUTPUT
+              echo "run_trtllm=false" >> $GITHUB_OUTPUT
+              ;;
+            trtllm)
+              echo "run_vllm=false"   >> $GITHUB_OUTPUT
+              echo "run_sglang=false" >> $GITHUB_OUTPUT
+              echo "run_trtllm=true"  >> $GITHUB_OUTPUT
+              ;;
+            nixl)
+              # NIXL is built into all frameworks — validate all three
+              echo "run_vllm=true"   >> $GITHUB_OUTPUT
+              echo "run_sglang=true" >> $GITHUB_OUTPUT
+              echo "run_trtllm=true" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+  vllm-pipeline:
+    needs: [setup]
+    if: needs.setup.outputs.run_vllm == 'true'
+    uses: ./.github/workflows/build-test-distribute-flavor-matrix.yml
+    with:
+      framework: vllm
+      target: runtime
+      platforms: '["amd64"]'
+      cuda_versions: '["12.9"]'
+      builder_name: b-${{ github.run_id }}-${{ github.run_attempt }}
+      build_timeout_minutes: 180
+      copy_to_acr: false
+      cpu_only_test_markers: '(pre_merge or post_merge) and vllm and gpu_0'
+      single_gpu_test_markers: '(pre_merge or post_merge) and vllm and gpu_1'
+      multi_gpu_test_markers: '(pre_merge or post_merge) and vllm and (gpu_2 or gpu_4)'
+      cpu_only_test_timeout_minutes: 60
+      single_gpu_test_timeout_minutes: 60
+      multi_gpu_test_timeout_minutes: 60
+    secrets: inherit
+
+  sglang-pipeline:
+    needs: [setup]
+    if: needs.setup.outputs.run_sglang == 'true'
+    uses: ./.github/workflows/build-test-distribute-flavor-matrix.yml
+    with:
+      framework: sglang
+      target: runtime
+      platforms: '["amd64"]'
+      cuda_versions: '["12.9"]'
+      builder_name: b-${{ github.run_id }}-${{ github.run_attempt }}
+      build_timeout_minutes: 180
+      copy_to_acr: false
+      cpu_only_test_markers: '(pre_merge or post_merge) and sglang and gpu_0'
+      single_gpu_test_markers: '(pre_merge or post_merge) and sglang and gpu_1'
+      multi_gpu_test_markers: '(pre_merge or post_merge) and sglang and (gpu_2 or gpu_4)'
+      cpu_only_test_timeout_minutes: 60
+      single_gpu_test_timeout_minutes: 60
+      multi_gpu_test_timeout_minutes: 60
+    secrets: inherit
+
+  trtllm-pipeline:
+    needs: [setup]
+    if: needs.setup.outputs.run_trtllm == 'true'
+    uses: ./.github/workflows/build-test-distribute-flavor-matrix.yml
+    with:
+      framework: trtllm
+      target: runtime
+      platforms: '["amd64"]'
+      cuda_versions: '["13.1"]'
+      builder_name: b-${{ github.run_id }}-${{ github.run_attempt }}
+      build_timeout_minutes: 180
+      copy_to_acr: false
+      cpu_only_test_markers: '(pre_merge or post_merge) and trtllm and gpu_0'
+      single_gpu_test_markers: '(pre_merge or post_merge) and trtllm and gpu_1'
+      multi_gpu_test_markers: '(pre_merge or post_merge) and trtllm and (gpu_2 or gpu_4)'
+      cpu_only_test_timeout_minutes: 60
+      single_gpu_test_timeout_minutes: 60
+      multi_gpu_test_timeout_minutes: 60
+    secrets: inherit
+
+  create-pr:
+    needs: [setup, vllm-pipeline, sglang-pipeline, trtllm-pipeline]
+    if: |
+      always() &&
+      (needs.vllm-pipeline.result == 'success' || needs.vllm-pipeline.result == 'skipped') &&
+      (needs.sglang-pipeline.result == 'success' || needs.sglang-pipeline.result == 'skipped') &&
+      (needs.trtllm-pipeline.result == 'success' || needs.trtllm-pipeline.result == 'skipped') &&
+      !contains(needs.*.result, 'failure')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Create PR with version summary and build link
+
+  notify-failure:
+    needs: [setup, vllm-pipeline, sglang-pipeline, trtllm-pipeline]
+    if: always() && contains(needs.*.result, 'failure')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Slack + cleanup branch
+        # Slack webhook + delete branch
+```
+
 ### Schedule
 
 Staggered from nightly CI (08:00 UTC) and from each other to avoid BuildKit worker contention:
@@ -222,24 +399,30 @@ Staggered from nightly CI (08:00 UTC) and from each other to avoid BuildKit work
 | TRTLLM | Wed 10:00 UTC | NVIDIA release cadence |
 | NIXL | Fri 10:00 UTC | Internal project |
 
-### Build Configuration Per Framework
+### Build and Test Configuration Per Framework
 
-| Framework | CUDA Version | Notes |
-|-----------|-------------|-------|
-| vLLM | `["12.9"]` | Primary CUDA version |
-| SGLang | `["12.9"]` | Primary CUDA version |
-| TRTLLM | `["13.1"]` | Only supported CUDA version |
-| NIXL | N/A | Built as part of vLLM build; trigger vLLM build for validation |
+The trial run uses the same test markers as post-merge CI but on a single platform (amd64) and primary CUDA version to balance coverage with resource cost.
+
+| Framework | CUDA Version | CPU Test Markers | Single GPU Markers | Multi GPU Markers |
+|-----------|-------------|------------------|--------------------|--------------------|
+| vLLM | `["12.9"]` | `(pre_merge or post_merge) and vllm and gpu_0` | `(pre_merge or post_merge) and vllm and gpu_1` | `(pre_merge or post_merge) and vllm and (gpu_2 or gpu_4)` |
+| SGLang | `["12.9"]` | `(pre_merge or post_merge) and sglang and gpu_0` | `(pre_merge or post_merge) and sglang and gpu_1` | `(pre_merge or post_merge) and sglang and (gpu_2 or gpu_4)` |
+| TRTLLM | `["13.1"]` | `(pre_merge or post_merge) and trtllm and gpu_0` | `(pre_merge or post_merge) and trtllm and gpu_1` | `(pre_merge or post_merge) and trtllm and (gpu_2 or gpu_4)` |
+| NIXL | N/A | Built as part of other framework builds; triggers vLLM, SGLang, and TRTLLM build+test for validation | | |
+
+Test timeouts follow post-merge CI: 60 minutes for CPU, single GPU, and multi-GPU test tiers. Images are NOT copied to ACR (`copy_to_acr: false`) since these are trial builds.
 
 ### Permissions
 
-The workflow requires `contents: write` (to push branches) and `pull-requests: write` (to create PRs). The `GITHUB_TOKEN` is sufficient for same-repository operations.
+- **Phase 1** (`dep-upgrade-release.yml`): `contents: write` (to push branches) and `actions: write` (to dispatch phase 2 via `gh workflow run`)
+- **Phase 2** (`dep-upgrade-test.yml`): `contents: write` (to delete branch on failure) and `pull-requests: write` (to create PRs)
+
+The `GITHUB_TOKEN` is sufficient for same-repository operations.
 
 ### PR Lifecycle
 
 - Branch naming: `deps/upgrade-{framework}-{version}`
-- If an open PR with labels `[dep-upgrade, {framework}]` already exists for an older version: close the old PR, delete the old branch, then create the new one
-- If an open PR exists for the same version: skip (already in progress)
+- If an open PR already exists for the same framework and version: skip (already in progress)
 
 # Implementation Phases
 
@@ -250,7 +433,8 @@ Implement the full release detection and upgrade PR pipeline for all 4 framework
 **Deliverables:**
 - `.github/scripts/detect_latest_versions.py` — version detection from upstream sources
 - `.github/scripts/bump_dependency.py` — coordinated multi-file version bump
-- `.github/workflows/dep-upgrade-release.yml` — main upgrade workflow
+- `.github/workflows/dep-upgrade-release.yml` — phase 1: detect, branch, bump, dispatch
+- `.github/workflows/dep-upgrade-test.yml` — phase 2: build, test, PR/notify (runs on upgrade branch)
 - `.github/workflows/dep-upgrade-all.yml` — optional orchestrator for manual triggers
 
 **Rollout:**
@@ -282,7 +466,8 @@ This workflow would run on a separate schedule, report pass/fail to Slack, and w
 | Container builds | `container/context.yaml` | `vllm_ref: v0.17.1` |
 | Python packages | `pyproject.toml` | `vllm[flashinfer,runai]==0.17.1` |
 | vLLM install | `container/deps/vllm/install_vllm.sh` | `VLLM_VER="0.17.1"` |
-| NIXL install | `container/deps/trtllm/install_nixl.sh` | `NIXL_COMMIT="0.10.1"` |
+| NIXL install (container) | `container/deps/trtllm/install_nixl.sh` | `NIXL_COMMIT="0.10.1"` |
+| NIXL install (deploy) | `deploy/pre-deployment/nixl/build_and_deploy.sh` | `NIXL_VERSION="0.10.1"` |
 | Documentation | `docs/reference/support-matrix.md` | Version compatibility table |
 
 ## Current CI Build Infrastructure
