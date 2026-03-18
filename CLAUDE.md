@@ -61,6 +61,7 @@ Claude Code skills are available for common DEP operations:
 
 - `/dep-create [feature-name]` — Create a new DEP with proper structure. Discusses problem statement first, researches context, then drafts.
 - `/dep-status [area|number|all]` — Show status of DEPs grouped by status. Flags stalled proposals and missing sponsors.
+- `/dep-review [dep-number|area|all]` — Check if a DEP is still current, superseded, or diverged from implementation. Recommends actions.
 - `/dep-retroactive [PR-number]` — Draft a DEP from an already-merged PR when design was done inline.
 - `/dep-triage` — Weekly triage report: stalled DEPs, large PRs without design docs, backlog priorities.
 

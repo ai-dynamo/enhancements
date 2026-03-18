@@ -345,10 +345,20 @@ status: draft
 area: process
 authors: [nnshah1]
 pic: nnshah1
+extends: 0000-dep-process        # builds on an existing DEP
+replaces: null                    # fully supersedes another DEP
+replaced-by: null                 # pointer when this DEP is superseded
 linear: []
 implementation-prs: []
 ---
 ```
+
+The `extends` field captures when a DEP builds directly on a prior one
+— adding to or refining its scope without replacing it. This is
+distinct from `replaces` (full supersession) and complements the
+Related Proposals section by making the relationship machine-readable.
+Agents and tooling use `extends` and `replaces`/`replaced-by` to trace
+the lineage of decisions and detect when a DEP chain may need review.
 
 The human-readable header block remains for readability. Frontmatter
 is the source of truth for tooling and agent queries.
@@ -454,7 +464,8 @@ code.**
 - Create clean (agent-ready) template variant — section headers only,
   no inline instructions
 - Publish Claude Code skills for DEP workflow automation
-  (`/dep-create`, `/dep-status`, `/dep-retroactive`, `/dep-triage`)
+  (`/dep-create`, `/dep-status`, `/dep-review`, `/dep-retroactive`,
+  `/dep-triage`)
 
 # Related Proposals
 
