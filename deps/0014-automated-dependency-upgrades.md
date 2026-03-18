@@ -48,7 +48,7 @@ Recent examples of manual upgrades include `chore: bump trtllm to 1.3.0rc7` and 
 
 * Upgrading transitive dependencies (e.g., `transformers`, `torch`) — these require manual analysis
 
-* Upgrading recipe YAML files or documentation (flagged in PR for manual review)
+* Upgrading recipe YAML files (these reference Dynamo release versions, not upstream framework versions)
 
 ## Requirements
 
@@ -90,7 +90,7 @@ The system **MUST** run the full post-merge CI pipeline for the target framework
 
 On successful build, the system **MUST** create a pull request with:
 - Title: `chore: bump {framework} to {version}`
-- Labels: `dep-upgrade`, `{framework}`
+- Labels: `dep-upgrade`, `backend::{framework}`
 - Body containing: version change summary, build log link, manual review checklist
 
 If a prior open PR exists for the same framework and version, the system **SHOULD** skip creating a duplicate.
@@ -302,8 +302,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          EXISTING=$(gh pr list --label "dep-upgrade" \
-            --label "${{ matrix.framework }}" --json title --jq 'length')
+          VERSION="${{ steps.detect.outputs.latest_version }}"
+          BRANCH="deps/upgrade-${{ matrix.framework }}-${VERSION}"
+          EXISTING=$(gh pr list --head "$BRANCH" --json title --jq 'length')
           if [ "$EXISTING" -gt 0 ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
           else
@@ -387,7 +388,7 @@ jobs:
             --head "${{ github.event.workflow_run.head_branch }}" \
             --title "chore: bump ${{ steps.parse.outputs.framework }} to ${{ steps.parse.outputs.version }}" \
             --label "dep-upgrade" \
-            --label "${{ steps.parse.outputs.framework }}" \
+            --label "backend::${{ steps.parse.outputs.framework }}" \
             --body "$(cat <<EOF
           ## Dependency Upgrade
 
