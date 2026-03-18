@@ -205,7 +205,7 @@ vllm-dev-pipeline:
     ...
 ```
 
-The two upgrade workflows are connected via GitHub's `workflow_run` trigger — no polling, no idle runners:
+The two upgrade workflows are connected via GitHub's `workflow_run` trigger:
 
 ```
 auto-dep-upgrade-trigger.yml    ┊  post-merge-ci.yml           ┊  auto-dep-upgrade-complete.yml
