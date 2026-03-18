@@ -26,7 +26,7 @@ Improvements to the Dynamo Enhancement Proposal (DEP) process to address
 inconsistent adoption, abandoned proposals, and the growing gap between
 architectural decisions made informally in PRs and the design record in
 the enhancements repository. Introduces area-based ownership with
-designated PICs (Persons In Charge), a weekly triage cadence, GitHub
+designated PICs (Pilots In Charge), a weekly triage cadence, GitHub
 Issues for backlog tracking, and a lightweight path from implementation
 PRs to retroactive design documentation.
 
@@ -596,7 +596,7 @@ enhancements repo is ad-hoc.
 | Term | Definition |
 | :--- | :--- |
 | **Area** | A functional subdivision of the Dynamo project (e.g., frontend, router, backends) used to organize DEPs and assign ownership |
-| **PIC** | Person In Charge — the designated owner of a DEP area, responsible for shepherding proposals and reviewing implementations |
+| **PIC** | Pilot In Charge — the designated owner of a DEP area, responsible for shepherding proposals and reviewing implementations |
 | **Terminal State** | A DEP status that indicates the proposal is no longer active: approved, deferred, or rejected |
 | **Retroactive DEP** | A design document created after implementation has already merged, capturing the design rationale from PR descriptions and offline discussions |
 
@@ -604,7 +604,7 @@ enhancements repo is ad-hoc.
 
 **DEP:** Dynamo Enhancement Proposal
 
-**PIC:** Person In Charge
+**PIC:** Pilot In Charge
 
 **PM:** Product Manager
 
