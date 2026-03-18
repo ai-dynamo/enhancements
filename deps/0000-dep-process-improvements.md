@@ -34,8 +34,16 @@ PRs to retroactive design documentation.
 
 The DEP process as defined in [DEP-0000](./0000-dep-process.md) has been
 successful in fostering thoughtful design when used. However, as Dynamo
-approaches 1.0 and opens to external governance, two systemic problems
-have emerged:
+reaches 1.0 and opens to external governance, the informal approach that
+got us here will not scale to what comes next. With 1.0, Dynamo begins
+to prioritize stability as much as innovation — API compatibility,
+deprecation policies, and backward-compatible evolution all require that
+design decisions are recorded, reviewable, and traceable. At the same
+time, a larger team, external contributors who lack tribal knowledge,
+and a longer maintenance horizon mean today's decisions must be
+understood and respected years from now.
+
+Three systemic problems have emerged:
 
 **1. Proposals filed but never driven to completion.** Of 72 enhancement
 PRs to date, 48 (67%) remain open. Twenty of these have been open for
@@ -54,10 +62,31 @@ references. The design work was done — but it is not captured in the
 enhancements repository where it can be discovered, reviewed broadly,
 and maintained.
 
+**3. Architectural decisions captured outside the project record.** The
+decision to consolidate configuration parameters across Dynamo
+components — a cross-cutting change affecting every service — was
+discussed and captured in a Google Doc rather than a DEP. The rationale,
+alternatives considered, and migration plan are not discoverable in the
+enhancements repository or linked from the implementing PRs. When a new
+engineer or external contributor encounters the configuration system and
+asks "why was it done this way?", the answer lives in a document they
+don't know exists and may not have access to. This is exactly the kind
+of tribal knowledge that DEPs are meant to eliminate, and it illustrates
+what happens when the process is too heavy for the pace of work — teams
+route around it.
+
 These are not failures of individual engineers. The current process lacks
 the ownership model, triage cadence, and lightweight on-ramps needed to
 scale with the team. Engineers move fast and make good decisions — we
 need the process to keep up by making the right thing the easy thing.
+
+As Dynamo opens to external contributors and community governance, the
+stakes increase. External contributors need a discoverable record of
+architectural decisions to make meaningful contributions. Maintainers
+need a way to evaluate proposed changes against established design
+direction. Without this, external PRs will either be rejected for
+violating undocumented conventions or accepted without adequate design
+review — both outcomes erode trust and slow the project.
 
 DEP-0000 itself deferred several decisions that are now load-bearing:
 
@@ -464,8 +493,8 @@ code.**
 - Create clean (agent-ready) template variant — section headers only,
   no inline instructions
 - Publish Claude Code skills for DEP workflow automation
-  (`/dep-create`, `/dep-status`, `/dep-review`, `/dep-retroactive`,
-  `/dep-triage`)
+  (`/dep-create`, `/dep-status`, `/dep-review`, `/dep-related`,
+  `/dep-retroactive`, `/dep-triage`)
 
 # Related Proposals
 
