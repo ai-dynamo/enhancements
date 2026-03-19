@@ -350,8 +350,20 @@ Key principles:
 
 ## Agent-Friendly Format and Tooling
 
-As AI coding agents become standard development tools, the DEP format
-and workflow should be optimized for both human and agent use.
+As AI coding agents become standard development tools, DEPs serve a
+dual purpose: they capture decisions for human contributors and
+provide structured context that agents can reason over when working on
+the codebase. An agent tasked with modifying the router or extending
+the frontend benefits from being able to discover the design rationale,
+architectural constraints, and alternatives that were considered — the
+same way a new engineer would. Design knowledge that lives only in
+Google Docs, Slack threads, or people's heads is invisible to agents
+and effectively doesn't exist for them. A well-maintained DEP
+repository becomes part of the development infrastructure, not just a
+process artifact.
+
+With this in mind, the DEP format and workflow should be optimized for
+both human and agent use.
 
 ### Structured Metadata
 
@@ -586,12 +598,40 @@ scheduling policy, multimodal Anthropic Messages API support.
 Backlog, 29 Done). Component areas well-defined but linkage to
 enhancements repo is ad-hoc.
 
+## Agent-First Development and Repository as System of Record
+
+OpenAI's experience with "harness engineering" — building a product
+with AI agents as the primary code contributors — offers corroborating
+evidence for several aspects of this proposal. In
+[Harness engineering: leveraging Codex in an agent-first world](https://openai.com/index/harness-engineering/),
+the team found that a structured `docs/` directory with design docs,
+execution plans, and product specs — indexed and cross-linked — was
+essential for agent effectiveness. Their key insight: "anything [the
+agent] can't access in-context while running effectively doesn't
+exist. Knowledge that lives in Google Docs, chat threads, or people's
+heads are not accessible to the system."
+
+They also found that a monolithic instruction file fails at scale
+("it rots instantly," "too much guidance becomes non-guidance") and
+instead adopted a short top-level map pointing to deeper sources of
+truth — similar to the progressive disclosure our YAML frontmatter
+and area-based organization provide. Their use of recurring
+"doc-gardening" agents to scan for stale documentation and open fix-up
+PRs validates the direction of our `/dep-review` skill and suggests
+future automation opportunities.
+
+While Dynamo's development model is not fully agent-driven, the trend
+is clear: design decisions captured in structured, in-repo formats
+serve both human contributors and the AI tools increasingly assisting
+them.
+
 ## References
 
 * [DEP-0000: Dynamo Enhancement Proposals](./0000-dep-process.md)
 * [Kubernetes KEP Process](https://github.com/kubernetes/enhancements/blob/master/keps/sig-architecture/0000-kep-process/README.md)
 * [Rust RFC Process](https://github.com/rust-lang/rfcs/blob/master/text/0002-rfc-process.md)
 * [Scaling Engineering Teams via RFCs](https://blog.pragmaticengineer.com/scaling-engineering-teams-via-writing-things-down-rfcs/)
+* [Harness engineering: leveraging Codex in an agent-first world](https://openai.com/index/harness-engineering/)
 
 ## Terminology & Definitions
 
