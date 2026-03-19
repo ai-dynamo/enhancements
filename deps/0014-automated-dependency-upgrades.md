@@ -477,6 +477,10 @@ Once release tracking is proven stable, add a separate workflow that builds agai
 
 This workflow would run on a separate schedule, report pass/fail to Slack, and would NOT create PRs since `main` is a moving target.
 
+### Switch Validation to Nightly Pipeline
+
+Once the nightly CI pipeline is stable and reliable, switch the validation step from dispatching `post-merge-ci.yml` to dispatching `nightly-ci.yml` instead. The nightly pipeline runs a broader test suite (including tests not in post-merge) and would provide higher confidence in upgrade PRs.
+
 # Background
 
 ## Current Version Pinning Locations
