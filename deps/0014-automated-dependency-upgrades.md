@@ -6,11 +6,11 @@
 
 **Category**: Process - CI/CD
 
-**Sponsor**: TBD
+**Sponsor**: Meenakshi Sharma
 
-**Required Reviewers**: TBD
+**Required Reviewers**: Neelay, Dillon
 
-**Review Date**: TBD
+**Review Date**: March 31, 2026
 
 **Pull Request**: TBD
 
