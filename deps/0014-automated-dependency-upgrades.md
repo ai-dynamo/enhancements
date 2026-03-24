@@ -247,8 +247,7 @@ name: Auto Dependency Upgrade Trigger
 
 on:
   schedule:
-    # Wed: all frameworks
-    - cron: '0 10 * * 3'
+    - cron: '0 10 * * *'
   workflow_dispatch:
     inputs:
       framework:
@@ -422,7 +421,7 @@ Staggered from nightly CI (08:00 UTC) and from each other to avoid BuildKit work
 
 | Day | Frameworks | Schedule |
 |-----|-----------|----------|
-| Wednesday | All (vLLM, SGLang, TRTLLM, NIXL) | 10:00 UTC |
+| Everyday | All (vLLM, SGLang, TRTLLM, NIXL) | 10:00 UTC |
 
 Single mid-week schedule. All frameworks run in parallel via matrix strategy with `fail-fast: false`. The workflow also supports `workflow_dispatch` for manual triggers when someone wants to upgrade a specific framework outside of the regular cadence.
 
