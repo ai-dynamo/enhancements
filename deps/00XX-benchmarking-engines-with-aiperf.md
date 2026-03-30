@@ -1,6 +1,26 @@
+**Status**: Draft
+
+**Authors**: [@FrankD412](https://github.com/FrankD412)
+
+**Category**: Benchmarking
+
+**Replaces**: N/A
+
+**Replaced By**: N/A
+
+**Sponsor**: [@ganeshku1](https://github.com/ganeshku1)
+
+**Required Reviewers**: [@debermudez](https://github.com/debermudez), [@ajcasagrande](https://github.com/ajcasagrande)
+
+**Review Date**: TBD
+
+**Pull Request**: N/A
+
+**Implementation PR / Tracking Issue**: N/A
+
 # Summary
 
-Add support for benchmarking inference engines directly via IPC, bypassing HTTP. AIPerf connects to a user-managed pseudo-server over ZMQ and sends pre-tokenized requests using a versioned, aiperf-native wire protocol. The control plane, credit loop, record processing, and analytic plane are untouched. Pre-tokenization runs in the `DatasetManager` during the configure phase and is stored as two parallel mmap files alongside `dataset.dat`; workers look up token IDs at request time with no hot-path tokenization overhead.
+Add support for benchmarking inference engines directly via IPC, bypassing HTTP. AIPerf connects to a framework-managed pseudo-server over ZMQ and sends pre-tokenized requests using a versioned, aiperf-native wire protocol. The control plane, credit loop, record processing, and analytic plane are untouched. Pre-tokenization runs in the `DatasetManager` during the configure phase and is stored as two parallel mmap files alongside `dataset.dat`; workers look up token IDs at request time with no hot-path tokenization overhead.
 
 # Value Proposition
 
@@ -27,7 +47,7 @@ Direct engine benchmarking addresses limitations inherent to HTTP-based benchmar
 # Non-Goals
 
 - AIPerf will not launch, manage, or monitor pseudo-server processes.
-- AIPerf will not ship pseudo-server implementations for any specific engine.
+- AIPerf will not ship pseudo-server implementations for any specific engine (possibly provide a reference implementation).
 - No integration tests against real engines in the aiperf test suite.
 - Multi-turn conversation support is out of scope; only single-turn datasets are supported in this iteration. `DatasetManager` validates this constraint at configure time and raises an error if multi-turn conversations are present when `endpoint == direct_engine`.
 - Token decoding (token IDs → natural language text) for response inspection is out of scope. `parse_response` populates `ParsedResponse` with output token count only; text reconstruction is deferred to a future iteration.
@@ -398,3 +418,17 @@ A lightweight in-process pseudo-server stub (ZMQ ROUTER, background task) that s
 ## Scope boundary
 
 No integration tests against real engine frameworks. Testing against a real pseudo-server is the pseudo-server author's responsibility. This is consistent with goal 1 — aiperf takes no engine dependency, even in tests.
+
+# Outstanding Questions/Thoughts
+
+1. Does pre-tokenized input break `aiperf`'s existing dataflow sufficiently that with might need to enable a different sub-command to enable this? Right now the proposal proposes adding a new mapping file (which for large datasets could be large) and requires a tokenizer to be called on every input (though I think that is already happening today).
+
+2. How much overhead would the psuedo-server add? Some prototyping is required to test and get some numbers and test if the harness adds non-trivial amounts of delay. We need a few things on this front:
+
+- What is a good baseline of delay we're willing to tolerate since introducing more into the chain does guarantee there will be some delay. I think that ~1-2% is reasonable, but if we start getting much higher than that we're probably outside of noise.
+- We can own the reference copy, but the way that I envision this going is that each framework will have its own psuedo-server implementation. We can assist with maintenance, but this would require buy-in.
+- A reference implementation is currently a work in progress.
+
+3. How would we handle multi-turn in this scenario? We're pre-tokenizing prompts and if we go with multi-turn, then we would need to decode, add a chat template, encode again. This cost would scale with the length/number of turns.
+
+4. Right now the specifications above are immature, mostly just trying to get the flow down. In theory, in responses we could add a timing log that would quantify the lifecycle of the request. This would allow us to know what parts of the psuedo-server are adding latency.
