@@ -117,7 +117,7 @@ Each variant represents an error category that is meaningful to both end users a
 
 ### Subcategories
 
-Top-level variants like `Unknown`, `CannotConnect`, `Disconnected`, and `ConnectionTimeout` represent common error categories that stand on their own. For domains with multiple related error types, a nested enum groups them under a shared prefix. For example, `Backend(BackendError)` groups all backend engine errors, displayed as `Backend.EngineShutdown`.
+Top-level variants like `Unknown`, `CannotConnect`, `Disconnected`, and `ConnectionTimeout` represent common error categories that stand on their own. For domains with multiple related error types, a nested enum groups them under a shared prefix. For example, `Backend(BackendError)` groups all backend engine errors, displayed as `BackendEngineShutdown`.
 
 Nested enums preserve `Copy`, `Eq`, and `Serialize`/`Deserialize` since all inner variants are unit types. New subcategories are added by defining a new inner enum and adding a variant to `ErrorType`.
 
@@ -153,12 +153,12 @@ Fields are private. Public access is via:
 
 ```
 Disconnected: Stream ended before generation completed
-Backend.EngineShutdown: engine shutting down
+BackendEngineShutdown: engine shutting down
 ```
 
 This means the outermost error type is immediately visible in logs and user-facing responses.
 - A `Disconnected` error tells the reader "a connection was lost" at a glance
-- A `Backend.EngineShutdown` error tells the reader "a backend engine process exited"
+- A `BackendEngineShutdown` error tells the reader "a backend engine process exited"
 
 All without needing to parse the message text. The full cause chain is available for debugging by walking `source()`.
 
