@@ -513,7 +513,415 @@ code.**
 
 # Alternate Solutions
 
-## Alt 1: Static Index File Instead of GitHub Issues
+## Alt 1: GitHub Issues as DEPs (Main Repo)
+
+This is the most substantive alternate — a fundamentally different
+approach that eliminates the separate enhancements repository and makes
+a GitHub Issue on `ai-dynamo/dynamo` the DEP artifact itself.
+
+### The Core Idea
+
+The GitHub Issue IS the DEP. It lives on `ai-dynamo/dynamo` (the main
+code repo), not a separate enhancements repo. The issue number is the
+DEP number. Everything — spec, plan, approval, implementation
+tracking — lives in one place.
+
+This approach preserves the goals, area-based ownership, PIC model,
+triage cadence, and agent-friendly principles from the primary
+proposal. It changes the artifact and workflow, not the governance.
+
+### How It Works
+
+1. **Propose** — Author opens a GitHub Issue on `ai-dynamo/dynamo`
+   using a structured issue template. The template enforces the DEP
+   structure (Summary, Motivation, Proposal, Alternate Solutions —
+   same sections as the markdown template). The issue body IS the spec.
+
+2. **Discuss** — Reviewers discuss in issue comments. Threaded,
+   timestamped, immutable audit trail.
+
+3. **Plan** — Once the spec is solid, the author (or an AI agent) adds
+   an Implementation Plan as a designated comment with the heading
+   `## Implementation Plan`. This separates spec-level requirements
+   from implementation details. The plan can be revised independently
+   without muddying the spec.
+
+4. **Approve** — Area PIC reviews and posts `/approve` as a comment.
+   Required reviewers each do the same. A pinned comment tracks the
+   approval checklist:
+
+   ```
+   ## Approval Status
+   - [x] @pic-name (PIC) — approved 2026-03-28
+   - [x] @reviewer1 — approved 2026-03-29
+   - [ ] @reviewer2 — pending
+   ```
+
+   When all required approvals are in, PIC changes label from
+   `dep:under-review` → `dep:approved`.
+
+5. **Implement** — PRs reference the issue (`Closes #N`, `Part of #N`).
+   The issue timeline shows the full lifecycle: spec → discussion →
+   plan → approval → implementation PRs → completion.
+
+6. **Track** — Labels for area (`area/frontend`, `area/router`) and
+   status (`dep:draft`, `dep:under-review`, `dep:approved`, etc.).
+   GitHub Projects board gives kanban view. Milestones group by release.
+
+### Issue Templates
+
+Two issue templates — full and lightweight — mirror the existing
+limited and complete DEP templates:
+
+**Full DEP template** (`dep.yml`):
+
+```yaml
+name: Dynamo Enhancement Proposal (DEP)
+description: Propose a new feature, architecture change, or process improvement
+title: "DEP: "
+labels: ["dep:draft"]
+body:
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Feature
+        - Architecture
+        - Process
+        - Guidelines
+    validations:
+      required: true
+  - type: input
+    id: sponsor
+    attributes:
+      label: Sponsor
+      description: GitHub handle of the maintainer or code owner sponsoring this DEP
+      placeholder: "@username"
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One-paragraph summary of the proposal
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: Why is this change needed? What problem does it solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Detailed description of the proposed change
+    validations:
+      required: true
+  - type: textarea
+    id: alternates
+    attributes:
+      label: Alternate Solutions
+      description: What other approaches were considered and why were they not chosen?
+    validations:
+      required: true
+  - type: textarea
+    id: requirements
+    attributes:
+      label: Requirements
+      description: Specific requirements (use MUST/SHOULD per RFC-2119)
+    validations:
+      required: false
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation Details
+      description: Technical details, API surfaces, migration plans
+    validations:
+      required: false
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Links to related documents, prior art, external resources
+    validations:
+      required: false
+  - type: textarea
+    id: related
+    attributes:
+      label: Related Proposals
+      description: Links to related DEPs by issue number
+    validations:
+      required: false
+```
+
+**Lightweight DEP template** (`dep-light.yml`):
+
+```yaml
+name: Lightweight DEP
+description: Quick proposal for smaller changes that don't need a full DEP
+title: "DEP (light): "
+labels: ["dep:draft", "dep:lightweight"]
+body:
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Feature
+        - Architecture
+        - Process
+        - Guidelines
+    validations:
+      required: true
+  - type: input
+    id: sponsor
+    attributes:
+      label: Sponsor
+      placeholder: "@username"
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+    validations:
+      required: true
+```
+
+The PIC can escalate a lightweight DEP to full if the scope warrants
+it — the author edits the issue body to add the missing sections and
+the PIC removes the `dep:lightweight` label.
+
+### DEP Lifecycle
+
+Issue state (open/closed) combines with labels to express the full
+DEP lifecycle:
+
+| State | Issue Open? | Label | Meaning |
+|-------|-------------|-------|---------|
+| Draft | Open | `dep:draft` | Author is still writing |
+| Under Review | Open | `dep:under-review` | Awaiting PIC/reviewer approval |
+| Approved | Open | `dep:approved` | Spec accepted, implementation can proceed |
+| Implementing | Open | `dep:implementing` | PRs in flight |
+| **Done** | **Closed** | `dep:done` | All implementation PRs merged |
+| **Deferred** | **Closed** | `dep:deferred` | Parked — may revisit later |
+| **Rejected** | **Closed** | `dep:rejected` | Not proceeding |
+| **Replaced** | **Closed** | `dep:replaced` | Superseded by another DEP |
+
+Key: **Approved ≠ closed.** The issue stays open through
+implementation so it serves as the tracking hub. It only closes when
+the work is done or the DEP reaches another terminal state.
+
+### Approval Mechanism
+
+The approval mechanism is designed to be auditable, easy for reviewers,
+and compatible with the PIC model:
+
+- **PIC assigns reviewers** by listing them in the pinned approval
+  checklist when the label moves to `dep:under-review`
+- **Reviewers approve** by posting a `/approve` comment on the issue
+- **PIC updates the checklist** (or automation does) as approvals come
+  in
+- **When all required approvals are collected**, PIC changes label to
+  `dep:approved`
+
+**Why this is auditable**: GitHub issue comments are immutable (edit
+history visible), timestamped, and attributable. `/approve` comments
+can be searched across the repo (`/approve in:comments label:dep:*`).
+The pinned checklist gives at-a-glance status. This is more traceable
+than PR approvals, which can be dismissed and re-requested with
+muddled history.
+
+### Merge Gating for Implementation PRs
+
+To prevent implementation PRs from merging before their DEP is
+approved:
+
+- PR template on `ai-dynamo/dynamo` includes: `DEP: #___ (if
+  applicable)`
+- A lightweight GitHub Action (~30 lines) checks: if PR body contains
+  `DEP: #N`, verify issue #N has the `dep:approved` label. Fails the
+  status check if not.
+- Branch protection requires this check to pass.
+- PRs without a DEP reference are not gated — business as usual for
+  bug fixes and small changes.
+
+This is opt-in enforcement: only PRs that claim to implement a DEP
+get gated.
+
+### Revision Traceability
+
+GitHub preserves edit history for issue bodies and comments (visible
+via the "edited" link), but the UX is less prominent than git diffs.
+This is a real tradeoff. The mitigation is a convention:
+
+**For spec revisions (issue body edits):**
+
+Before making a substantive edit to the issue body, the author posts
+a comment:
+
+```
+## Spec Revision — <date>
+
+**What changed**: <brief description>
+**Why**: <motivation — reviewer feedback, new constraint, scope change>
+
+Updating the issue body now.
+```
+
+The body is always the current truth; the comment trail is the
+changelog. Minor edits (typos, formatting) don't need a revision
+comment.
+
+**For plan revisions:**
+
+Post a new comment rather than editing the original:
+
+```
+## Implementation Plan — Revised <date>
+
+**Changes from previous plan**: <what changed and why>
+
+### Phase 1: ...
+(full revised plan)
+```
+
+Every version of the plan is preserved as a distinct comment in the
+timeline. Agents and humans can trace the plan's evolution by
+searching for `## Implementation Plan` comments.
+
+**For approval after revision:**
+
+If a substantive spec revision occurs after reviewers have approved,
+the PIC **SHOULD** re-request approval by resetting the pinned
+checklist and notifying affected reviewers.
+
+**Trade-off acknowledgment:**
+
+This convention-based approach is less rigorous than git diffs — it
+relies on authors following the convention. The mitigation is that PIC
+triage and the approval workflow provide checkpoints where drift would
+be caught. For DEPs where full diff-level traceability is critical,
+the author can maintain a companion markdown file in a PR for
+line-level review, with the issue remaining the tracking hub.
+
+### Portability and Migration Risk
+
+**Repo rename** (e.g., `ai-dynamo/dynamo` → `ai-dynamo/dynamo-v2`):
+GitHub automatically redirects the old URL. All issues, PRs, labels,
+and projects stay intact. Issue numbers are preserved. Old links
+redirect.
+
+**Repo transfer** (e.g., move to a different org): GitHub preserves
+all issues, PRs, labels, milestones, and projects. Old URLs redirect.
+Cross-repo references update automatically.
+
+**Repo deletion**: Issues are lost — but so is git history. Repo
+deletion is catastrophic regardless of where DEPs live.
+
+**Backup**: The `gh` CLI can export all DEP issues as JSON:
+`gh issue list --state all --label "dep:*" --json number,title,body,comments,labels`.
+Periodic backups are trivial via GitHub Actions. If issues ever need
+to move, `gh issue create` can rehydrate them — easier than migrating
+markdown files because the structure is uniform and machine-readable.
+
+### Workflow Comparison
+
+| Aspect | Primary Proposal (markdown + PR) | Alt 1 (Issues on main repo) |
+|--------|--------------------------------|----------------------------|
+| Propose | Fork enhancements repo, copy template, open PR | Open issue on main repo, fill in form |
+| Discuss | PR review comments (line-level) | Issue comments (threaded, immutable) |
+| Iterate on spec | Push commits to PR branch | Edit issue body + revision comment |
+| Add plan | Section in the markdown file | Designated comment (separate from spec) |
+| Approve | Sponsor merges PR | PIC + reviewers `/approve`; label change |
+| Number | Manually assigned by sponsor | Automatic (GitHub issue number) |
+| Track | Issues on enhancements repo + `deps/` dir | Labels, Projects board on main repo |
+| Link to impl | Cross-repo references | Same-repo native linking (`Closes #N`) |
+| Agent access | Read/write markdown files via git | `gh` CLI create/comment/label/search |
+| Audit trail | Git history + PR comments | Issue comment timeline |
+| Review quality | Line-level on markdown diffs | Coarser — quote-reply in comments |
+| Lightweight DEPs | Limited template (fewer sections) | Separate lightweight issue template |
+| Merge gating | Manual (link in frontmatter) | Automated (GitHub Action checks label) |
+
+### Pros
+
+* **Single pane of glass** — spec, plan, discussion, approvals,
+  implementation PRs all on one issue
+
+* **Same-repo linking** — PRs reference issues natively, no cross-repo
+  links
+
+* **Lower barrier** — web form easier than fork/branch/commit/PR
+
+* **Better audit trail** — immutable, linear, timestamped comment
+  timeline
+
+* **Agent-native** — `gh issue create/comment/edit` without touching
+  git
+
+* **Discoverable** — contributors on the main repo naturally encounter
+  DEPs
+
+* **Automated merge gating** — GitHub Action enforces DEP approval
+  before impl PR merges
+
+* **Lightweight path built in** — separate template for smaller
+  decisions
+
+### Cons
+
+* **No line-level review** — coarser-grained feedback via quote-reply.
+  Mitigation: companion PR for critical specs.
+
+* **Edit history less visible** — no git-style diffs. Mitigation:
+  revision comment convention.
+
+* **Template enforcement weaker** — blank issues can bypass templates.
+  Mitigation: disable blank issues; PIC triage catches outliers.
+
+* **Issue noise on main repo** — mixed with bugs/features. Mitigation:
+  `dep:*` labels + dedicated Projects board.
+
+* **Migration effort** — backfill 13+ existing DEPs. One-time,
+  scriptable.
+
+### Reason Not Yet Adopted
+
+Presented as a serious alternate for evaluation. The key question: does
+collapsing spec + tracking into one artifact and eliminating the
+separate repo outweigh the loss of line-level review and git-native
+diffs?
+
+If the team prefers this approach, the primary proposal's governance
+(PICs, areas, triage, agent skills) applies unchanged — only the
+artifact and hosting change.
+
+### Migration Path
+
+1. **Phase 0**: Add issue templates to `ai-dynamo/dynamo`. Both
+   workflows coexist — authors choose either.
+2. **Phase 1**: New DEPs default to issues. Complex approved specs can
+   optionally attach a markdown file for line-level review.
+3. **Phase 2**: Backfill existing DEPs as issues via `gh` script.
+   Archive `enhancements` repo as read-only reference.
+
+## Alt 2: Static Index File Instead of GitHub Issues
 
 **Pros:**
 
@@ -533,7 +941,7 @@ code.**
   less maintenance burden. A lightweight index in README can complement
   Issues without replacing them.
 
-## Alt 2: Strict Gate — No Merge Without Approved DEP
+## Alt 3: Strict Gate — No Merge Without Approved DEP
 
 **Pros:**
 
@@ -554,7 +962,7 @@ code.**
   creating them. A strict gate would create friction without
   proportional benefit.
 
-## Alt 3: Keep Current Process, Just Enforce It
+## Alt 4: Keep Current Process, Just Enforce It
 
 **Pros:**
 
