@@ -1,4 +1,4 @@
-# Frontend Health Endpoint: Disaggregated Serving Readiness
+# Disaggregated Topology Readiness
 
 **Status**: Draft
 
@@ -22,13 +22,13 @@
 
 # Summary
 
-The frontend's `/health` endpoint (`localhost:8000/health`) always returns HTTP 200 with `"status": "healthy"` as long as any worker instance exists in service discovery. It has no awareness of disaggregated serving topology. This causes decode-only workers to receive aggregated requests and crash when their required counterparts (prefill, encode) are not yet available.
+The frontend has no awareness of disaggregated serving topology. `GET /v1/models` lists any model with at least one worker, regardless of whether its topology is complete. The `check_ready()` function gating request handlers is a no-op. This causes decode-only workers to receive aggregated requests and crash when their required counterparts (prefill, encode) are not yet available.
 
-This DEP proposes that workers declare their role and dependencies at registration time (derived from existing CLI flags), enabling the frontend to perform per-model topology completeness checks. The frontend's `/health` endpoint and request handlers are updated to report readiness and reject requests when a model's topology is incomplete.
+This DEP proposes that workers declare their role and dependencies at registration time (derived from existing CLI flags), enabling the frontend to perform per-model, per-namespace topology completeness checks. Readiness is surfaced through three mechanisms: `/v1/models` filtering, per-model request gating (HTTP 503), and a new `GET /v1/models/{model}/readiness` detail endpoint. The `/health` endpoint is **not in scope** — it reflects frontend process readiness, not model-level serving readiness.
 
 # Motivation
 
-In a disaggregated deployment, decode workers can start and register before prefill workers. Because the frontend cannot distinguish decode-only workers from aggregated workers (both register as `ModelType.Chat | Completions`), it reports "healthy" and begins routing requests as soon as any worker is discovered. Decode-only workers (TRT-LLM, SGLang) then crash with:
+In a disaggregated deployment, decode workers can start and register before prefill workers. Because the frontend cannot distinguish decode-only workers from aggregated workers (both register as `ModelType.Chat | Completions`), it lists the model in `/v1/models` and begins routing requests as soon as any worker is discovered. Decode-only workers (TRT-LLM, SGLang) then crash with:
 
 ```
 ValueError: Disaggregated params are required for decode mode
@@ -43,54 +43,54 @@ The problem is compounded by two additional gaps:
 
 ## Goals
 
-- The frontend `/health` endpoint **MUST** report per-model readiness based on whether the model's worker topology is complete.
-- The frontend **MUST** reject requests (HTTP 503) to models whose worker topology is incomplete.
+- `GET /v1/models` **MUST** only list models whose topology is complete (at least one namespace has all required roles present).
+- The frontend **MUST** reject requests (HTTP 503) to models whose worker topology is incomplete in all namespaces.
+- A new `GET /v1/models/{model}/readiness` endpoint **MUST** provide per-namespace topology detail for debugging and monitoring.
+- The `/health` endpoint **MUST NOT** be modified — it reflects frontend process readiness only.
 - The solution **MUST** support current pipeline topologies: aggregated, P/D (prefill/decode), and E/P/D (encode/prefill/decode).
-- The solution **SHOULD** be extensible to future pipeline topologies without changes to the health check logic.
-- The solution **SHOULD** provide actionable information in the health response (what roles are present, what is missing).
+- The solution **SHOULD** be extensible to future pipeline topologies without changes to the readiness logic.
+- Readiness checks **MUST** be namespace-scoped to align with the WorkerSet architecture, which only pairs prefill and decode workers within the same namespace.
 
 ### Non Goals
 
 - Expected replica counts (e.g., "we expected 4 decode workers and only 2 are up"). This requires the orchestration layer (K8s operator / DGD spec) to pass expected counts, which is out of scope.
 - Changes to the K8s operator or DynamoGraphDeployment spec.
 - Changes to the per-worker system status server (`DYN_SYSTEM_PORT`). That endpoint serves a different purpose (individual worker health).
+- Changes to the `/health` endpoint. It reflects frontend process readiness and should not carry model-level topology information.
 
 ## Requirements
 
-### REQ 1 Per-Model Readiness
+### REQ 1 `/v1/models` Filtering
 
-The `/health` endpoint **MUST** report readiness per model. A model is ready only when all worker roles required by its topology are present with at least one worker each.
+`GET /v1/models` **MUST** only list models that have at least one namespace with a complete topology. A model is ready only when all worker roles required by its topology are present with at least one worker each, within the same namespace.
 
 ### REQ 2 Request Gating
 
-The frontend **MUST** return HTTP 503 for inference requests to models whose topology is incomplete, rather than routing to workers that will fail.
+The frontend **MUST** return HTTP 503 for inference requests to models whose topology is incomplete in all namespaces, rather than routing to workers that will fail.
 
-### REQ 3 Topology Extensibility
+### REQ 3 Readiness Detail Endpoint
 
-The readiness mechanism **SHOULD** support new pipeline topologies (e.g., E/P/D) without requiring changes to the core health check logic.
+A new `GET /v1/models/{model}/readiness` endpoint **MUST** provide per-namespace topology detail for debugging and monitoring.
 
-### REQ 4 Backward Compatibility
+### REQ 4 Topology Extensibility
 
-The `/health` response **SHOULD** retain the existing `endpoints` and `instances` fields for backward compatibility while adding new per-model readiness information.
+The readiness mechanism **SHOULD** support new pipeline topologies (e.g., E/P/D) without requiring changes to the core readiness logic.
 
-### REQ 5 No New Worker Flags
+### REQ 5 Namespace-Scoped Readiness
+
+Readiness checks **MUST** be scoped to namespaces to align with the WorkerSet architecture, which only pairs prefill and decode workers within the same namespace via `oneshot`-based prefill router activation.
+
+### REQ 6 No New Worker Flags
 
 Workers **SHOULD** derive their role and dependencies from existing configuration flags (`--disaggregation-mode`, `--route-to-encoder`, `--multimodal-encode-worker`, etc.) without requiring new CLI arguments.
+
+### REQ 7 `/health` Unchanged
+
+The `/health` endpoint **MUST NOT** be modified. It reflects frontend process readiness only.
 
 # Proposal
 
 ## Background: Current Architecture
-
-### Two `/health` endpoints
-
-
-| Endpoint                 | Port                           | What it checks                                                                                                  |
-| ------------------------ | ------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| **System status server** | `DYN_SYSTEM_PORT` (e.g., 8081) | Per-worker endpoint readiness (e.g., "is my `generate` endpoint up?"). Per-worker, not topology-aware.          |
-| **Frontend HTTP server** | `DYN_HTTP_PORT` (e.g., 8000)   | Lists all discovered instances from service discovery. Always returns 200 "healthy" if frontend is initialized. |
-
-
-Neither checks whether discovered workers form a complete serving topology.
 
 ### `check_ready()` is a no-op
 
@@ -105,6 +105,16 @@ fn check_ready(_state: &Arc<service_v2::State>) -> Result<(), ErrorResponse> {
 }
 ```
 
+### `/v1/models` has no topology awareness
+
+`GET /v1/models` lists any model that passes `Model::is_displayable()`, which only checks that at least one WorkerSet has a serving engine and a non-zero worker count. It does not check whether the model's disaggregated topology is complete.
+
+### WorkerSet architecture and namespace scoping
+
+The `ModelManager` organizes workers hierarchically: `ModelManager → Model → WorkerSet(s)`. Each WorkerSet represents a group of workers deployed from the same configuration, identified by their shared namespace. In disaggregated deployments, prefill and decode workers in the same namespace form separate WorkerSets (keyed as `"ns"` and `"ns:prefill"` via `worker_set_key()`).
+
+Critically, the prefill router coordination uses a `oneshot` channel keyed by `"model_name:namespace"` — only prefill and decode workers **within the same namespace** can be paired. A decode WorkerSet in `ns-old` cannot route to a prefill WorkerSet in `ns-new`. This means readiness must be checked per-namespace, not per-model.
+
 ### Design constraints
 
 These were confirmed through codebase investigation and simplify the design:
@@ -112,8 +122,9 @@ These were confirmed through codebase investigation and simplify the design:
 1. **One model = one topology.** Mixed agg+disagg for the same model is not supported. The planner (`AggPlanner` vs `DisaggPlanner`), router, and checksum validation all assume a single mode per model.
 2. **All workers of the same role for a model share the same configuration.** Checksum validation rejects mismatches.
 3. **Workers know their own dependencies at startup** from existing CLI flags (`--disaggregation-mode`, `--route-to-encoder`, etc.).
-4. **Encode workers are optional at deployment time, but required at runtime if configured.** A model with prefill worker configured with `--route-to-encoder` will not be considered healthy if no encode worker is present.
+4. **Encode workers are optional at deployment time, but required at runtime if configured.** A model with prefill worker configured with `--route-to-encoder` will not be considered ready if no encode worker is present.
 5. **The frontend has no upfront knowledge** of how many workers or what types to expect.
+6. **Readiness is namespace-scoped.** The WorkerSet architecture only pairs prefill and decode within the same namespace (via `oneshot`-based prefill router activation). Readiness must reflect actual routability, not just role presence across the model.
 
 ## Overview: Worker-Declared Dependencies
 
@@ -146,48 +157,108 @@ Workers derive `{role, needs}` from existing CLI flags at startup — no new fla
 
 ### Readiness check
 
+Readiness is checked **per-namespace**, not per-model, because the WorkerSet architecture only pairs prefill and decode workers within the same namespace. A model-wide check would report "ready" when a decode exists in `ns-old` and a prefill exists in `ns-new`, even though they cannot actually route to each other.
+
 For each model, the frontend:
 
-1. Collects the union of all `needs` across registered workers, plus the roles themselves → **required set**.
-2. Collects the set of roles with at least one registered worker → **present set**.
-3. **Ready** = required set is a subset of the present set.
+1. Groups WorkerSets by base namespace (strip the `:prefill` suffix used in `worker_set_key`).
+2. For each namespace:
+   a. Collects the union of all `needs` across registered workers, plus the roles themselves → **required set**.
+   b. Collects the set of roles with at least one registered worker → **present set**.
+   c. **Namespace complete** = required set is a subset of the present set.
+3. **Model ready** = at least one namespace is complete.
+4. `AGGREGATED` workers (`needs: []`) are always self-sufficient — their namespace is trivially complete.
 
-### Example: P/D startup
+### Example: P/D startup (same namespace)
 
-1. Decode worker registers: `{role: DECODE, needs: [PREFILL]}`
-   - Required: `{PREFILL, DECODE}`, Present: `{DECODE}` → **not ready** (missing PREFILL)
-2. Prefill worker registers: `{role: PREFILL, needs: [DECODE]}`
-   - Required: `{PREFILL, DECODE}`, Present: `{DECODE, PREFILL}` → **ready**
+1. Decode worker registers in `ns-abc`: `{role: DECODE, needs: [PREFILL]}`
+   - `ns-abc` required: `{PREFILL, DECODE}`, present: `{DECODE}` → **not ready** (missing PREFILL)
+2. Prefill worker registers in `ns-abc`: `{role: PREFILL, needs: [DECODE]}`
+   - `ns-abc` required: `{PREFILL, DECODE}`, present: `{DECODE, PREFILL}` → **ready**
+
+### Example: P/D cross-namespace (not routable)
+
+1. Decode worker registers in `ns-old`: `{role: DECODE, needs: [PREFILL]}`
+2. Prefill worker registers in `ns-new`: `{role: PREFILL, needs: [DECODE]}`
+   - `ns-old` required: `{PREFILL, DECODE}`, present: `{DECODE}` → **not ready**
+   - `ns-new` required: `{PREFILL, DECODE}`, present: `{PREFILL}` → **not ready**
+   - Model not ready — no namespace is complete, even though both roles exist across the model.
 
 ### Example: E/P/D startup
 
-1. Decode registers: `{role: DECODE, needs: [PREFILL]}` → not ready
-2. Prefill registers: `{role: PREFILL, needs: [DECODE, ENCODE]}` → not ready (missing ENCODE)
-3. Encode registers: `{role: ENCODE, needs: [PREFILL, DECODE]}` → **ready**
+1. Decode registers in `ns-abc`: `{role: DECODE, needs: [PREFILL]}` → not ready
+2. Prefill registers in `ns-abc`: `{role: PREFILL, needs: [DECODE, ENCODE]}` → not ready (missing ENCODE)
+3. Encode registers in `ns-abc`: `{role: ENCODE, needs: [PREFILL, DECODE]}` → **ready**
 
 ### Example: Aggregated
 
-1. Agg worker registers: `{role: AGGREGATED, needs: []}`
-   - Required: `{AGGREGATED}`, Present: `{AGGREGATED}` → **ready**
+1. Agg worker registers in `ns-abc`: `{role: AGGREGATED, needs: []}`
+   - `ns-abc` required: `{AGGREGATED}`, present: `{AGGREGATED}` → **ready** (trivially complete)
 
-### Top-level status
+### Mechanism 1: `/v1/models` filtering
 
-
-| Condition                   | Status      | HTTP Code |
-| --------------------------- | ----------- | --------- |
-| All models ready            | `ready`     | 200       |
-| Some models ready, some not | `degraded`  | 200       |
-| No models ready / no models | `not_ready` | 503       |
-
-
-### Health response format
+`Model::is_displayable()` is extended with a topology check. A model only appears in `GET /v1/models` when at least one namespace has a complete topology. Clients polling `/v1/models` to discover available models will not see a model until it is actually routable.
 
 ```json
+GET /v1/models
 {
-  "status": "not_ready",
-  "models": {
-    "llama-3.1-70b": {
-      "status": "not_ready",
+  "object": "list",
+  "data": [
+    {
+      "id": "llama-3.1-70b",
+      "object": "model",
+      "created": 1711929600,
+      "owned_by": "nvidia"
+    }
+  ]
+}
+```
+
+A model with only decode workers (missing prefill) will not appear in this list.
+
+### Mechanism 2: Per-model request gating
+
+The existing `check_ready()` function in `lib/llm/src/http/service/openai.rs` (currently a no-op) is wired to perform per-model, per-namespace topology checks. When a request arrives for a model whose topology is incomplete (no namespace has all required roles), the frontend returns HTTP 503 immediately:
+
+```json
+HTTP 503
+{
+  "error": {
+    "message": "Model 'llama-3.1-70b' is not ready: missing roles in all namespaces",
+    "type": "service_unavailable"
+  }
+}
+```
+
+This gates all request handlers: chat completions, completions, embeddings, images, and responses.
+
+```rust
+fn check_model_ready(state: &State, model: &str) -> Result<(), ErrorResponse> {
+    if let Some(model_obj) = state.manager().get_model(model) {
+        if !model_obj.has_complete_namespace() {
+            let summary = model_obj.readiness_summary();
+            return Err(service_unavailable_with_reason(
+                format!("Model '{}' is not ready: {}", model, summary)
+            ));
+        }
+    }
+    Ok(())
+}
+```
+
+### Mechanism 3: Readiness detail endpoint `GET /v1/models/{model}/readiness`
+
+A new endpoint exposes per-namespace topology detail for debugging and monitoring. This is where the full dependency graph is visible, without overloading `/health` or `/v1/models`.
+
+```json
+GET /v1/models/llama-3.1-70b/readiness
+{
+  "model": "llama-3.1-70b",
+  "ready": false,
+  "reason": "no namespace has complete topology",
+  "namespaces": {
+    "ns-abc12345": {
+      "ready": false,
       "reason": "missing roles: prefill",
       "roles": {
         "decode": {"workers": 2, "needs": ["prefill"]},
@@ -195,32 +266,21 @@ For each model, the frontend:
       },
       "required": ["decode", "prefill"],
       "present": ["decode"]
+    },
+    "ns-def67890": {
+      "ready": true,
+      "roles": {
+        "decode": {"workers": 2, "needs": ["prefill"]},
+        "prefill": {"workers": 1, "needs": ["decode"]}
+      },
+      "required": ["decode", "prefill"],
+      "present": ["decode", "prefill"]
     }
-  },
-  "endpoints": ["dyn://dynamo.backend.generate", "..."],
-  "instances": [{"component": "backend", "...": "..."}]
+  }
 }
 ```
 
-The `endpoints` and `instances` fields are retained for backward compatibility.
-
-### Per-model request gating
-
-Update `check_ready()` in `openai.rs` to check per-model topology completeness. Requests to a model with incomplete topology return HTTP 503 immediately instead of being routed to workers that will fail:
-
-```rust
-fn check_model_ready(state: &State, model: &str) -> Result<(), ErrorResponse> {
-    if let Some(model_obj) = state.manager().get_model(model) {
-        if !model_obj.is_topology_complete() {
-            let missing = model_obj.missing_roles();
-            return Err(service_unavailable_with_reason(
-                format!("Model '{}' is not ready: missing roles: {}", model, missing.join(", "))
-            ));
-        }
-    }
-    Ok(())
-}
-```
+For models that don't exist, returns HTTP 404. For aggregated models (`needs: []`), returns a trivially-ready response.
 
 # Implementation Details
 
@@ -306,19 +366,19 @@ pub struct ModelDeploymentCard {
 | `lib/llm/src/model_card.rs`                | Add `role: Option<String>` and `needs: Vec<String>` to `ModelDeploymentCard`                         |
 | `lib/llm/src/model_type.rs`                | Evaluate adding `Decode`/`Encode` variants or tracking via card fields (see note above on u8 limit)  |
 | `lib/llm/src/discovery/watcher.rs`         | Extract `role`/`needs` from card, call `model.register_role()` on add/remove                         |
-| `lib/llm/src/discovery/model.rs`           | Add `RoleInfo` struct, `roles: DashMap`, `register_role()`, `is_topology_complete()`, `missing_roles()` |
-| `lib/llm/src/discovery/model_manager.rs`   | Add `ModelReadiness` struct, `readiness_summary()` using per-model graph completeness                |
+| `lib/llm/src/discovery/model.rs`           | Add `RoleInfo` struct, `roles: DashMap`, `register_role()`, `is_namespace_complete()`, `has_complete_namespace()`, `first_complete_namespace()`, `missing_roles(namespace)`. Extend `is_displayable()` to require topology completeness. |
+| `lib/llm/src/discovery/model_manager.rs`   | Add `NamespaceReadiness`, `ModelReadiness` structs, `readiness_summary()` using per-namespace graph completeness |
 | `lib/bindings/python/src/dynamo/_core.pyi` | Update `register_model()` signature to accept `role` and `needs`                                     |
 
 
-## Frontend health & request gating changes
+## Frontend request gating & readiness changes
 
 
 | File                                       | Change                                                                  |
 | ------------------------------------------ | ----------------------------------------------------------------------- |
-| `lib/llm/src/http/service/health.rs`       | Rewrite `health_handler` to use per-model readiness from `ModelManager` |
-| `lib/llm/src/http/service/openai.rs`       | Implement `check_model_ready()` for per-model request gating            |
-| `lib/llm/src/http/service/openapi_docs.rs` | Update `/health` endpoint description                                   |
+| `lib/llm/src/http/service/openai.rs`       | Wire `check_ready()` to per-model topology check via `check_model_ready()`; extend `list_models_openai` to filter by `has_complete_namespace()`; add `GET /v1/models/{model}/readiness` handler |
+| `lib/llm/src/http/service/service_v2.rs`   | Register the new `/v1/models/{model}/readiness` route                   |
+| `lib/llm/src/http/service/openapi_docs.rs` | Add docs for `/v1/models/{model}/readiness` endpoint                    |
 
 
 ## Deferred to Implementation
@@ -327,6 +387,9 @@ pub struct ModelDeploymentCard {
 - Whether to expand `ModelType` to `u16` for `Decode`/`Encode` variants or keep role/needs as separate `ModelDeploymentCard` fields.
 - `role`/`needs` are NOT part of the model checksum (deployment topology, not model identity).
 - Exact placement of `check_model_ready()` in the request handler chain (before or after model name extraction).
+- Namespace visibility in readiness endpoint — exposing internal namespace IDs (e.g., `ns-abc12345`) may be noisy for operators. Consider whether to show them, use aliases, or only surface them at a verbose detail level.
+- `/v1/models` backward compatibility — clients that expect a model to appear as soon as any worker registers will now see it delayed until topology is complete. This is the desired behavior but may surprise existing deployments.
+- `--decode-fallback` interaction — a decode worker with fallback enabled could be considered self-sufficient (no prefill needed). Whether this affects readiness semantics needs discussion.
 
 # Alternate Solutions
 
@@ -347,7 +410,7 @@ Add a `--serving-mode` CLI option to the frontend (`agg` / `disagg` / `auto`) th
 
 **Reason Rejected:**
 
-- Does not meet REQ 3 (topology extensibility) or REQ 1 (per-model readiness for mixed deployments). Worker-declared dependencies solve both without a global flag.
+- Does not meet REQ 4 (topology extensibility) or REQ 1 (`/v1/models` filtering for mixed deployments). Worker-declared dependencies solve both without a global flag.
 
 ## Alt 2: Static Dependency Table in Frontend
 
@@ -389,12 +452,13 @@ Add a `Decode` variant to `ModelType` bitflags so decode-only workers are distin
 ## References
 
 - [Slack thread: Disagg prefill fallback causes confusing errors (Feb 25, 2025)](https://nvidia.slack.com/archives/C06850J381Y/p1740513081785499)
-- Frontend health handler: `lib/llm/src/http/service/health.rs`
-- System status server health handler: `lib/runtime/src/system_status_server.rs`
 - `check_ready()` no-op: `lib/llm/src/http/service/openai.rs:1743`
+- `/v1/models` handler: `lib/llm/src/http/service/openai.rs` (`list_models_openai`)
 - Model manager: `lib/llm/src/discovery/model_manager.rs`
 - Model: `lib/llm/src/discovery/model.rs`
-- Worker set: `lib/llm/src/discovery/worker_set.rs`
+- WorkerSet: `lib/llm/src/discovery/worker_set.rs`
+- WorkerSet architecture PR: [#6054](https://github.com/ai-dynamo/dynamo/pull/6054) — hierarchical Model/WorkerSet for multi-namespace support
+- Prefill router coordination (oneshot namespace pairing): `lib/llm/src/discovery/model_manager.rs:583-689`
 
 ## Terminology & Definitions
 
@@ -405,7 +469,9 @@ Add a `Decode` variant to `ModelType` bitflags so decode-only workers are distin
 | **Disaggregated serving (P/D)** | Prefill and decode are handled by separate, specialized workers.                                                                             |
 | **E/P/D**                       | Encode/Prefill/Decode — a three-stage disaggregated pipeline for multimodal models where vision encoding is offloaded to a dedicated worker. |
 | **Topology**                    | The set of worker roles required to serve a model end-to-end (e.g., {prefill, decode} for P/D).                                              |
-| **ModelManager**                | Rust component in the frontend that tracks registered models and their workers.                                                              |
+| **ModelManager**                | Rust component in the frontend that tracks registered models and their workers. Hierarchy: ModelManager → Model → WorkerSet(s).              |
+| **WorkerSet**                   | A group of workers deployed from the same configuration, identified by a shared namespace. Each WorkerSet owns its own pipeline (engines, KV router, worker monitor). |
+| **Namespace**                   | An identifier shared by workers of the same configuration. Prefill and decode workers are only paired within the same namespace.              |
 | **ModelDeploymentCard**         | Metadata about a model instance registered by a worker, including model name, capabilities, and configuration.                               |
 
 
