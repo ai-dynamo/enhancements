@@ -98,17 +98,16 @@ automation.
 
 ### REQ 1 Issue as Spec
 
-The GitHub Issue body **MUST** serve as the DEP spec. It **MUST** use
-the same section structure as the existing DEP templates (Summary,
-Motivation, Proposal, Alternate Solutions at minimum). Two issue
-templates **MUST** be provided: full and lightweight.
+The GitHub Issue **MUST** be the DEP. The issue body contains the spec
+summary, or for detailed proposals the author attaches a `dep.md` file
+to the issue. Two issue templates **MUST** be provided: full and
+lightweight.
 
-### REQ 2 Plan as Comment
+### REQ 2 Plan as Attachment
 
-Implementation plans **MUST** be posted as issue comments with the
-heading `## Implementation Plan`. Plans **MUST NOT** be embedded in
-the issue body — they are a separate artifact that can evolve
-independently.
+Implementation plans **MUST** be separate from the spec. The author
+attaches a `plan.md` file to an issue comment. Plans **MUST NOT** be
+embedded in the issue body.
 
 ### REQ 3 Label-Based Lifecycle
 
@@ -121,15 +120,15 @@ for terminal states.
 ### REQ 4 PIC Assignment via Area Labels
 
 Each DEP **MUST** have an area label (`area/frontend`, `area/router`,
-etc.). The area label **MUST** determine the responsible PIC. PIC
-assignment **SHOULD** be automated via GitHub Action when an area label
-is added.
+etc.). The area label determines the responsible PIC. PIC assignment
+**SHOULD** be automated via GitHub Action when an area label is added.
 
-### REQ 5 Auditable Approval
+### REQ 5 Approval
 
-Approvals **MUST** be posted as `/approve` comments. A pinned approval
-checklist **MUST** track required reviewer status. The PIC **MUST**
-change the status label only when all required approvals are collected.
+The PIC posts `/approve` to approve a DEP and changes the status label.
+For DEPs with multiple required reviewers, a pinned approval checklist
+**SHOULD** track reviewer status. For straightforward DEPs, the PIC's
+`/approve` is sufficient.
 
 ### REQ 6 Merge Gating
 
@@ -139,9 +138,26 @@ PRs without a DEP reference **MUST NOT** be gated.
 
 ### REQ 7 Revision Traceability
 
-Substantive spec revisions **MUST** be preceded by a revision comment
-documenting what changed and why. Plan revisions **MUST** be posted as
-new comments, not edits to the original.
+Substantive spec revisions **SHOULD** be preceded by a revision comment
+documenting what changed and why. Plan revisions **SHOULD** be posted as
+new `plan.md` attachments rather than edits to the original.
+
+## Minimal Viable DEP
+
+The simplest path through the process — what a lightweight DEP looks
+like when you strip away all optional ceremony:
+
+```
+1. Open issue using lightweight template (3 fields: summary, motivation, proposal)
+2. PIC assigned via area label
+3. Discussion in comments
+4. PIC posts /approve, changes label to dep:approved
+5. PR references issue (DEP: #N), merges
+6. Issue closed
+```
+
+No checklist, no pinned comment, no plan.md, no revision tracking.
+Just: propose, discuss, approve, implement, close.
 
 # Proposal
 
@@ -154,7 +170,7 @@ The complete lifecycle of a DEP, from idea to implementation:
 │                     PROPOSE                                 │
 │                                                             │
 │  Author opens issue using DEP template on ai-dynamo/dynamo  │
-│  → Issue body = spec (Summary, Motivation, Proposal, ...)   │
+│  → Issue body = spec (or attach dep.md for full proposals)  │
 │  → Labels: dep:draft, area/<area>                           │
 │  → Auto-assigned: area PIC                                  │
 │                                                             │
@@ -166,31 +182,17 @@ The complete lifecycle of a DEP, from idea to implementation:
 │                                                             │
 │  Reviewers, PIC, and community discuss in issue comments    │
 │  Author edits issue body to incorporate feedback            │
-│  Substantive edits preceded by "## Spec Revision" comment   │
+│  Substantive edits optionally preceded by revision comment   │
 │                                                             │
 └──────────────────────┬──────────────────────────────────────┘
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                      PLAN                                   │
+│                   PLAN (if needed)                           │
 │                                                             │
-│  Author or agent posts "## Implementation Plan" comment     │
+│  Author attaches plan.md to an issue comment                │
 │  → Phases, tasks, effort, dependencies, risks               │
 │  → Separate from spec — can evolve independently            │
-│  Revisions posted as new comments (not edits)               │
-│                                                             │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    REVIEW                                   │
-│                                                             │
-│  PIC changes label: dep:draft → dep:under-review            │
-│  PIC posts pinned approval checklist:                       │
-│    ## Approval Status                                       │
-│    - [ ] @pic — pending                                     │
-│    - [ ] @reviewer1 — pending                               │
-│    - [ ] @reviewer2 — pending                               │
 │                                                             │
 └──────────────────────┬──────────────────────────────────────┘
                        │
@@ -198,13 +200,11 @@ The complete lifecycle of a DEP, from idea to implementation:
 ┌─────────────────────────────────────────────────────────────┐
 │                    APPROVE                                  │
 │                                                             │
-│  Each reviewer posts "/approve" comment                     │
-│  PIC updates checklist as approvals arrive                  │
-│  When all required approvals collected:                     │
-│    PIC changes label: dep:under-review → dep:approved       │
+│  PIC changes label: dep:draft → dep:under-review            │
+│  PIC reviews → PIC posts "/approve" → label: dep:approved   │
 │                                                             │
-│  If spec revised after approval:                            │
-│    PIC resets checklist, re-requests approval                │
+│  (For multi-reviewer DEPs: PIC posts pinned checklist,      │
+│   each reviewer posts "/approve", PIC updates checklist)    │
 │                                                             │
 └──────────────────────┬──────────────────────────────────────┘
                        │
@@ -237,7 +237,35 @@ The complete lifecycle of a DEP, from idea to implementation:
 
 ## Issue Anatomy
 
-A mature DEP issue looks like this:
+### Lightweight DEP
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ DEP (light): Add retry backoff to frontend        #567   │
+│ Labels: dep:approved  area/frontend  dep:lightweight     │
+│ Assignees: @frontend-pic                                 │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│ ISSUE BODY                                               │
+│ ──────────                                               │
+│ ## Summary                                               │
+│ Add exponential backoff to frontend retry logic...       │
+│ ## Motivation                                            │
+│ Retries currently hammer backends during outages...      │
+│ ## Proposal                                              │
+│ Use exponential backoff with jitter, max 30s...          │
+│                                                          │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│ @frontend-pic — Mar 21                                   │
+│ /approve                                                 │
+│                                                          │
+│ 🔗 PR #568 — Add retry backoff (merged)                 │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Full DEP
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -246,56 +274,30 @@ A mature DEP issue looks like this:
 │ Assignees: @router-pic                                   │
 ├──────────────────────────────────────────────────────────┤
 │                                                          │
-│ ISSUE BODY (the spec — always current truth)             │
-│ ─────────────────────────────────────────────            │
-│ ## Category                                              │
-│ Architecture                                             │
-│                                                          │
-│ ## Sponsor                                               │
-│ @router-pic                                              │
-│                                                          │
+│ ISSUE BODY                                               │
+│ ──────────                                               │
 │ ## Summary                                               │
 │ Redesign the KV-aware router to support...               │
-│                                                          │
 │ ## Motivation                                            │
 │ Current router doesn't account for...                    │
 │                                                          │
-│ ## Proposal                                              │
-│ ...detailed design...                                    │
-│                                                          │
-│ ## Alternate Solutions                                   │
-│ ...what was considered and rejected...                   │
-│                                                          │
-│ ## Requirements                                          │
-│ REQ 1: ...                                               │
+│ (Full spec in attached dep.md)                           │
+│ 📎 dep.md                                               │
 │                                                          │
 ├──────────────────────────────────────────────────────────┤
 │                                                          │
 │ COMMENT TIMELINE                                         │
 │ ─────────────────                                        │
 │                                                          │
+│ @author — Mar 17                                         │
+│ Implementation plan attached.                            │
+│ 📎 plan.md                                              │
+│                                                          │
 │ 📌 @router-pic — Mar 15                                 │
 │ ## Approval Status                                       │
 │ - [x] @router-pic (PIC) — approved Mar 18               │
 │ - [x] @reviewer1 — approved Mar 19                      │
 │ - [x] @reviewer2 — approved Mar 20                      │
-│                                                          │
-│ @reviewer1 — Mar 16                                      │
-│ Have you considered using consistent hashing for...      │
-│                                                          │
-│ @author — Mar 16                                         │
-│ ## Spec Revision — 2026-03-16                            │
-│ **What changed**: Added consistent hashing approach      │
-│ **Why**: @reviewer1 feedback — better load distribution  │
-│                                                          │
-│ @author — Mar 17                                         │
-│ ## Implementation Plan                                   │
-│ ### Phase 1: Core scheduler rewrite                      │
-│ **Effort**: L                                            │
-│ **Tasks**:                                               │
-│ - [x] Refactor scheduler interface                       │
-│ - [ ] Implement consistent hashing                       │
-│ ...                                                      │
 │                                                          │
 │ @router-pic — Mar 18                                     │
 │ /approve                                                 │
@@ -362,25 +364,6 @@ description: Propose a new feature, architecture change, or process improvement
 title: "DEP: "
 labels: ["dep:draft"]
 body:
-  - type: dropdown
-    id: category
-    attributes:
-      label: Category
-      options:
-        - Feature
-        - Architecture
-        - Process
-        - Guidelines
-    validations:
-      required: true
-  - type: input
-    id: sponsor
-    attributes:
-      label: Sponsor
-      description: GitHub handle of the maintainer or code owner sponsoring this DEP
-      placeholder: "@username"
-    validations:
-      required: true
   - type: textarea
     id: summary
     attributes:
@@ -408,7 +391,7 @@ body:
       label: Alternate Solutions
       description: What other approaches were considered and why were they not chosen?
     validations:
-      required: true
+      required: false
   - type: textarea
     id: requirements
     attributes:
@@ -417,24 +400,10 @@ body:
     validations:
       required: false
   - type: textarea
-    id: implementation
-    attributes:
-      label: Implementation Details
-      description: Technical details, API surfaces, migration plans
-    validations:
-      required: false
-  - type: textarea
     id: references
     attributes:
       label: References
       description: Links to related documents, prior art, external resources
-    validations:
-      required: false
-  - type: textarea
-    id: related
-    attributes:
-      label: Related Proposals
-      description: Links to related DEPs by issue number
     validations:
       required: false
 ```
@@ -449,24 +418,6 @@ description: Quick proposal for smaller changes
 title: "DEP (light): "
 labels: ["dep:draft", "dep:lightweight"]
 body:
-  - type: dropdown
-    id: category
-    attributes:
-      label: Category
-      options:
-        - Feature
-        - Architecture
-        - Process
-        - Guidelines
-    validations:
-      required: true
-  - type: input
-    id: sponsor
-    attributes:
-      label: Sponsor
-      placeholder: "@username"
-    validations:
-      required: true
   - type: textarea
     id: summary
     attributes:
@@ -549,43 +500,41 @@ the work is done or reaches another terminal state.
 
 ## Approval Mechanism
 
+### Default: PIC Approval
+
+Most DEPs need only one approval — the PIC's.
+
+```
+PIC reviews spec
+      │
+      ▼
+PIC posts "/approve" comment
+      │
+      ▼
+PIC changes label: dep:under-review → dep:approved
+```
+
+### Multi-Reviewer (when needed)
+
+For cross-cutting or high-impact DEPs, the PIC can request additional
+reviewers using a pinned checklist:
+
 ```
 PIC posts pinned approval checklist
           │
           ▼
-Required reviewers review the spec
-          │
-          ├─ Reviewer posts "/approve" comment
-          │         │
-          │         ▼
-          │  PIC checks box in pinned checklist
-          │
-          ├─ (repeat for each reviewer)
+Each reviewer posts "/approve"
+PIC checks boxes as approvals arrive
           │
           ▼
-All boxes checked?
-  │            │
-  No           Yes
-  │            │
-  ▼            ▼
-Wait      PIC changes label
-          dep:under-review → dep:approved
+All boxes checked → PIC changes label to dep:approved
 ```
 
-**Why `/approve` comments are auditable:**
+**Why `/approve` comments work:**
 
-- Issue comments are **immutable** — edit history is visible, deletions
-  are logged
-- Each comment is **timestamped** and **attributed** to a GitHub user
-- `/approve` comments are **searchable** across the repo:
-  `gh search issues --repo ai-dynamo/dynamo "/approve" in:comments`
-- The pinned checklist gives **at-a-glance status** without reading
-  the full timeline
-- This is more traceable than PR approvals, which can be silently
-  dismissed and re-requested
-
-**Reviewer effort**: posting `/approve` is one comment — lower friction
-than navigating to a PR, reviewing files, and clicking "Approve."
+- Comments are **timestamped**, **attributed**, and **searchable**
+- `/approve` is searchable: `gh search issues --repo ai-dynamo/dynamo "/approve" in:comments`
+- Posting `/approve` is lower friction than a PR review
 
 ## Merge Gating
 
@@ -640,28 +589,15 @@ comment.
 
 ### Plan Revisions
 
-Post a new comment rather than editing the original:
-
-```markdown
-## Implementation Plan — Revised 2026-03-20
-
-**Changes from previous plan**: Split Phase 1 into 1a (interface) and
-1b (implementation) based on @pic feedback about review scope.
-
-### Phase 1a: Scheduler interface refactor
-...
-```
-
-Every version of the plan is preserved as a distinct comment. Agents
-and humans trace the evolution by searching for `## Implementation
-Plan` comments in the timeline.
+Attach a new `plan.md` in a new comment rather than editing the
+original. Every version of the plan is preserved as a distinct
+attachment.
 
 ### Approval After Revision
 
-If a substantive spec revision occurs after reviewers have approved,
-the PIC **MUST** re-request approval by resetting the pinned checklist
-and notifying affected reviewers. This prevents stale approvals from
-persisting across material changes.
+If a substantive spec revision occurs after approval, the PIC
+**SHOULD** re-request approval from affected reviewers. For DEPs
+with a pinned checklist, the PIC resets it and notifies reviewers.
 
 ### Trade-off Acknowledgment
 
@@ -682,9 +618,10 @@ workflow native for AI agents:
 | Operation | Command |
 |-----------|---------|
 | Create DEP | `gh issue create --repo ai-dynamo/dynamo --title "DEP: ..." --body "..." --label dep:draft --label area/...` |
+| Attach dep.md | Upload `dep.md` to the issue body (drag-and-drop or GitHub API) |
 | Read spec | `gh issue view <N> --repo ai-dynamo/dynamo` |
 | Read discussion | `gh issue view <N> --repo ai-dynamo/dynamo --comments` |
-| Add plan | `gh issue comment <N> --body "## Implementation Plan ..."` |
+| Attach plan | `gh issue comment <N>` with `plan.md` attached |
 | Approve | `gh issue comment <N> --body "/approve"` |
 | Change status | `gh issue edit <N> --add-label dep:approved --remove-label dep:under-review` |
 | List DEPs | `gh issue list --repo ai-dynamo/dynamo --label dep:draft` |
@@ -693,6 +630,40 @@ workflow native for AI agents:
 Claude Code skills (`/dep-issue-create`, `/dep-issue-plan`,
 `/dep-issue-approve`, `/dep-issue-status`) encode these patterns.
 See `.claude/skills/dep-issue-*/` for details.
+
+## Collaboration
+
+Issue body editing is single-writer: only the author (and repo admins)
+can edit it, there's no concurrent editing, and no merge conflict
+resolution. This is the main tradeoff versus markdown files in a repo
+or Google Docs.
+
+**What works well on issues:**
+
+- Anyone can comment — discussion, suggestions, and plans are
+  inherently collaborative
+- PIC manages labels, assignees, and approval status
+- The comment timeline creates a natural review loop: reviewer suggests
+  in a comment, author incorporates into the issue body
+
+**What doesn't work well:**
+
+- Two people can't edit the spec simultaneously
+- No "suggest changes" mechanism like PR line comments
+- Issue body edit history exists but is buried and has no diff view
+
+**Recommended patterns by collaboration intensity:**
+
+| Intensity | Pattern |
+|-----------|---------|
+| **Low** (most DEPs) | Author writes spec in issue body, incorporates comment feedback. Works fine. |
+| **Medium** | Spec co-authored in a Google Doc or HackMD. Issue body contains the summary and links to the shared doc. |
+| **High** (complex cross-cutting specs) | Spec lives as `dep.md` in a branch where multiple contributors submit PRs. Issue body summarizes and links to the branch/file. |
+
+The issue body always contains at minimum a **summary of the proposal**
+and a **link to the full spec** when it lives elsewhere. The issue
+remains the single source of truth for status, approvals, and
+discussion — the spec can be co-authored wherever the team works best.
 
 ## Portability and Migration Risk
 
@@ -857,6 +828,6 @@ history) as acceptable given the mitigations.
 | **Area** | A functional subdivision of the Dynamo project used to organize DEPs and assign ownership |
 | **PIC** | Pilot In Charge — the designated owner of a DEP area |
 | **Spec** | The issue body — the current-truth design document |
-| **Plan** | An implementation plan posted as a designated comment on the issue |
+| **Plan** | An implementation plan attached as `plan.md` to an issue comment |
 | **Terminal State** | A DEP status indicating the proposal is no longer active: done, deferred, rejected, or replaced |
 | **Lightweight DEP** | A DEP using the reduced template for smaller changes |
