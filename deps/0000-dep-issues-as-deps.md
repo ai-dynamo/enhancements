@@ -1,833 +1,459 @@
-# GitHub Issues as DEPs
+# DEP-0000: GitHub Issues as DEP Artifacts
 
-**Status**: Draft
+| Field | Value |
+|-------|-------|
+| Status | Draft |
+| Author | nnshah1 |
+| Category | Process |
+| Created | 2024-12 |
+| Updated | 2025-04 |
 
-**Authors**: [nnshah1](https://github.com/nnshah1)
+## Summary
 
-**Category**: Process
+Use GitHub Issues on ai-dynamo/dynamo as the primary artifact for Dynamo Enhancement Proposals (DEPs). Issues replace the separate enhancements repository for most proposals, reducing context-switching and enabling agent-native workflows.
 
-**Extends**: [DEP-0000: Dynamo Enhancement Proposals](./0000-dep-process.md),
-[DEP Process Improvements](./0000-dep-process-improvements.md)
+## Motivation
 
-**Replaces**: N/A
+The current DEP process has a 67% stall rate. Analysis reveals three root causes:
 
-**Replaced By**: N/A
+1. **Context switching kills adoption** — Contributors must leave the dynamo repo, navigate the enhancements repo, understand a different file structure, and submit a PR. Each hop loses participants.
 
-**Sponsor**: [nnshah1](https://github.com/nnshah1)
+2. **Specs, plans, and implementation are artificially separated** — A DEP in the enhancements repo has no direct link to the code it governs. Implementation PRs reference DEPs by URL, but the connection is one-way and easily broken.
 
-**Required Reviewers**: TBD
+3. **Agents work better with issues** — Modern AI coding agents (Claude, Cursor, Copilot) have native GitHub Issue support. They can read, create, comment, and close issues. Markdown files in a separate repo require custom tooling.
 
-**Review Date**: TBD
-
-**Pull Request**: TBD
-
-**Implementation PR / Tracking Issue**: TBD
-
-# Summary
-
-Use GitHub Issues on `ai-dynamo/dynamo` as the primary artifact for
-Dynamo Enhancement Proposals. The issue body is the spec. Implementation
-plans, approvals, discussion, and PR tracking all live on the same
-issue. The issue number is the DEP number. This replaces the
-fork/branch/PR workflow on a separate enhancements repository while
-preserving the governance model (PICs, areas, triage cadence) from the
-DEP Process Improvements proposal.
-
-# Motivation
-
-The DEP process as defined in [DEP-0000](./0000-dep-process.md) has
-been successful in fostering thoughtful design when used. The
-[DEP Process Improvements](./0000-dep-process-improvements.md) proposal
-introduces area-based ownership with PICs, a weekly triage cadence, and
-agent-friendly tooling to address adoption gaps.
-
-Both proposals retain a markdown-file-in-a-separate-repo workflow for
-the DEP artifact itself. This proposal argues that the artifact should
-change: a GitHub Issue on the main code repository is a better home
-for design proposals than a markdown file in a separate repository.
-
-Three observations motivate this:
-
-**1. Context switching kills adoption.** Engineers work in
-`ai-dynamo/dynamo` — that's where PRs are opened, issues are filed,
-and CI runs. The enhancements repo is a separate destination that
-requires a fork, a branch, a file copy, and a PR. This friction is why
-67% of enhancement PRs remain open with minimal engagement.
-
-**2. The spec, the plan, and the implementation are artificially
-separated.** A DEP in the enhancements repo has no native link to the
-implementation PRs in the main repo. Cross-repo references
-(`ai-dynamo/enhancements#N`) work but don't create automatic backlinks.
-The decision trail is scattered across two repos.
-
-**3. Agents work better with issues than with files in a separate
-repo.** `gh issue create`, `gh issue comment`, and `gh issue edit` are
-simple, stateless operations. Cloning a second repo, copying a
-template, committing, and pushing is a multi-step workflow that's
-fragile for agents. Issues are the native API surface for GitHub
-automation.
+Moving DEPs to issues solves all three problems while preserving the governance properties (review, approval, traceability) that motivated the original process.
 
 ## Goals
 
-* **Single pane of glass** — Spec, plan, discussion, approvals, and
-  implementation PRs all visible from one issue on the main repo.
+1. **Single pane of glass** — All DEP activity happens in ai-dynamo/dynamo. No repo switching.
+2. **Lower barrier to entry** — Creating a DEP is as simple as opening an issue with a template.
+3. **Auditable decisions** — All comments, approvals, and revisions are preserved in issue history.
+4. **Agent-native** — Standard `gh` CLI commands work out of the box.
+5. **Preserve governance** — Area PICs still review and approve. Merge gating still enforced.
 
-* **Lower barrier to propose** — Filing a GitHub issue is simpler than
-  forking a repo, copying a template, and opening a PR.
+## TPM Role
 
-* **Auditable decisions** — Every approval, revision, and discussion
-  point is a timestamped, immutable comment in a linear timeline.
+The TPM function supports the DEP process in four ways:
 
-* **Agent-native workflow** — All DEP operations (create, plan, approve,
-  status) are expressible as `gh` CLI commands.
+- **Triage driver** — Release readiness and bug triage are already part of the TPM workflow. DEP triage is the same motion: aging reports, stall detection, PIC follow-up. Most of this can be agent-assisted.
+- **Implementation gap report** — REQ 5 (retroactive DEPs) needs someone flagging large PRs that merged without design docs. Reviewing merged PRs for release notes is already happening — adding a "needs DEP?" check is straightforward.
+- **Cross-cutting coordinator** — Multi-area DEPs need someone tracking cross-area review who isn't an area PIC. The TPM fills this role.
+- **DEP metrics** — Status, age, stall rate by area. Feeds into the weekly execution meeting.
 
-* **Preserve governance** — PICs, areas, triage cadence, and review
-  standards from the DEP Process Improvements proposal apply unchanged.
+## When Is a DEP Required?
+
+A DEP is required when a change:
+
+- Affects multiple components
+- Introduces or modifies a public API
+- Alters communication plane architecture
+- Affects backend integration contracts
+
+This test is derived from the Dynamo Governance proposal (pending merge). PICs use it to determine whether incoming PRs need a DEP reference.
 
 ## Non Goals
 
-* Changing what requires a DEP — the thresholds from DEP-0000 and the
-  improvements proposal remain the same.
-
-* Defining the CODEOWNERS structure — that's a separate DEP.
-
-* Building complex automation — the workflow should work with labels
-  and conventions before any GitHub Actions are added.
+1. **Not changing what requires a DEP** — The threshold for when a DEP is needed remains unchanged. This proposal changes where DEPs live, not when they're required.
+2. **Not defining CODEOWNERS** — CODEOWNERS restructure is a companion effort. This DEP documents the target state but doesn't implement it.
+3. **Not building complex automation** — Phase 0 uses manual label management. Automation comes later if needed.
 
 ## Requirements
 
-### REQ 1 Issue as Spec
+### REQ 1: Issue as Spec
 
-The GitHub Issue **MUST** be the DEP. The issue body contains the spec
-summary, or for detailed proposals the author attaches a `dep.md` file
-to the issue. Two issue templates **MUST** be provided: full and
-lightweight.
+The DEP specification lives in the issue body. The issue body is the source of truth.
 
-### REQ 2 Plan as Attachment
+- Issue title follows the format: `[DEP] <short title>`
+- Issue body uses the DEP template (lightweight or full)
+- Edits to the issue body are visible in issue history
 
-Implementation plans **MUST** be separate from the spec. The author
-attaches a `plan.md` file to an issue comment. Plans **MUST NOT** be
-embedded in the issue body.
+### REQ 2: Plan as Attachment
 
-### REQ 3 Label-Based Lifecycle
+Implementation plans attach to the DEP issue, not separate documents.
 
-DEP status **MUST** be tracked via labels (`dep:draft`,
-`dep:under-review`, `dep:approved`, `dep:implementing`, `dep:done`,
-`dep:deferred`, `dep:rejected`, `dep:replaced`). Issue open/closed
-state **MUST** align with the lifecycle: open for active states, closed
-for terminal states.
+- Plans can be in the issue body (for simple DEPs) or linked task lists
+- Complex plans can use GitHub Projects for tracking
+- All plan artifacts link back to the parent DEP issue
 
-### REQ 4 PIC Assignment via Area Labels
+### REQ 3: Label Lifecycle
 
-Each DEP **MUST** have an area label (`area/frontend`, `area/router`,
-etc.). The area label determines the responsible PIC. PIC assignment
-**SHOULD** be automated via GitHub Action when an area label is added.
+DEP state is tracked via labels:
 
-### REQ 5 Approval
+| Label | Meaning |
+|-------|---------|
+| `dep:draft` | Work in progress, not ready for review |
+| `dep:review` | Ready for PIC review |
+| `dep:approved` | Approved by area PIC(s) |
+| `dep:implementing` | Implementation in progress |
+| `dep:done` | Implementation complete and merged |
+| `dep:deferred` | Postponed to future release |
+| `dep:rejected` | Not approved, with documented rationale |
+| `dep:replaced` | Superseded by another DEP |
 
-The PIC posts `/approve` to approve a DEP and changes the status label.
-For DEPs with multiple required reviewers, a pinned approval checklist
-**SHOULD** track reviewer status. For straightforward DEPs, the PIC's
-`/approve` is sufficient.
+Only one `dep:*` label should be active at a time.
 
-### REQ 6 Merge Gating
+### REQ 4: PIC Assignment via Area Labels
 
-Implementation PRs that reference a DEP (`DEP: #N` in PR body)
-**SHOULD** be gated on the DEP issue having the `dep:approved` label.
-PRs without a DEP reference **MUST NOT** be gated.
+Area labels determine which PIC(s) must approve:
 
-### REQ 7 Revision Traceability
+- Author applies `area/<name>` label(s) to the DEP issue
+- GitHub CODEOWNERS (or manual assignment) notifies the appropriate PIC
+- Multi-area DEPs require approval from all affected area PICs
 
-Substantive spec revisions **SHOULD** be preceded by a revision comment
-documenting what changed and why. Plan revisions **SHOULD** be posted as
-new `plan.md` attachments rather than edits to the original.
+### REQ 5: Approval via /approve
 
-## Minimal Viable DEP
+PICs approve DEPs by commenting `/approve` on the issue.
 
-The simplest path through the process — what a lightweight DEP looks
-like when you strip away all optional ceremony:
+- The `/approve` comment is timestamped and attributed
+- For multi-area DEPs, each PIC comments `/approve` separately
+- Approval without comment is invalid — PICs must use the command
 
-```
-1. Open issue using lightweight template (3 fields: summary, motivation, proposal)
-2. PIC assigned via area label
-3. Discussion in comments
-4. PIC posts /approve, changes label to dep:approved
-5. PR references issue (DEP: #N), merges
-6. Issue closed
-```
+### REQ 6: Merge Gating
 
-No checklist, no pinned comment, no plan.md, no revision tracking.
-Just: propose, discuss, approve, implement, close.
+PRs implementing a DEP must reference the DEP issue.
 
-# Proposal
+- PR description includes `DEP: #<issue-number>` or `DEP: N/A`
+- GitHub Action validates the reference format
+- PRs without valid DEP reference are flagged (soft gate initially)
 
-## End-to-End Workflow
+### REQ 7: Revision Traceability
 
-The complete lifecycle of a DEP, from idea to implementation:
+DEP revisions are tracked in issue history.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     PROPOSE                                 │
-│                                                             │
-│  Author opens issue using DEP template on ai-dynamo/dynamo  │
-│  → Issue body = spec (or attach dep.md for full proposals)  │
-│  → Labels: dep:draft, area/<area>                           │
-│  → Auto-assigned: area PIC                                  │
-│                                                             │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     DISCUSS                                 │
-│                                                             │
-│  Reviewers, PIC, and community discuss in issue comments    │
-│  Author edits issue body to incorporate feedback            │
-│  Substantive edits optionally preceded by revision comment   │
-│                                                             │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   PLAN (if needed)                           │
-│                                                             │
-│  Author attaches plan.md to an issue comment                │
-│  → Phases, tasks, effort, dependencies, risks               │
-│  → Separate from spec — can evolve independently            │
-│                                                             │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    APPROVE                                  │
-│                                                             │
-│  PIC changes label: dep:draft → dep:under-review            │
-│  PIC reviews → PIC posts "/approve" → label: dep:approved   │
-│                                                             │
-│  (For multi-reviewer DEPs: PIC posts pinned checklist,      │
-│   each reviewer posts "/approve", PIC updates checklist)    │
-│                                                             │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   IMPLEMENT                                 │
-│                                                             │
-│  PIC changes label: dep:approved → dep:implementing         │
-│  Implementation PRs reference issue: "DEP: #N"             │
-│  GitHub Action verifies dep:approved before PR merge        │
-│  PRs appear in issue timeline automatically                 │
-│                                                             │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     DONE                                    │
-│                                                             │
-│  All implementation PRs merged                              │
-│  PIC changes label: dep:implementing → dep:done             │
-│  Issue closed                                               │
-│                                                             │
-│  OR at any point:                                           │
-│    → dep:deferred (closed) — parked for later               │
-│    → dep:rejected (closed) — not proceeding                 │
-│    → dep:replaced (closed) — superseded by new DEP          │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
+- Major revisions should be summarized in a comment
+- The issue body reflects the current approved state
+- Historical versions are recoverable from GitHub's edit history
 
-## Issue Anatomy
+## Area PICs and CODEOWNERS Mapping
 
-### Lightweight DEP
+### Individual PIC Areas
+
+| Area | Label | PIC | CODEOWNERS Team | Key Paths |
+|------|-------|-----|-----------------|-----------|
+| External API | area/external-api | Graham King (@grahamking) | @ai-dynamo/dynamo-rust-codeowners | lib/llm/src/http/, lib/llm/src/grpc/, lib/llm/src/protocols/ |
+| Frontend | area/frontend | Rudy Pei (@PeaBrane) | @ai-dynamo/dynamo-rust-codeowners | components/src/dynamo/frontend/, lib/llm/src/preprocessor/ |
+| Router | area/router | Rudy Pei (@PeaBrane) | @ai-dynamo/dynamo-rust-codeowners | components/src/dynamo/router/, lib/llm/src/kv_router/ |
+| Backend: vLLM | area/backend-vllm | Alec (@alec-flowers) | @ai-dynamo/python-codeowners | components/src/dynamo/vllm/, examples/backends/vllm/ |
+| Backend: TRT-LLM | area/backend-trtllm | Yuewei Na (@nv-yna) | @ai-dynamo/python-codeowners | components/src/dynamo/trtllm/, examples/backends/trtllm/ |
+| Backend: SGLang | area/backend-sglang | Ishan Dhanani (@ishandhanani) | @ai-dynamo/python-codeowners | components/src/dynamo/sglang/, examples/backends/sglang/ |
+| KV/Memory | area/kv-memory | Rudy Pei (@PeaBrane) | @ai-dynamo/dynamo-rust-codeowners | lib/memory/, lib/runtime/src/transports/ |
+| Multimodal | area/multimodal | Ryan McCormick (@rmccorm4) | @ai-dynamo/python-codeowners | examples/multimodal/, components/src/dynamo/*/multimodal* |
+| Planner | area/planner | Hongkuan Zhou (@tedzhouhk) | @ai-dynamo/python-codeowners | components/src/dynamo/planner/, components/src/dynamo/global_router/, components/src/dynamo/global_planner/, components/src/dynamo/profiler/ |
+| Core Platform | area/core-platform | Graham King (@grahamking) | @ai-dynamo/dynamo-rust-codeowners | lib/runtime/, lib/bindings/, components/src/dynamo/sdk/ |
+| Observability | area/observability | Neelay Shah (@nnshah1) | @ai-dynamo/Devops | deploy/observability/, docs/observability/ |
+| Fault Tolerance | area/fault-tolerance | Neelay Shah (@nnshah1) | @ai-dynamo/python-codeowners | docs/fault-tolerance/, tests/fault_tolerance/ |
+
+### Team-Owned Areas
+
+| Area | Label | PIC | CODEOWNERS Team | Key Paths |
+|------|-------|-----|-----------------|-----------|
+| Inference Gateway | area/gateway | Anna Tchernych (@atchernych) | @ai-dynamo/dynamo-deploy-codeowners | deploy/inference-gateway/ |
+| DevOps | area/devops | Harrison Saturley-Hall (@saturley-hall) | @ai-dynamo/devops | .github/, container/ |
+| Documentation | area/docs | (team) | @ai-dynamo/dynamo-docs-codeowners (new) | docs/, fern/, *.md |
+| Process | area/process | Neelay Shah, Dan Gil, David Zier | @ai-dynamo/dynamo-process-codeowners (new) | CODEOWNERS, CONTRIBUTING.md, .github/ISSUE_TEMPLATE/ |
+
+### Emerging Areas (Potentially Co-Maintained)
+
+| Area | Label | Current Owner | CODEOWNERS Team | Key Paths |
+|------|-------|---------------|-----------------|-----------|
+| K8s / DGDR | area/k8s | Hannah Zhang (@hhzhang16) | @ai-dynamo/dynamo-deploy-codeowners | deploy/operator/, deploy/helm/, deploy/snapshot/ |
+| XPU / Intel | area/xpu | (team) | @ai-dynamo/devops | TBD |
+
+> **Note:** The three backend PICs (vLLM, TRT-LLM, SGLang) coordinate on cross-backend design parity — shared APIs, common patterns, feature matrix alignment.
+
+> **Note:** CODEOWNERS restructure is a companion PR, separate from this DEP. The table above documents the target state.
+
+> **Note:** Two new GitHub teams need to be created: `dynamo-docs-codeowners` and `dynamo-process-codeowners`.
+
+## Cross-Cutting DEPs
+
+Cross-cutting is not a standing area with a dedicated PIC. When a DEP spans multiple areas:
+
+1. The author applies area labels for all affected areas
+2. The TPM assigns a **lead PIC** (typically from the most-affected area)
+3. The lead PIC coordinates review with **consulted PICs** from other affected areas
+4. All consulted PICs must post `/approve` or `/defer` before the lead PIC can approve
+5. Core Maintainers are available for escalation if PICs disagree
+
+## Proposal
+
+### Minimal Viable DEP Flow
+
+1. Author opens issue with `[DEP]` title prefix
+2. Author applies `dep:draft` and `area/<name>` labels
+3. Author writes spec in issue body using template
+4. When ready, author changes label to `dep:review`
+5. PIC reviews and comments `/approve` or requests changes
+6. On approval, label changes to `dep:approved`
+7. Author implements, referencing `DEP: #N` in PRs
+8. On merge of final PR, label changes to `dep:done`
+
+### End-to-End Workflow
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│ DEP (light): Add retry backoff to frontend        #567   │
-│ Labels: dep:approved  area/frontend  dep:lightweight     │
-│ Assignees: @frontend-pic                                 │
-├──────────────────────────────────────────────────────────┤
-│                                                          │
-│ ISSUE BODY                                               │
-│ ──────────                                               │
-│ ## Summary                                               │
-│ Add exponential backoff to frontend retry logic...       │
-│ ## Motivation                                            │
-│ Retries currently hammer backends during outages...      │
-│ ## Proposal                                              │
-│ Use exponential backoff with jitter, max 30s...          │
-│                                                          │
-├──────────────────────────────────────────────────────────┤
-│                                                          │
-│ @frontend-pic — Mar 21                                   │
-│ /approve                                                 │
-│                                                          │
-│ 🔗 PR #568 — Add retry backoff (merged)                 │
-│                                                          │
-└──────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           DEP LIFECYCLE                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌────────┐ │
+│  │  draft   │───▶│  review  │───▶│ approved │───▶│implement │───▶│  done  │ │
+│  └──────────┘    └──────────┘    └──────────┘    └──────────┘    └────────┘ │
+│       │               │               │                              ▲       │
+│       │               │               │                              │       │
+│       ▼               ▼               ▼                              │       │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐                        │       │
+│  │ rejected │    │ deferred │    │ replaced │────────────────────────┘       │
+│  └──────────┘    └──────────┘    └──────────┘                                │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Full DEP
+### Issue Anatomy
 
-```
-┌──────────────────────────────────────────────────────────┐
-│ DEP: KV-Aware Router Scheduling Overhaul          #1234  │
-│ Labels: dep:approved  area/router  dep:implementing      │
-│ Assignees: @router-pic                                   │
-├──────────────────────────────────────────────────────────┤
-│                                                          │
-│ ISSUE BODY                                               │
-│ ──────────                                               │
-│ ## Summary                                               │
-│ Redesign the KV-aware router to support...               │
-│ ## Motivation                                            │
-│ Current router doesn't account for...                    │
-│                                                          │
-│ (Full spec in attached dep.md)                           │
-│ 📎 dep.md                                               │
-│                                                          │
-├──────────────────────────────────────────────────────────┤
-│                                                          │
-│ COMMENT TIMELINE                                         │
-│ ─────────────────                                        │
-│                                                          │
-│ @author — Mar 17                                         │
-│ Implementation plan attached.                            │
-│ 📎 plan.md                                              │
-│                                                          │
-│ 📌 @router-pic — Mar 15                                 │
-│ ## Approval Status                                       │
-│ - [x] @router-pic (PIC) — approved Mar 18               │
-│ - [x] @reviewer1 — approved Mar 19                      │
-│ - [x] @reviewer2 — approved Mar 20                      │
-│                                                          │
-│ @router-pic — Mar 18                                     │
-│ /approve                                                 │
-│                                                          │
-│ @reviewer1 — Mar 19                                      │
-│ /approve                                                 │
-│                                                          │
-│ @reviewer2 — Mar 20                                      │
-│ /approve                                                 │
-│                                                          │
-│ 🔗 PR #1301 — Refactor scheduler interface (merged)     │
-│ 🔗 PR #1315 — Implement consistent hashing (open)       │
-│                                                          │
-└──────────────────────────────────────────────────────────┘
-```
-
-## PIC Assignment by Area
-
-Each area has a designated PIC. The mapping is maintained in the
-main repo's `PICS.md` (or `README.md`):
-
-| Area | Label | PIC(s) |
-|------|-------|--------|
-| Frontend | `area/frontend` | TBD |
-| Router | `area/router` | TBD |
-| Backends | `area/backend` | TBD |
-| KV Block Manager | `area/kvbm` | TBD |
-| Python Bindings | `area/bindings` | TBD |
-| Deployment | `area/deployment` | TBD |
-| Observability | `area/observability` | TBD |
-| CI/CD | `area/cicd` | TBD |
-| Process | `area/process` | TBD |
-| Cross-Cutting | `area/cross-cutting` | TBD |
-
-**How PIC assignment works:**
-
-```
-Author adds area label (or it's added during triage)
-          │
-          ▼
-GitHub Action triggers on label event
-          │
-          ▼
-Action looks up PIC for the area label
-(from PICS.md or a YAML config in .github/)
-          │
-          ▼
-Action assigns PIC as issue assignee
-          │
-          ▼
-PIC receives notification, begins shepherding
-```
-
-Before automation exists, the Friday triage assigns PICs manually.
-The automation is a convenience, not a prerequisite.
-
-## Issue Templates
-
-### Full DEP Template (`dep.yml`)
-
-```yaml
-name: Dynamo Enhancement Proposal (DEP)
-description: Propose a new feature, architecture change, or process improvement
-title: "DEP: "
-labels: ["dep:draft"]
-body:
-  - type: textarea
-    id: summary
-    attributes:
-      label: Summary
-      description: One-paragraph summary of the proposal
-    validations:
-      required: true
-  - type: textarea
-    id: motivation
-    attributes:
-      label: Motivation
-      description: Why is this change needed? What problem does it solve?
-    validations:
-      required: true
-  - type: textarea
-    id: proposal
-    attributes:
-      label: Proposal
-      description: Detailed description of the proposed change
-    validations:
-      required: true
-  - type: textarea
-    id: alternates
-    attributes:
-      label: Alternate Solutions
-      description: What other approaches were considered and why were they not chosen?
-    validations:
-      required: false
-  - type: textarea
-    id: requirements
-    attributes:
-      label: Requirements
-      description: Specific requirements (use MUST/SHOULD per RFC-2119)
-    validations:
-      required: false
-  - type: textarea
-    id: references
-    attributes:
-      label: References
-      description: Links to related documents, prior art, external resources
-    validations:
-      required: false
-```
-
-### Lightweight DEP Template (`dep-light.yml`)
-
-For smaller changes that don't warrant a full DEP:
-
-```yaml
-name: Lightweight DEP
-description: Quick proposal for smaller changes
-title: "DEP (light): "
-labels: ["dep:draft", "dep:lightweight"]
-body:
-  - type: textarea
-    id: summary
-    attributes:
-      label: Summary
-    validations:
-      required: true
-  - type: textarea
-    id: motivation
-    attributes:
-      label: Motivation
-    validations:
-      required: true
-  - type: textarea
-    id: proposal
-    attributes:
-      label: Proposal
-    validations:
-      required: true
-```
-
-The PIC can escalate a lightweight DEP to full — the author adds the
-missing sections to the issue body and the PIC removes the
-`dep:lightweight` label.
-
-## DEP Lifecycle
-
-```
-                    ┌──────────┐
-                    │  DRAFT   │ ← Author is writing
-                    │  (open)  │
-                    └────┬─────┘
-                         │ PIC moves to review
-                         ▼
-                  ┌──────────────┐
-                  │ UNDER REVIEW │ ← Awaiting approvals
-                  │   (open)     │
-                  └──────┬───────┘
-                         │ All /approve collected
-                         ▼
-                    ┌──────────┐
-             ┌──────│ APPROVED │ ← Spec accepted
-             │      │  (open)  │
-             │      └────┬─────┘
-             │           │ Implementation begins
-             │           ▼
-             │   ┌──────────────┐
-             │   │IMPLEMENTING  │ ← PRs in flight
-             │   │   (open)     │
-             │   └──────┬───────┘
-             │          │ All PRs merged
-             │          ▼
-             │     ┌─────────┐
-             │     │  DONE   │ ← Complete
-             │     │(closed) │
-             │     └─────────┘
-             │
-             │  (at any point)
-             ├─────────────────┐─────────────────┐
-             ▼                 ▼                  ▼
-        ┌──────────┐    ┌──────────┐       ┌──────────┐
-        │ DEFERRED │    │ REJECTED │       │ REPLACED │
-        │ (closed) │    │ (closed) │       │ (closed) │
-        └──────────┘    └──────────┘       └──────────┘
-```
-
-| State | Issue Open? | Label | Meaning |
-|-------|-------------|-------|---------|
-| Draft | Open | `dep:draft` | Author is still writing |
-| Under Review | Open | `dep:under-review` | Awaiting PIC/reviewer approval |
-| Approved | Open | `dep:approved` | Spec accepted, implementation can proceed |
-| Implementing | Open | `dep:implementing` | PRs in flight |
-| **Done** | **Closed** | `dep:done` | All implementation PRs merged |
-| **Deferred** | **Closed** | `dep:deferred` | Parked — may revisit later |
-| **Rejected** | **Closed** | `dep:rejected` | Not proceeding |
-| **Replaced** | **Closed** | `dep:replaced` | Superseded by another DEP |
-
-Key: **Approved ≠ closed.** The issue stays open through
-implementation so it serves as the tracking hub. It only closes when
-the work is done or reaches another terminal state.
-
-## Approval Mechanism
-
-### Default: PIC Approval
-
-Most DEPs need only one approval — the PIC's.
-
-```
-PIC reviews spec
-      │
-      ▼
-PIC posts "/approve" comment
-      │
-      ▼
-PIC changes label: dep:under-review → dep:approved
-```
-
-### Multi-Reviewer (when needed)
-
-For cross-cutting or high-impact DEPs, the PIC can request additional
-reviewers using a pinned checklist:
-
-```
-PIC posts pinned approval checklist
-          │
-          ▼
-Each reviewer posts "/approve"
-PIC checks boxes as approvals arrive
-          │
-          ▼
-All boxes checked → PIC changes label to dep:approved
-```
-
-**Why `/approve` comments work:**
-
-- Comments are **timestamped**, **attributed**, and **searchable**
-- `/approve` is searchable: `gh search issues --repo ai-dynamo/dynamo "/approve" in:comments`
-- Posting `/approve` is lower friction than a PR review
-
-## Merge Gating
-
-```
-Author opens implementation PR
-          │
-          ▼
-PR body includes "DEP: #1234"
-          │
-          ▼
-GitHub Action checks:
-  Does issue #1234 have dep:approved label?
-  │            │
-  No           Yes
-  │            │
-  ▼            ▼
-Status       Status
-check        check
-FAILS        PASSES
-  │            │
-  ▼            ▼
-PR blocked   PR can merge
-(branch      (normal review
-protection)   process)
-```
-
-- PRs **without** a `DEP: #N` reference are **not gated** — business
-  as usual for bug fixes and small changes
-- This is **opt-in enforcement**: only PRs that claim to implement a
-  DEP get checked
-- The GitHub Action is ~30 lines of YAML — no complex infrastructure
-
-## Revision Traceability
-
-### Spec Revisions
-
-Before making a substantive edit to the issue body, the author posts
-a comment:
+**Lightweight Template** (for small enhancements):
 
 ```markdown
-## Spec Revision — 2026-03-16
+## Summary
+One paragraph describing the enhancement.
 
-**What changed**: Added consistent hashing to the routing proposal
-**Why**: @reviewer1 feedback — better load distribution under skewed workloads
+## Motivation
+Why is this needed? What problem does it solve?
 
-Updating the issue body now.
+## Proposal
+How will it work? Include API changes, configuration, behavior.
+
+## Alternatives Considered
+What other approaches were evaluated?
 ```
 
-The **issue body is always the current truth**. The **comment trail is
-the changelog**. Minor edits (typos, formatting) don't need a revision
-comment.
+**Full Template** (for architectural changes):
 
-### Plan Revisions
+```markdown
+## Summary
+One paragraph describing the enhancement.
 
-Attach a new `plan.md` in a new comment rather than editing the
-original. Every version of the plan is preserved as a distinct
-attachment.
+## Motivation
+Why is this needed? What problem does it solve?
 
-### Approval After Revision
+## Goals
+- Goal 1
+- Goal 2
 
-If a substantive spec revision occurs after approval, the PIC
-**SHOULD** re-request approval from affected reviewers. For DEPs
-with a pinned checklist, the PIC resets it and notifies reviewers.
+## Non Goals
+- Non-goal 1
 
-### Trade-off Acknowledgment
+## Requirements
+- REQ 1: Description
+- REQ 2: Description
 
-This convention-based approach is less rigorous than git diffs — it
-relies on authors following the convention. The mitigations are:
+## Proposal
+Detailed design including:
+- Architecture changes
+- API changes
+- Configuration changes
+- Migration path
 
-- PIC triage catches drift at weekly checkpoints
-- The approval re-request convention catches post-approval changes
-- For DEPs where full diff-level traceability is critical, the author
-  can maintain a companion markdown file in a PR for line-level review,
-  with the issue remaining the tracking hub
+## Alternatives Considered
+| Alternative | Pros | Cons |
+|------------|------|------|
+| Alt 1 | ... | ... |
 
-## Agent Workflow
+## Implementation Plan
+- [ ] Phase 1: ...
+- [ ] Phase 2: ...
 
-All DEP operations are expressible as `gh` CLI commands, making the
-workflow native for AI agents:
+## Open Questions
+- Question 1?
+```
 
-| Operation | Command |
-|-----------|---------|
-| Create DEP | `gh issue create --repo ai-dynamo/dynamo --title "DEP: ..." --body "..." --label dep:draft --label area/...` |
-| Attach dep.md | Upload `dep.md` to the issue body (drag-and-drop or GitHub API) |
-| Read spec | `gh issue view <N> --repo ai-dynamo/dynamo` |
-| Read discussion | `gh issue view <N> --repo ai-dynamo/dynamo --comments` |
-| Attach plan | `gh issue comment <N>` with `plan.md` attached |
-| Approve | `gh issue comment <N> --body "/approve"` |
-| Change status | `gh issue edit <N> --add-label dep:approved --remove-label dep:under-review` |
-| List DEPs | `gh issue list --repo ai-dynamo/dynamo --label dep:draft` |
-| Search DEPs | `gh search issues --repo ai-dynamo/dynamo "label:dep:* KV router"` |
+### Agent Workflow
 
-Claude Code skills (`/dep-issue-create`, `/dep-issue-plan`,
-`/dep-issue-approve`, `/dep-issue-status`) encode these patterns.
-See `.claude/skills/dep-issue-*/` for details.
+| Task | Command |
+|------|---------|
+| Create DEP | `gh issue create --title "[DEP] Title" --body-file dep.md --label dep:draft,area/router` |
+| List DEPs | `gh issue list --label dep:draft` |
+| View DEP | `gh issue view 123` |
+| Add comment | `gh issue comment 123 --body "Comment text"` |
+| Approve DEP | `gh issue comment 123 --body "/approve"` |
+| Change status | `gh issue edit 123 --remove-label dep:draft --add-label dep:review` |
+| Close DEP | `gh issue close 123 --reason completed` |
 
-## Collaboration
+### Making DEPs Work for Agents
 
-Issue body editing is single-writer: only the author (and repo admins)
-can edit it, there's no concurrent editing, and no merge conflict
-resolution. This is the main tradeoff versus markdown files in a repo
-or Google Docs.
+1. **DEPs should generate rules files** — When a DEP is approved, distill requirements into a `.cursor/rules/` or `.claude/` rule scoped to the relevant files. An agent working on the router automatically picks up router DEP constraints. The DEP is the source of truth; the rule is the delivery mechanism.
 
-**What works well on issues:**
+2. **READMEs should index relevant DEPs** — Any README (component, module, top-level) should link to the DEPs that apply to that area. Agents read READMEs when exploring code, so it's zero-friction discovery.
 
-- Anyone can comment — discussion, suggestions, and plans are
-  inherently collaborative
-- PIC manages labels, assignees, and approval status
-- The comment timeline creates a natural review loop: reviewer suggests
-  in a comment, author incorporates into the issue body
+3. **Code should reference DEPs** — Key modules that implement a DEP should have a module-level reference, e.g., `// Design: DEP-0014 (Error Standardization)`. Agents see it in-context and can pull the full DEP. Lightweight, greppable.
 
-**What doesn't work well:**
+4. **Structured requirements block** — A machine-readable YAML block alongside prose requirements:
 
-- Two people can't edit the spec simultaneously
-- No "suggest changes" mechanism like PR line comments
-- Issue body edit history exists but is buried and has no diff view
+```yaml
+requirements:
+  - id: REQ-1
+    summary: Area-based ownership
+    level: MUST
+    areas: [all]
+    verifiable: true
+  - id: REQ-2
+    summary: PIC approval required
+    level: MUST
+    areas: [all]
+    verifiable: true
+```
 
-**Recommended patterns by collaboration intensity:**
+### Collaboration Patterns
 
-| Intensity | Pattern |
-|-----------|---------|
-| **Low** (most DEPs) | Author writes spec in issue body, incorporates comment feedback. Works fine. |
-| **Medium** | Spec co-authored in a Google Doc or HackMD. Issue body contains the summary and links to the shared doc. |
-| **High** (complex cross-cutting specs) | Spec lives as `dep.md` in a branch where multiple contributors submit PRs. Issue body summarizes and links to the branch/file. |
+**Low Intensity** (most DEPs):
+- Author writes spec
+- PIC reviews async
+- Approval via `/approve` comment
 
-The issue body always contains at minimum a **summary of the proposal**
-and a **link to the full spec** when it lives elsewhere. The issue
-remains the single source of truth for status, approvals, and
-discussion — the spec can be co-authored wherever the team works best.
+**Medium Intensity**:
+- Author writes spec
+- PIC requests changes via comments
+- Author revises, PIC re-reviews
+- Approval via `/approve` comment
+
+**High Intensity** (cross-cutting, controversial):
+- Author writes spec
+- Synchronous meeting to discuss
+- Meeting notes added as comment
+- Multiple revision cycles
+- All affected PICs must `/approve`
+
+## Implementation Phases
+
+### Phase 0: Bootstrap
+
+- Create DEP issue template in `.github/ISSUE_TEMPLATE/`
+- Create `dep:*` and `area/*` labels
+- Document process in CONTRIBUTING.md
+- This DEP (DEP-0000) is the first issue-based DEP
+
+### Phase 1: Default to Issues
+
+- New DEPs use issue template by default
+- Add `DEP: #N` / `DEP: N/A` field to `feat:` PR template (soft gate, no merge block — missing references surface in weekly gap report)
+- Add GitHub Action for DEP reference validation (soft gate initially)
+- PICs trained on `/approve` workflow
+- Weekly DEP status report in execution meeting
+
+### Phase 2: Migration and Archive
+
+- Existing in-flight DEPs complete in enhancements repo
+- Archive enhancements repo as read-only
+- Historical DEPs remain accessible via archive
+- All new DEPs use dynamo repo issues
+
+### Phase 3: Agent Integration
+
+- Generate `.cursor/rules/` files from approved DEPs
+- Add DEP index links to component READMEs
+- Add `// Design: DEP-NNNN` references to key implementation files
+- Add YAML requirements blocks to DEP templates
+- Collapse skills to 3: `/dep-create`, `/dep-status`, `/dep-triage`
+
+## Agent Skills
+
+Three consolidated skills replace the previous ten:
+
+### /dep-create
+
+Covers: dep-create, dep-retroactive, dep-issue-create
+
+Creates new DEPs or retroactive DEPs for existing implementations. Detects context (PR-based vs issue-based) and adapts.
+
+Usage:
+- `/dep-create` — Interactive DEP creation
+- `/dep-create --retroactive PR#123` — Create DEP for merged PR
+- `/dep-create --from-pr PR#456` — Extract DEP from in-flight PR
+
+### /dep-status
+
+Covers: dep-status, dep-related, dep-issue-status
+
+Queries DEP status, finds related DEPs, and generates status reports. Detects context and adapts.
+
+Usage:
+- `/dep-status` — List all active DEPs
+- `/dep-status #123` — Status of specific DEP
+- `/dep-status --area router` — DEPs affecting router area
+- `/dep-status --stalled` — DEPs with no activity >14 days
+
+### /dep-triage
+
+Covers: dep-triage, dep-review, dep-issue-approve, dep-issue-plan
+
+Triage and review workflows for PICs and TPM. Detects context and adapts.
+
+Usage:
+- `/dep-triage` — Generate triage report for all areas
+- `/dep-triage --area backend-vllm` — Triage for specific area
+- `/dep-triage --approve #123` — PIC approval workflow
+- `/dep-triage --plan #123` — Generate implementation plan
+
+## Alternate Solutions
+
+### Alternative 1: Keep Enhancements Repo
+
+**Pros:**
+- No migration needed
+- Clear separation of design vs implementation
+
+**Cons:**
+- Context switching remains
+- 67% stall rate continues
+- Agent tooling requires custom integration
+
+**Decision:** Rejected — does not address root causes.
+
+### Alternative 2: Docs Folder in Dynamo Repo
+
+**Pros:**
+- Single repo
+- Version controlled with code
+
+**Cons:**
+- PRs for spec changes conflated with code PRs
+- Review process less visible than issues
+- No native discussion threading
+
+**Decision:** Rejected — issues provide better collaboration primitives.
+
+### Alternative 3: External Tool (Notion, Confluence)
+
+**Pros:**
+- Rich editing experience
+- Better for long-form documents
+
+**Cons:**
+- Another tool to manage
+- No native GitHub integration
+- Agent support varies
+
+**Decision:** Rejected — adds complexity without solving core problems.
 
 ## Portability and Migration Risk
 
-**Repo rename** (e.g., `ai-dynamo/dynamo` → `ai-dynamo/dynamo-v2`):
-GitHub automatically redirects. All issues, PRs, labels, and projects
-stay intact. Issue numbers preserved. Old links redirect.
+**Risk:** GitHub Issues lock-in.
 
-**Repo transfer** (e.g., move to a different org): GitHub preserves
-all issues, PRs, labels, milestones, and projects. Old URLs redirect.
+**Mitigation:**
+- Issue bodies are markdown — portable
+- GitHub API allows bulk export
+- Issue history is preserved in API responses
+- If migration needed, issues export to any markdown-based system
 
-**Repo deletion**: Issues are lost — but so is git history. This is
-catastrophic regardless of where DEPs live.
+**Migration effort estimate:** Low. Issues are simpler to migrate than repository-based DEPs.
 
-**Backup**: `gh issue list --state all --label "dep:*" --json
-number,title,body,comments,labels` exports everything. Periodic
-backups are trivial via GitHub Actions. Rehydration via `gh issue
-create` is scriptable.
-
-# Implementation Phases
-
-## Phase 0: Bootstrap (no code changes)
-
-**Release Target**: Immediate
-
-**Actions:**
-
-- Create labels on `ai-dynamo/dynamo`: `dep:draft`,
-  `dep:under-review`, `dep:approved`, `dep:implementing`, `dep:done`,
-  `dep:deferred`, `dep:rejected`, `dep:replaced`, `dep:lightweight`,
-  and area labels (`area/frontend`, `area/router`, etc.)
-- Add issue templates: `dep.yml` and `dep-light.yml` to
-  `.github/ISSUE_TEMPLATE/`
-- Add `PICS.md` with area-to-PIC mapping
-- Disable blank issues (force template use)
-- Both workflows coexist — authors can use issues or the enhancements
-  repo
-
-## Phase 1: Default to Issues
-
-**Release Target**: 2 weeks after Phase 0
-
-**Actions:**
-
-- New DEPs default to issues on `ai-dynamo/dynamo`
-- Add PR template with `DEP: #___ (if applicable)` field
-- Add GitHub Action for merge gating (check `dep:approved` label)
-- Add GitHub Action for PIC auto-assignment on area label
-- Publish Claude Code skills for issue-based workflow
-- Complex approved specs can optionally attach a markdown file
-
-## Phase 2: Migration and Archive
-
-**Release Target**: 4 weeks after Phase 0
-
-**Actions:**
-
-- Backfill existing 13+ DEPs as issues via `gh` script
-- Set up GitHub Projects board for DEP kanban view
-- Archive `enhancements` repo as read-only reference
-- Set up periodic backup Action
-
-# Alternate Solutions
-
-## Alt 1: Markdown Files in Separate Repository (Current Process)
-
-**Pros:**
-
-- Line-level review via PR diffs
-- Full git history of spec evolution
-- Familiar to the team (13+ DEPs filed this way)
-
-**Cons:**
-
-- Context switching between repos
-- Cross-repo references don't create automatic backlinks
-- Higher barrier to entry (fork/branch/commit/PR)
-- 67% of enhancement PRs stall — the friction contributes
-- Fragile for agents (multi-step git workflow)
-
-**Reason Not Recommended:**
-
-- The governance is sound; the artifact and hosting are the friction
-  points. Moving to issues on the main repo preserves the governance
-  while removing the friction.
-
-## Alt 2: PR Description as DEP (Main Repo)
-
-**Pros:**
-
-- Lives on the main repo
-- PRs have native approval mechanism
-
-**Cons:**
-
-- Conflates the design decision (spec) with the code change
-- Editing PR description doesn't notify reviewers
-- PR approval is one signal for both "design approved" and "code ready"
-- A closed/merged PR disappears from view
-- Long specs in PR descriptions are hard to read
-
-**Reason Rejected:**
-
-- A PR is the wrong artifact for a design decision. It conflates
-  approval of the spec with approval of the code. Issues cleanly
-  separate the two.
-
-## Alt 3: Keep Enhancements Repo, Use Issues There
-
-**Pros:**
-
-- Separates DEPs from code issues (no noise)
-- Issues still simpler than markdown + PR
-
-**Cons:**
-
-- Still a separate repo — context switching remains
-- Cross-repo references to implementation PRs
-- Contributors must watch a second repo
-
-**Reason Rejected:**
-
-- Partial improvement. If we're moving to issues, we should also
-  eliminate the repo separation. The `dep:*` label prefix and a
-  Projects board handle the noise concern on the main repo.
-
-# Related Proposals
-
-* [DEP-0000: Dynamo Enhancement Proposals](./0000-dep-process.md) —
-  The original process definition
-* [DEP Process Improvements](./0000-dep-process-improvements.md) —
-  PIC model, area ownership, triage cadence (this proposal extends it)
-* CODEOWNERS Restructuring (future DEP) — Area-based code ownership
-
-# Background
-
-## Why Issues Over Files
-
-The insight behind this proposal is that a DEP is fundamentally a
-**decision record with a lifecycle**, not a **document**. Issues are
-GitHub's native primitive for tracking things with lifecycles — they
-have states, labels, assignees, milestones, timelines, and
-cross-references. Markdown files are GitHub's native primitive for
-documents — they have content, history, and diffs.
-
-The current process uses a document primitive for a lifecycle concern,
-then bolts on lifecycle tracking (GitHub Issues for backlog, frontmatter
-for status). This proposal uses the lifecycle primitive directly and
-accepts the document trade-offs (no line-level review, buried edit
-history) as acceptable given the mitigations.
-
-## References
-
-* [DEP-0000: Dynamo Enhancement Proposals](./0000-dep-process.md)
-* [DEP Process Improvements](./0000-dep-process-improvements.md)
-* [Kubernetes KEP Process](https://github.com/kubernetes/enhancements/blob/master/keps/sig-architecture/0000-kep-process/README.md)
-* [Rust RFC Process](https://github.com/rust-lang/rfcs/blob/master/text/0002-rfc-process.md)
-
-## Terminology & Definitions
+## Terminology
 
 | Term | Definition |
-| :--- | :--- |
-| **Area** | A functional subdivision of the Dynamo project used to organize DEPs and assign ownership |
-| **PIC** | Pilot In Charge — the designated owner of a DEP area |
-| **Spec** | The issue body — the current-truth design document |
-| **Plan** | An implementation plan attached as `plan.md` to an issue comment |
-| **Terminal State** | A DEP status indicating the proposal is no longer active: done, deferred, rejected, or replaced |
-| **Lightweight DEP** | A DEP using the reduced template for smaller changes |
+|------|------------|
+| DEP | Dynamo Enhancement Proposal |
+| PIC | Person In Charge — area owner responsible for review and approval |
+| Area | Functional domain of the codebase (e.g., router, frontend, backend) |
+| Cross-cutting | DEP affecting multiple areas |
+| Soft gate | Validation that warns but does not block merge |
+| Hard gate | Validation that blocks merge until resolved |
