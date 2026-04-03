@@ -94,6 +94,23 @@ automation.
 * Building complex automation — the workflow should work with labels
   and conventions before any GitHub Actions are added.
 
+## When Is a DEP Required?
+
+A DEP is required when a change meets any of these criteria:
+
+* **Affects multiple components** — e.g., a router change that also
+  modifies the frontend's request path
+* **Introduces or modifies a public API** — new endpoints, changed
+  request/response contracts, or deprecations
+* **Alters communication plane architecture** — transport layers,
+  discovery mechanisms, or event-plane protocols
+* **Affects backend integration contracts** — changes to the interface
+  that backends must implement
+
+These thresholds are derived from the Dynamo Governance proposal
+(pending merge). PICs apply this test when reviewing incoming PRs to
+determine whether a `DEP: #N` reference is needed.
+
 ## Requirements
 
 ### REQ 1 Issue as Spec
@@ -132,9 +149,13 @@ For DEPs with multiple required reviewers, a pinned approval checklist
 
 ### REQ 6 Merge Gating
 
-Implementation PRs that reference a DEP (`DEP: #N` in PR body)
+Implementation PRs **SHOULD** include either `DEP: #N` (referencing
+the DEP issue) or `DEP: N/A` in the PR body. PRs that reference a DEP
 **SHOULD** be gated on the DEP issue having the `dep:approved` label.
 PRs without a DEP reference **MUST NOT** be gated.
+
+Missing references surface in a weekly gap report — large `feat:` PRs
+that merged without a `DEP:` line are flagged for retroactive review.
 
 ### REQ 7 Revision Traceability
 
@@ -316,21 +337,52 @@ The complete lifecycle of a DEP, from idea to implementation:
 
 ## PIC Assignment by Area
 
-Each area has a designated PIC. The mapping is maintained in the
-main repo's `PICS.md` (or `README.md`):
+Each area has a designated PIC responsible for shepherding DEPs,
+reviewing implementations, and maintaining design quality in their
+domain. The mapping is maintained in the main repo's `PICS.md`.
 
-| Area | Label | PIC(s) |
-|------|-------|--------|
-| Frontend | `area/frontend` | TBD |
-| Router | `area/router` | TBD |
-| Backends | `area/backend` | TBD |
-| KV Block Manager | `area/kvbm` | TBD |
-| Python Bindings | `area/bindings` | TBD |
-| Deployment | `area/deployment` | TBD |
-| Observability | `area/observability` | TBD |
-| CI/CD | `area/cicd` | TBD |
-| Process | `area/process` | TBD |
-| Cross-Cutting | `area/cross-cutting` | TBD |
+### Individual PIC Areas
+
+| Area | Label | PIC | CODEOWNERS Team | Key Paths |
+|------|-------|-----|-----------------|-----------|
+| External API | `area/external-api` | Graham King (@grahamking) | @ai-dynamo/dynamo-rust-codeowners | lib/llm/src/http/, lib/llm/src/grpc/ |
+| Frontend | `area/frontend` | Rudy Pei (@PeaBrane) | @ai-dynamo/dynamo-rust-codeowners | components/src/dynamo/frontend/ |
+| Router | `area/router` | Rudy Pei (@PeaBrane) | @ai-dynamo/dynamo-rust-codeowners | components/src/dynamo/router/, lib/llm/src/kv_router/ |
+| Backend: vLLM | `area/backend-vllm` | Alec (@alec-flowers) | @ai-dynamo/python-codeowners | components/src/dynamo/vllm/ |
+| Backend: TRT-LLM | `area/backend-trtllm` | Yuewei Na (@nv-yna) | @ai-dynamo/python-codeowners | components/src/dynamo/trtllm/ |
+| Backend: SGLang | `area/backend-sglang` | Ishan Dhanani (@ishandhanani) | @ai-dynamo/python-codeowners | components/src/dynamo/sglang/ |
+| KV/Memory | `area/kv-memory` | Rudy Pei (@PeaBrane) | @ai-dynamo/dynamo-rust-codeowners | lib/memory/, lib/runtime/src/transports/ |
+| Multimodal | `area/multimodal` | Ryan McCormick (@rmccorm4) | @ai-dynamo/python-codeowners | examples/multimodal/ |
+| Planner | `area/planner` | Hongkuan Zhou (@tedzhouhk) | @ai-dynamo/python-codeowners | components/src/dynamo/planner/ |
+| Core Platform | `area/core-platform` | Graham King (@grahamking) | @ai-dynamo/dynamo-rust-codeowners | lib/runtime/, lib/bindings/ |
+| Observability | `area/observability` | Neelay Shah (@nnshah1) | @ai-dynamo/Devops | deploy/observability/ |
+| Fault Tolerance | `area/fault-tolerance` | Neelay Shah (@nnshah1) | @ai-dynamo/python-codeowners | tests/fault_tolerance/ |
+
+The three backend PICs (vLLM, TRT-LLM, SGLang) coordinate on
+cross-backend design parity — shared APIs, common patterns, and
+feature matrix alignment.
+
+### Team-Owned Areas
+
+| Area | Label | PIC | CODEOWNERS Team | Key Paths |
+|------|-------|-----|-----------------|-----------|
+| Inference Gateway | `area/gateway` | Anna Tchernych (@atchernych) | @ai-dynamo/dynamo-deploy-codeowners | deploy/inference-gateway/ |
+| DevOps | `area/devops` | Harrison Saturley-Hall (@saturley-hall) | @ai-dynamo/devops | .github/, container/ |
+| Documentation | `area/docs` | (team) | @ai-dynamo/dynamo-docs-codeowners *(new)* | docs/, fern/, *.md |
+| Process | `area/process` | Neelay Shah, Dan Gil, David Zier | @ai-dynamo/dynamo-process-codeowners *(new)* | CODEOWNERS, CONTRIBUTING.md, .github/ISSUE_TEMPLATE/ |
+
+Two new GitHub teams need to be created: `dynamo-docs-codeowners`
+and `dynamo-process-codeowners`.
+
+### Emerging Areas (Potentially Co-Maintained)
+
+| Area | Label | Current Owner | CODEOWNERS Team | Key Paths |
+|------|-------|---------------|-----------------|-----------|
+| K8s / DGDR | `area/k8s` | Hannah Zhang (@hhzhang16) | @ai-dynamo/dynamo-deploy-codeowners | deploy/operator/, deploy/helm/ |
+| XPU / Intel | `area/xpu` | (team) | @ai-dynamo/devops | TBD |
+
+CODEOWNERS restructure is a companion PR, separate from this DEP.
+The tables above document the target state.
 
 **How PIC assignment works:**
 
@@ -353,6 +405,20 @@ PIC receives notification, begins shepherding
 
 Before automation exists, the Friday triage assigns PICs manually.
 The automation is a convenience, not a prerequisite.
+
+## Cross-Cutting DEPs
+
+Cross-cutting is not a standing area with a dedicated PIC. When a
+DEP spans multiple areas:
+
+1. The author applies area labels for all affected areas
+2. The TPM assigns a **lead PIC** (typically from the most-affected
+   area) and tracks cross-area review
+3. The lead PIC coordinates review with **consulted PICs** from
+   other affected areas
+4. All consulted PICs **MUST** post `/approve` or `/defer` before
+   the lead PIC can approve
+5. Core Maintainers are available for escalation if PICs disagree
 
 ## Issue Templates
 
@@ -627,9 +693,41 @@ workflow native for AI agents:
 | List DEPs | `gh issue list --repo ai-dynamo/dynamo --label dep:draft` |
 | Search DEPs | `gh search issues --repo ai-dynamo/dynamo "label:dep:* KV router"` |
 
-Claude Code skills (`/dep-issue-create`, `/dep-issue-plan`,
-`/dep-issue-approve`, `/dep-issue-status`) encode these patterns.
-See `.claude/skills/dep-issue-*/` for details.
+Claude Code skills (`/dep-create`, `/dep-status`, `/dep-triage`)
+encode these patterns. See the Agent Skills section below for details.
+
+### Making DEPs Work for Agents
+
+Four conventions make DEPs discoverable and enforceable by AI
+coding agents without requiring the agent to search for them:
+
+1. **DEPs should generate rules files** — When a DEP is approved,
+   distill its requirements into a `.cursor/rules/` or `.claude/`
+   rule scoped to the relevant files. An agent working on the router
+   automatically picks up router DEP constraints. The DEP is the
+   source of truth; the rule is the delivery mechanism.
+
+2. **READMEs should index relevant DEPs** — Any README (component,
+   module, top-level) should link to the DEPs that apply to that
+   area. Agents read READMEs when exploring code, so this is
+   zero-friction discovery.
+
+3. **Code should reference DEPs** — Key modules that implement a
+   DEP should have a module-level reference, e.g.,
+   `// Design: DEP-0014 (Error Standardization)`. Agents see it
+   in-context and can pull the full DEP. Lightweight, greppable.
+
+4. **Structured requirements block** — A machine-readable YAML
+   block alongside prose requirements:
+
+```yaml
+requirements:
+  - id: REQ-1
+    summary: Area-based ownership
+    level: MUST
+    areas: [all]
+    verifiable: true
+```
 
 ## Collaboration
 
@@ -708,10 +806,13 @@ create` is scriptable.
 **Actions:**
 
 - New DEPs default to issues on `ai-dynamo/dynamo`
-- Add PR template with `DEP: #___ (if applicable)` field
+- Add `DEP: #N` / `DEP: N/A` field to `feat:` PR template (soft
+  gate — missing references surface in a weekly gap report)
 - Add GitHub Action for merge gating (check `dep:approved` label)
 - Add GitHub Action for PIC auto-assignment on area label
 - Publish Claude Code skills for issue-based workflow
+- Weekly DEP status (age, stall rate by area) feeds into the
+  execution meeting
 - Complex approved specs can optionally attach a markdown file
 
 ## Phase 2: Migration and Archive
@@ -724,6 +825,64 @@ create` is scriptable.
 - Set up GitHub Projects board for DEP kanban view
 - Archive `enhancements` repo as read-only reference
 - Set up periodic backup Action
+
+## Phase 3: Agent Integration
+
+**Release Target**: 6 weeks after Phase 0
+
+**Actions:**
+
+- Generate `.cursor/rules/` files from approved DEPs
+- Add DEP index links to component READMEs
+- Add `// Design: DEP-NNNN` references to key implementation files
+- Add YAML requirements blocks to DEP templates
+- Collapse agent skills to 3: `/dep-create`, `/dep-status`,
+  `/dep-triage`
+
+# Agent Skills
+
+Three consolidated skills replace the previous ten, covering the
+full DEP lifecycle from a `gh` CLI perspective:
+
+## /dep-create
+
+*Covers: dep-create, dep-retroactive, dep-issue-create*
+
+Creates new DEPs or retroactive DEPs for existing implementations.
+Detects context (PR-based vs issue-based) and adapts.
+
+```
+/dep-create                          # Interactive DEP creation
+/dep-create --retroactive PR#123     # Create DEP for merged PR
+/dep-create --from-pr PR#456         # Extract DEP from in-flight PR
+```
+
+## /dep-status
+
+*Covers: dep-status, dep-related, dep-issue-status*
+
+Queries DEP status, finds related DEPs, and generates status
+reports.
+
+```
+/dep-status                          # List all active DEPs
+/dep-status #123                     # Status of specific DEP
+/dep-status --area router            # DEPs affecting router area
+/dep-status --stalled                # No activity >14 days
+```
+
+## /dep-triage
+
+*Covers: dep-triage, dep-review, dep-issue-approve, dep-issue-plan*
+
+Triage and review workflows for PICs and TPM.
+
+```
+/dep-triage                          # Generate triage report
+/dep-triage --area backend-vllm      # Triage for specific area
+/dep-triage --approve #123           # PIC approval workflow
+/dep-triage --plan #123              # Generate implementation plan
+```
 
 # Alternate Solutions
 
