@@ -186,74 +186,22 @@ Just: propose, discuss, approve, implement, close.
 
 The complete lifecycle of a DEP, from idea to implementation:
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     PROPOSE                                 │
-│                                                             │
-│  Author opens issue using DEP template on ai-dynamo/dynamo  │
-│  → Issue body = spec (or attach dep.md for full proposals)  │
-│  → Labels: dep:draft, <area>                                │
-│  → Auto-assigned: area PIC                                  │
-│                                                             │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     DISCUSS                                 │
-│                                                             │
-│  Reviewers, PIC, and community discuss in issue comments    │
-│  Author edits issue body to incorporate feedback            │
-│  Substantive edits optionally preceded by revision comment   │
-│                                                             │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   PLAN (if needed)                           │
-│                                                             │
-│  Author attaches plan.md to an issue comment                │
-│  → Phases, tasks, effort, dependencies, risks               │
-│  → Separate from spec — can evolve independently            │
-│                                                             │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    APPROVE                                  │
-│                                                             │
-│  PIC changes label: dep:draft → dep:under-review            │
-│  PIC reviews → PIC posts "/approve" → label: dep:approved   │
-│                                                             │
-│  (For multi-reviewer DEPs: PIC posts pinned checklist,      │
-│   each reviewer posts "/approve", PIC updates checklist)    │
-│                                                             │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   IMPLEMENT                                 │
-│                                                             │
-│  PIC changes label: dep:approved → dep:implementing         │
-│  Implementation PRs reference issue: "DEP: #N"             │
-│  GitHub Action verifies dep:approved before PR merge        │
-│  PRs appear in issue timeline automatically                 │
-│                                                             │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     DONE                                    │
-│                                                             │
-│  All implementation PRs merged                              │
-│  PIC changes label: dep:implementing → dep:done             │
-│  Issue closed                                               │
-│                                                             │
-│  OR at any point:                                           │
-│    → dep:deferred (closed) — parked for later               │
-│    → dep:rejected (closed) — not proceeding                 │
-│    → dep:replaced (closed) — superseded by new DEP          │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    propose[Open issue with DEP template]
+    discuss[PIC and reviewers discuss]
+    plan[Attach plan.md if needed]
+    approve[PIC posts /approve]
+    implement[PRs reference DEP #N]
+    done[All PRs merged, issue closed]
+    deferred[Deferred]
+    rejected[Rejected]
+    replaced[Replaced]
+
+    propose --> discuss --> plan --> approve --> implement --> done
+    propose -.-> rejected
+    discuss -.-> deferred
+    approve -.-> replaced
 ```
 
 ## Issue Anatomy
@@ -360,8 +308,9 @@ PIC for that specific DEP.
 | DevOps | `devops` | @ai-dynamo/devops | .github/, container/ |
 | Documentation | `docs` | @ai-dynamo/docs | docs/, fern/, *.md |
 | Process | `process` | @ai-dynamo/process | CODEOWNERS, CONTRIBUTING.md, .github/ISSUE_TEMPLATE/ |
-| K8s / DGDR | `k8s` | @ai-dynamo/k8s | deploy/operator/, deploy/helm/ |
-| XPU / Intel | `xpu` | @ai-dynamo/xpu | TBD |
+| K8s | `k8s` | @ai-dynamo/dynamo-deploy-codeowners | deploy/helm/, deploy/snapshot/ |
+| DGDR | `dgdr` | @ai-dynamo/dgdr | deploy/operator/ |
+| XPU / Intel | `xpu` | @ai-dynamo/intel-hardware-support | TBD |
 
 The three backend teams (vLLM, TRT-LLM, SGLang) coordinate on
 cross-backend design parity — shared APIs, common patterns, and
@@ -370,27 +319,63 @@ feature matrix alignment.
 K8s / DGDR and XPU / Intel are emerging areas that may evolve
 into co-maintained areas with external contributors.
 
-No separate `PICS.md` is needed — CODEOWNERS is the source of
-truth. The area label on a DEP determines which team owns it, and
-the team assigns one member as PIC for that DEP.
+No separate `PICS.md` is needed. The area label on a DEP
+determines which team owns it, and the team assigns one member as
+PIC for that DEP.
+
+### Proposed Team Membership
+
+New teams to create (2-3 members each):
+
+| Team | Proposed Members |
+|------|-----------------|
+| @ai-dynamo/external-api | Graham King, Ryan McCormick |
+| @ai-dynamo/frontend | Graham King, milesial |
+| @ai-dynamo/router | Rudy Pei, Graham King |
+| @ai-dynamo/backend-vllm | Alec, GuanLuo |
+| @ai-dynamo/backend-trtllm | Yuewei Na, Indrajit Bhosale, Tanmay Verma |
+| @ai-dynamo/backend-sglang | Ishan Dhanani, William Arnold |
+| @ai-dynamo/kv-memory | Rudy Pei, Ziqi Fan |
+| @ai-dynamo/multimodal | Ryan McCormick, Kris Hung, KrishnanPrash, Ayush Agarwal |
+| @ai-dynamo/planner | Hongkuan Zhou, Hannah Zhang |
+| @ai-dynamo/core-platform | Graham King, Rudy Pei, Tzu-Ling Kan |
+| @ai-dynamo/observability | Neelay Shah, Keiven C |
+| @ai-dynamo/fault-tolerance | Jacky, Tzu-Ling Kan, Schwinn Saereesitthipitak |
+| @ai-dynamo/gateway | Anna Tchernych, Tushar Sharma |
+| @ai-dynamo/docs | Neal Vaidya, Kristen, Dan Gil |
+| @ai-dynamo/process | Neelay Shah, Dan Gil, David Zier |
+| @ai-dynamo/dgdr | Hannah Zhang, Julien Mancuso, Hongkuan Zhou |
+| @ai-dynamo/intel-hardware-support | TBD |
+
+Existing teams that serve as area owners (no changes needed):
+
+* `@ai-dynamo/devops` — DevOps area
+* `@ai-dynamo/dynamo-deploy-codeowners` — K8s area
+
+Membership derived from `git log` commit analysis per area path.
+Subject to manager approval before team creation.
+
+Area teams coexist with the existing language/role-based teams
+(`dynamo-rust-codeowners`, `python-codeowners`,
+`dynamo-deploy-codeowners`, `Devops`). The existing teams continue
+to handle code review; the area teams handle DEP ownership. Both
+appear in CODEOWNERS for the same paths:
+
+```
+/components/src/dynamo/router/  @ai-dynamo/dynamo-rust-codeowners  @ai-dynamo/router
+```
 
 **How PIC assignment works:**
 
-```
-Author adds area label (or it's added during triage)
-          │
-          ▼
-GitHub Action triggers on label event
-          │
-          ▼
-Action looks up team for the area label
-(from CODEOWNERS path mapping)
-          │
-          ▼
-Action assigns a team member as PIC
-          │
-          ▼
-PIC receives notification, begins shepherding
+```mermaid
+flowchart TD
+    label[Area label added]
+    action[GitHub Action fires]
+    lookup[Look up team from CODEOWNERS]
+    assign[Assign team member as PIC]
+    notify[PIC notified]
+
+    label --> action --> lookup --> assign --> notify
 ```
 
 Before automation exists, the Friday triage assigns PICs manually.
@@ -500,43 +485,21 @@ missing sections to the issue body and the PIC removes the
 
 ## DEP Lifecycle
 
-```
-                    ┌──────────┐
-                    │  DRAFT   │ ← Author is writing
-                    │  (open)  │
-                    └────┬─────┘
-                         │ PIC moves to review
-                         ▼
-                  ┌──────────────┐
-                  │ UNDER REVIEW │ ← Awaiting approvals
-                  │   (open)     │
-                  └──────┬───────┘
-                         │ All /approve collected
-                         ▼
-                    ┌──────────┐
-             ┌──────│ APPROVED │ ← Spec accepted
-             │      │  (open)  │
-             │      └────┬─────┘
-             │           │ Implementation begins
-             │           ▼
-             │   ┌──────────────┐
-             │   │IMPLEMENTING  │ ← PRs in flight
-             │   │   (open)     │
-             │   └──────┬───────┘
-             │          │ All PRs merged
-             │          ▼
-             │     ┌─────────┐
-             │     │  DONE   │ ← Complete
-             │     │(closed) │
-             │     └─────────┘
-             │
-             │  (at any point)
-             ├─────────────────┐─────────────────┐
-             ▼                 ▼                  ▼
-        ┌──────────┐    ┌──────────┐       ┌──────────┐
-        │ DEFERRED │    │ REJECTED │       │ REPLACED │
-        │ (closed) │    │ (closed) │       │ (closed) │
-        └──────────┘    └──────────┘       └──────────┘
+```mermaid
+stateDiagram-v2
+    [*] --> Draft
+    Draft --> UnderReview : PIC moves to review
+    UnderReview --> Approved : /approve collected
+    Approved --> Implementing : PRs in flight
+    Implementing --> Done : All PRs merged
+
+    Draft --> Rejected
+    UnderReview --> Deferred
+    Approved --> Replaced
+    Done --> [*]
+    Rejected --> [*]
+    Deferred --> [*]
+    Replaced --> [*]
 ```
 
 | State | Issue Open? | Label | Meaning |
@@ -560,14 +523,9 @@ the work is done or reaches another terminal state.
 
 Most DEPs need only one approval — the PIC's.
 
-```
-PIC reviews spec
-      │
-      ▼
-PIC posts "/approve" comment
-      │
-      ▼
-PIC changes label: dep:under-review → dep:approved
+```mermaid
+flowchart LR
+    review[PIC reviews spec] --> comment[Posts /approve] --> relabel[Label set to dep:approved]
 ```
 
 ### Multi-Reviewer (when needed)
@@ -575,15 +533,14 @@ PIC changes label: dep:under-review → dep:approved
 For cross-cutting or high-impact DEPs, the PIC can request additional
 reviewers using a pinned checklist:
 
-```
-PIC posts pinned approval checklist
-          │
-          ▼
-Each reviewer posts "/approve"
-PIC checks boxes as approvals arrive
-          │
-          ▼
-All boxes checked → PIC changes label to dep:approved
+```mermaid
+flowchart TD
+    checklist[PIC posts pinned checklist]
+    reviewers[Each reviewer posts /approve]
+    update[PIC checks boxes]
+    approved[All checked, label dep:approved]
+
+    checklist --> reviewers --> update --> approved
 ```
 
 **Why `/approve` comments work:**
@@ -594,27 +551,16 @@ All boxes checked → PIC changes label to dep:approved
 
 ## Merge Gating
 
-```
-Author opens implementation PR
-          │
-          ▼
-PR body includes "DEP: #1234"
-          │
-          ▼
-GitHub Action checks:
-  Does issue #1234 have dep:approved label?
-  │            │
-  No           Yes
-  │            │
-  ▼            ▼
-Status       Status
-check        check
-FAILS        PASSES
-  │            │
-  ▼            ▼
-PR blocked   PR can merge
-(branch      (normal review
-protection)   process)
+```mermaid
+flowchart TD
+    pr[PR opened with DEP: #1234]
+    check{dep:approved on issue?}
+    fail[Check fails, PR blocked]
+    pass[Check passes, PR can merge]
+
+    pr --> check
+    check -->|No| fail
+    check -->|Yes| pass
 ```
 
 - PRs **without** a `DEP: #N` reference are **not gated** — business
