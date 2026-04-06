@@ -136,8 +136,8 @@ for terminal states.
 
 ### REQ 4 PIC Assignment via Area Labels
 
-Each DEP **MUST** have an area label (`area/frontend`, `area/router`,
-etc.). The area label determines the responsible PIC. PIC assignment
+Each DEP **MUST** have an area label (`frontend`, `router`,
+etc.). The area label determines the responsible team. PIC assignment
 **SHOULD** be automated via GitHub Action when an area label is added.
 
 ### REQ 5 Approval
@@ -192,7 +192,7 @@ The complete lifecycle of a DEP, from idea to implementation:
 │                                                             │
 │  Author opens issue using DEP template on ai-dynamo/dynamo  │
 │  → Issue body = spec (or attach dep.md for full proposals)  │
-│  → Labels: dep:draft, area/<area>                           │
+│  → Labels: dep:draft, <area>                                │
 │  → Auto-assigned: area PIC                                  │
 │                                                             │
 └──────────────────────┬──────────────────────────────────────┘
@@ -263,7 +263,7 @@ The complete lifecycle of a DEP, from idea to implementation:
 ```
 ┌──────────────────────────────────────────────────────────┐
 │ DEP (light): Add retry backoff to frontend        #567   │
-│ Labels: dep:approved  area/frontend  dep:lightweight     │
+│ Labels: dep:approved  frontend  dep:lightweight           │
 │ Assignees: @frontend-pic                                 │
 ├──────────────────────────────────────────────────────────┤
 │                                                          │
@@ -291,7 +291,7 @@ The complete lifecycle of a DEP, from idea to implementation:
 ```
 ┌──────────────────────────────────────────────────────────┐
 │ DEP: KV-Aware Router Scheduling Overhaul          #1234  │
-│ Labels: dep:approved  area/router  dep:implementing      │
+│ Labels: dep:approved  router  dep:implementing            │
 │ Assignees: @router-pic                                   │
 ├──────────────────────────────────────────────────────────┤
 │                                                          │
@@ -337,52 +337,42 @@ The complete lifecycle of a DEP, from idea to implementation:
 
 ## PIC Assignment by Area
 
-Each area has a designated PIC responsible for shepherding DEPs,
-reviewing implementations, and maintaining design quality in their
-domain. The mapping is maintained in the main repo's `PICS.md`.
+Each area maps to a GitHub team. The team owns the area's code
+paths in CODEOWNERS and serves as the PIC group for DEPs in that
+area. When a DEP is filed, one member of the group is assigned as
+PIC for that specific DEP.
 
-### Individual PIC Areas
+| Area | Label | Team | Key Paths |
+|------|-------|------|-----------|
+| External API | `external-api` | @ai-dynamo/external-api | lib/llm/src/http/, lib/llm/src/grpc/ |
+| Frontend | `frontend` | @ai-dynamo/frontend | components/src/dynamo/frontend/ |
+| Router | `router` | @ai-dynamo/router | components/src/dynamo/router/, lib/llm/src/kv_router/ |
+| Backend: vLLM | `backend-vllm` | @ai-dynamo/backend-vllm | components/src/dynamo/vllm/ |
+| Backend: TRT-LLM | `backend-trtllm` | @ai-dynamo/backend-trtllm | components/src/dynamo/trtllm/ |
+| Backend: SGLang | `backend-sglang` | @ai-dynamo/backend-sglang | components/src/dynamo/sglang/ |
+| KV/Memory | `kv-memory` | @ai-dynamo/kv-memory | lib/memory/, lib/runtime/src/transports/ |
+| Multimodal | `multimodal` | @ai-dynamo/multimodal | examples/multimodal/ |
+| Planner | `planner` | @ai-dynamo/planner | components/src/dynamo/planner/ |
+| Core Platform | `core-platform` | @ai-dynamo/core-platform | lib/runtime/, lib/bindings/ |
+| Observability | `observability` | @ai-dynamo/observability | deploy/observability/ |
+| Fault Tolerance | `fault-tolerance` | @ai-dynamo/fault-tolerance | tests/fault_tolerance/ |
+| Inference Gateway | `gateway` | @ai-dynamo/gateway | deploy/inference-gateway/ |
+| DevOps | `devops` | @ai-dynamo/devops | .github/, container/ |
+| Documentation | `docs` | @ai-dynamo/docs | docs/, fern/, *.md |
+| Process | `process` | @ai-dynamo/process | CODEOWNERS, CONTRIBUTING.md, .github/ISSUE_TEMPLATE/ |
+| K8s / DGDR | `k8s` | @ai-dynamo/k8s | deploy/operator/, deploy/helm/ |
+| XPU / Intel | `xpu` | @ai-dynamo/xpu | TBD |
 
-| Area | Label | PIC | CODEOWNERS Team | Key Paths |
-|------|-------|-----|-----------------|-----------|
-| External API | `area/external-api` | Graham King (@grahamking) | @ai-dynamo/dynamo-rust-codeowners | lib/llm/src/http/, lib/llm/src/grpc/ |
-| Frontend | `area/frontend` | Rudy Pei (@PeaBrane) | @ai-dynamo/dynamo-rust-codeowners | components/src/dynamo/frontend/ |
-| Router | `area/router` | Rudy Pei (@PeaBrane) | @ai-dynamo/dynamo-rust-codeowners | components/src/dynamo/router/, lib/llm/src/kv_router/ |
-| Backend: vLLM | `area/backend-vllm` | Alec (@alec-flowers) | @ai-dynamo/python-codeowners | components/src/dynamo/vllm/ |
-| Backend: TRT-LLM | `area/backend-trtllm` | Yuewei Na (@nv-yna) | @ai-dynamo/python-codeowners | components/src/dynamo/trtllm/ |
-| Backend: SGLang | `area/backend-sglang` | Ishan Dhanani (@ishandhanani) | @ai-dynamo/python-codeowners | components/src/dynamo/sglang/ |
-| KV/Memory | `area/kv-memory` | Rudy Pei (@PeaBrane) | @ai-dynamo/dynamo-rust-codeowners | lib/memory/, lib/runtime/src/transports/ |
-| Multimodal | `area/multimodal` | Ryan McCormick (@rmccorm4) | @ai-dynamo/python-codeowners | examples/multimodal/ |
-| Planner | `area/planner` | Hongkuan Zhou (@tedzhouhk) | @ai-dynamo/python-codeowners | components/src/dynamo/planner/ |
-| Core Platform | `area/core-platform` | Graham King (@grahamking) | @ai-dynamo/dynamo-rust-codeowners | lib/runtime/, lib/bindings/ |
-| Observability | `area/observability` | Neelay Shah (@nnshah1) | @ai-dynamo/Devops | deploy/observability/ |
-| Fault Tolerance | `area/fault-tolerance` | Neelay Shah (@nnshah1) | @ai-dynamo/python-codeowners | tests/fault_tolerance/ |
-
-The three backend PICs (vLLM, TRT-LLM, SGLang) coordinate on
+The three backend teams (vLLM, TRT-LLM, SGLang) coordinate on
 cross-backend design parity — shared APIs, common patterns, and
 feature matrix alignment.
 
-### Team-Owned Areas
+K8s / DGDR and XPU / Intel are emerging areas that may evolve
+into co-maintained areas with external contributors.
 
-| Area | Label | PIC | CODEOWNERS Team | Key Paths |
-|------|-------|-----|-----------------|-----------|
-| Inference Gateway | `area/gateway` | Anna Tchernych (@atchernych) | @ai-dynamo/dynamo-deploy-codeowners | deploy/inference-gateway/ |
-| DevOps | `area/devops` | Harrison Saturley-Hall (@saturley-hall) | @ai-dynamo/devops | .github/, container/ |
-| Documentation | `area/docs` | (team) | @ai-dynamo/dynamo-docs-codeowners *(new)* | docs/, fern/, *.md |
-| Process | `area/process` | Neelay Shah, Dan Gil, David Zier | @ai-dynamo/dynamo-process-codeowners *(new)* | CODEOWNERS, CONTRIBUTING.md, .github/ISSUE_TEMPLATE/ |
-
-Two new GitHub teams need to be created: `dynamo-docs-codeowners`
-and `dynamo-process-codeowners`.
-
-### Emerging Areas (Potentially Co-Maintained)
-
-| Area | Label | Current Owner | CODEOWNERS Team | Key Paths |
-|------|-------|---------------|-----------------|-----------|
-| K8s / DGDR | `area/k8s` | Hannah Zhang (@hhzhang16) | @ai-dynamo/dynamo-deploy-codeowners | deploy/operator/, deploy/helm/ |
-| XPU / Intel | `area/xpu` | (team) | @ai-dynamo/devops | TBD |
-
-CODEOWNERS restructure is a companion PR, separate from this DEP.
-The tables above document the target state.
+No separate `PICS.md` is needed — CODEOWNERS is the source of
+truth. The area label on a DEP determines which team owns it, and
+the team assigns one member as PIC for that DEP.
 
 **How PIC assignment works:**
 
@@ -393,11 +383,11 @@ Author adds area label (or it's added during triage)
 GitHub Action triggers on label event
           │
           ▼
-Action looks up PIC for the area label
-(from PICS.md or a YAML config in .github/)
+Action looks up team for the area label
+(from CODEOWNERS path mapping)
           │
           ▼
-Action assigns PIC as issue assignee
+Action assigns a team member as PIC
           │
           ▼
 PIC receives notification, begins shepherding
@@ -408,12 +398,12 @@ The automation is a convenience, not a prerequisite.
 
 ## Cross-Cutting DEPs
 
-Cross-cutting is not a standing area with a dedicated PIC. When a
+Cross-cutting is not a standing area with a dedicated team. When a
 DEP spans multiple areas:
 
-1. The author applies area labels for all affected areas
+1. The author applies labels for all affected areas
 2. The TPM assigns a **lead PIC** (typically from the most-affected
-   area) and tracks cross-area review
+   area's team) and tracks cross-area review
 3. The lead PIC coordinates review with **consulted PICs** from
    other affected areas
 4. All consulted PICs **MUST** post `/approve` or `/defer` before
@@ -683,7 +673,7 @@ workflow native for AI agents:
 
 | Operation | Command |
 |-----------|---------|
-| Create DEP | `gh issue create --repo ai-dynamo/dynamo --title "DEP: ..." --body "..." --label dep:draft --label area/...` |
+| Create DEP | `gh issue create --repo ai-dynamo/dynamo --title "DEP: ..." --body "..." --label dep:draft --label <area>` |
 | Attach dep.md | Upload `dep.md` to the issue body (drag-and-drop or GitHub API) |
 | Read spec | `gh issue view <N> --repo ai-dynamo/dynamo` |
 | Read discussion | `gh issue view <N> --repo ai-dynamo/dynamo --comments` |
@@ -791,10 +781,11 @@ create` is scriptable.
 - Create labels on `ai-dynamo/dynamo`: `dep:draft`,
   `dep:under-review`, `dep:approved`, `dep:implementing`, `dep:done`,
   `dep:deferred`, `dep:rejected`, `dep:replaced`, `dep:lightweight`,
-  and area labels (`area/frontend`, `area/router`, etc.)
+  and area labels (`frontend`, `router`, etc.)
 - Add issue templates: `dep.yml` and `dep-light.yml` to
   `.github/ISSUE_TEMPLATE/`
-- Add `PICS.md` with area-to-PIC mapping
+- Create GitHub teams per area (see PIC Assignment table)
+- Update CODEOWNERS with area-team path mappings
 - Disable blank issues (force template use)
 - Both workflows coexist — authors can use issues or the enhancements
   repo
