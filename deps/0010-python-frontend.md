@@ -1,6 +1,6 @@
 # A Python-first frontend for Dynamo
 
-**Status**: Active
+**Status**: Accepted
 
 **Authors**: Graham King
 
@@ -11,34 +11,6 @@
 **Implements Pull Requests**:
     - https://github.com/ai-dynamo/dynamo/pull/4999
     - https://github.com/ai-dynamo/dynamo/pull/5544
-
-# Done (move from TODO)
-
-- Copy over all the possible sampling params between Dynamo and Vllm.
-- Accept all vllm flags
-- Try mistral
-- Add KV routing (see section in this document)
-- Can you run multiple requests at once? Yes.
-- Basic perf shake-out: On a local dual RTX 6000 system vllm processing (this proposal) performance is identical to Dynamo processing, because the GPU is the bottleneck.
-- Tool call parsing (tested on mistral and qwen3)
-- Reasoning parsing (tested on qwen3)
-- generation_config.json population of SamplingParams
-- Usage dict (how many tokens were used)
-
-# TODO (updated)
-
-- Handle all vllm cmd line flags, pass to ModelConfig and/or VllmConfig. Do it similar to the vllm wrapper component.
-
-- Tell vllm when the model is unloaded so it can stop (do we still need that with given that we're not using the engine?)
-
-- Handle other types of request, is Chat Completions only right now:
-    - Completions
-    - Embeddings
-    - Prompt embeddings
-
-- Verify:
-    - Does it load prompt templates from external files, or always from tokenizer_config.json?
-
 
 # Summary
 
@@ -58,11 +30,11 @@ We will provide a version that uses the engine's input and output processors. It
 
 # Proposal, as pseudo-code
 
-A Python engine for each model, on the frontend. That has full control over request handling.
+A Python engine for each model calling into vllm or sglang, on the frontend. That has full control over request handling.
 
 The engine has to be per-model, so that is uses the correct pre/post processor and so on. The frontend doesn't know which models are available until the instances register. Hence I propose a Python engine factory.
 
-Example is for vllm. We would provide one for each engine.
+Example is for vllm. We would also provide one for sglang engine.
 
 ## Setup
 
@@ -166,10 +138,6 @@ and
 ```python
     dynamo_stream: dynamo.AsyncResponseStream = await endpoint_client.round_robin(our_preproc)
 ```
-
-# Open questions
-
-1. The example handler takes `NvCreateChatCompletionRequest`. What about Completions, Requests, Embeddings, and Tensors? Do we have a separate handler for each? Should a single handler be able to cope with all of them, and we indicate in the call which type it is? Or it could take a union and figure it out.
 
 # Misc
 
