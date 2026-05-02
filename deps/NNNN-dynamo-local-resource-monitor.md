@@ -12,7 +12,7 @@
 
 **Sponsor:** keivenchang
 
-**Required Reviewers:** Jie Hao, Karen Chung
+**Required Reviewers:** Neelay Shah, Jie Hao, Karen Chung
 
 **Review Date:** TBD
 
