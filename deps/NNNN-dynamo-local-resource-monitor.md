@@ -30,7 +30,8 @@ down to 20 ms) and rendered in a dedicated Grafana dashboard.
 This is a **local/host-level** resource monitor — it watches Dynamo
 processes from the outside (via `psutil` and `pynvml`), not the
 request-lifecycle metrics emitted from inside the workers. It is
-complementary to and independent of [0004-observability-metrics.md](./0004-observability-metrics.md).
+complementary and re-uses the existing Grafana + Prometheus stack
+that hosts [0004-observability-metrics.md](./0004-observability-metrics.md).
 
 # Motivation
 
