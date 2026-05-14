@@ -49,6 +49,7 @@ Live AIPerf closes that gap by adding a safe capture path near the inference API
 - Capture privacy-safe traces that can be replayed as realistic benchmark inputs.
 - Preserve agentic workload structure: sessions, turns, tool calls, tool returns, delays, dependencies, and prefix relationships.
 - Capture speculative decoding/MTP acceptance-rate signals from real production use cases when the serving stack exposes them.
+- Correlate user-visible request metrics with "under the hood" telemetry from disaggregated serving workers, including prefill and decode workers.
 - Support K8s, Slurm, and SRT Slurm deployment paths.
 - Reuse proven telemetry capture primitives where they fit while making AIPerf the user-facing product surface.
 
@@ -148,6 +149,20 @@ Live AIPerf **SHOULD** support:
 - Slurm-based benchmark environments
 - SRT Slurm environments
 - local/debug capture against a single OpenAI-compatible endpoint
+
+### REQ 7: Worker-Level Telemetry for Disaggregated Serving
+
+Live AIPerf **SHOULD** preserve enough metadata to compare telemetry across serving roles and worker processes in disaggregated deployments.
+
+At minimum, telemetry records **SHOULD** support grouping by:
+
+- worker role, such as prefill or decode
+- worker index
+- worker process or rank
+- hostname or node
+- GPU index when applicable
+
+This enables AIPerf users to correlate request-level symptoms, such as high TTFT or low output throughput, with internal serving behavior such as prefill/decode imbalance, GPU utilization, memory pressure, queueing, KV-cache allocation waits, or backend-specific histogram metrics.
 
 # Proposal
 
@@ -254,6 +269,8 @@ The Live Metrics Sink aggregates normalized events into AIPerf metrics for the T
 ### Telemetry Collector
 
 The Telemetry Collector captures hardware, node, backend, and frontend telemetry from Prometheus-compatible endpoints. This is separate from request metrics: request metrics come from API events, while hardware/backend telemetry comes from systems such as DCGM, node-exporter, or serving-stack metrics endpoints.
+
+The collector should preserve worker-level metadata so users can inspect disaggregated serving systems under the hood. For example, a Dynamo deployment may have distinct prefill and decode workers. Live AIPerf should allow users to compare metrics by role, worker index, process or rank, hostname, and GPU so they can identify whether a live performance issue is caused by the frontend, prefill workers, decode workers, hardware utilization, KV-cache behavior, or cross-role imbalance.
 
 ### SATF Trace Sink
 
@@ -431,6 +448,7 @@ Local capture should support:
 - Outputs telemetry Parquet under an AIPerf artifact directory.
 - Supports local/S3 storage.
 - Supports DCGM and node-exporter at minimum.
+- Preserves worker-role metadata for disaggregated serving systems, including prefill/decode comparisons when exposed by the serving stack.
 - Works in Slurm, SRT Slurm, and local debug flows.
 
 **Not Supported:**
@@ -569,6 +587,7 @@ At a high level, Tachometer is a Prometheus-to-Parquet capture and visualization
 
 - Rust scraper for Prometheus endpoints.
 - DCGM, node-exporter, backend, and frontend filters.
+- Metadata tagging that supports comparing disaggregated serving roles such as prefill and decode workers.
 - Arrow/Parquet writer and compaction flow.
 - S3/local run browser and web UI.
 - Existing awareness of AIPerf artifacts for Pareto views.
