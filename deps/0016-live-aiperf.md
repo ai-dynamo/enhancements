@@ -29,7 +29,12 @@ This DEP proposes **Live AIPerf**: a production-aware extension to AIPerf that c
 1. **Live Metrics**: AIPerf-conventioned metrics computed from production or benchmark traffic in real time, including TTFT, ITL, request latency, output token throughput, and speculative decoding/MTP acceptance rate when available.
 2. **Live Trace Capture and Anonymization**: privacy-safe trace artifacts that preserve performance-relevant workload shape, preferably in Standard Agentic Trace Format (SATF), with default support for content-free performance traces and optional support for block-hashed or content-redacted traces.
 
-These should be built as two modular surfaces on top of one shared live capture substrate. The product goal is simple: observe production traffic once, then safely emit the views customers need, whether that is live AIPerf metrics, anonymized replay traces, or both.
+These should be built as two independently deployable live-data paths under one Live AIPerf umbrella:
+
+- a low-touch telemetry path for exported system, hardware, and serving metrics
+- a separately gated traffic-capture path for anonymized replay traces
+
+The two paths share AIPerf metric definitions, time correlation, artifact conventions, and user workflows, but they do not share the same trust boundary. Live metrics must be useful without request/response capture, and trace capture must remain optional and privacy-reviewed.
 
 # Motivation
 
@@ -40,7 +45,7 @@ AIPerf today is primarily a synthetic-load benchmarking tool. That remains impor
 
 Current request-level benchmark tooling can mis-characterize long-context, multi-turn, tool-using, bursty agentic workloads when it flattens them into independent requests. At the same time, production observability stacks often compute related metrics differently from AIPerf, making "live TTFT" and "AIPerf TTFT" hard to compare.
 
-Live AIPerf closes that gap by adding a safe capture path near the inference API boundary. This lets AIPerf measure real production behavior, capture production-shaped traces for replay, and feed those traces back into agentic benchmarking workflows.
+Live AIPerf closes that gap through two complementary mechanisms. First, it can scrape exported telemetry to measure systems under live load without changing the traffic path. Second, it can optionally capture request/response structure near the inference API boundary to produce privacy-safe replay traces. These mechanisms should be correlated through AIPerf artifacts and definitions, but reviewed and deployed according to their different risk profiles.
 
 ## Goals
 
@@ -64,16 +69,15 @@ Live AIPerf closes that gap by adding a safe capture path near the inference API
 
 ## Requirements
 
-### REQ 1: Shared Live Capture Substrate
+### REQ 1: Separate Trust Boundaries
 
-Live AIPerf **MUST** use a shared normalized event model for live metrics and trace export so metric definitions do not drift between the two surfaces.
+Live AIPerf **MUST** treat telemetry scraping and traffic capture as separate trust boundaries.
 
-The capture substrate **SHOULD** support multiple deployment modes over time:
+Live metrics **MUST NOT** require request/response capture. A deployment that only exposes Prometheus-compatible system, hardware, or serving metrics **MUST** still be able to use the live telemetry path.
 
-- passive observer
-- sidecar or proxy
-- SDK middleware
-- benchmark-integrated capture when AIPerf is the load generator
+Traffic capture **MUST** be optional, separately configured, and subject to the privacy controls described in this DEP.
+
+The two paths **SHOULD** use shared AIPerf metric definitions, timestamps, artifact layout, and correlation identifiers where available, but they **SHOULD NOT** require the same collector or deployment mechanism.
 
 ### REQ 2: AIPerf-Conventioned Live Metrics
 
@@ -187,6 +191,8 @@ aiperf watch --url https://deployment.example.com \
 
 This should work whether or not AIPerf is generating the load. When AIPerf is the load generator, the same machinery should attach automatically and annotate the benchmark artifact.
 
+This workflow should not require request/response capture. It should be able to operate from exported system, hardware, frontend, and backend metrics alone.
+
 ## Workflow 2: Capture Anonymized Traces
 
 User intent: "Turn production traffic into a safe benchmark artifact."
@@ -223,30 +229,39 @@ This connects Live AIPerf to agentic benchmarking: live capture produces the wor
 
 ## Architecture
 
-Live AIPerf should be organized around a shared capture substrate with multiple sinks.
+Live AIPerf should be organized around two live-data paths that meet at AIPerf correlation, artifacts, and metric definitions.
 
 ```mermaid
 flowchart LR
-  A["Production or benchmark traffic"] --> B["Live Capture Agent"]
-  C["Inference API boundary"] --> B
-  D["Prometheus / DCGM / node metrics"] --> E["Telemetry Collector"]
+  A["Prometheus / DCGM / node / serving metrics"] --> B["Telemetry Collector"]
+  C["Production or benchmark request traffic"] --> D["Optional Traffic Capture Agent"]
+  E["Inference API boundary"] --> D
 
-  B --> F["Event Normalizer"]
-  E --> F
+  B --> F["Telemetry Event Normalizer"]
+  D --> G["Request Event Normalizer"]
 
-  F --> G["Live Metrics Sink"]
-  F --> H["SATF Trace Sink"]
+  F --> H["Live Metrics Sink"]
+  G --> H
   F --> I["Telemetry Parquet Sink"]
-  F --> J["Privacy Manifest"]
+  G --> J["SATF Trace Sink"]
+  G --> K["Privacy Manifest"]
 
-  G --> K["AIPerf TUI / Web"]
-  H --> L["Replay / Profile Mode"]
-  I --> K
+  H --> L["AIPerf TUI / Web"]
+  I --> L
+  J --> M["Replay / Profile Mode"]
 ```
 
-### Live Capture Agent
+### Telemetry Collector
 
-The Live Capture Agent observes request/response traffic at or near the inference API boundary. It emits structured events rather than final artifacts directly:
+The Telemetry Collector captures hardware, node, backend, and frontend telemetry from Prometheus-compatible endpoints. This is the low-touch path: it should not require request/response capture and should not require changing the live traffic path.
+
+The collector should preserve worker-level metadata so users can inspect disaggregated serving systems under the hood. For example, a Dynamo deployment may have distinct prefill and decode workers. Live AIPerf should allow users to compare metrics by role, worker index, process or rank, hostname, and GPU so they can identify whether a live performance issue is caused by the frontend, prefill workers, decode workers, hardware utilization, KV-cache behavior, or cross-role imbalance.
+
+### Optional Traffic Capture Agent
+
+The Optional Traffic Capture Agent observes request/response traffic at or near the inference API boundary. This path is higher trust than telemetry scraping and must be separately configured, privacy-reviewed, and optional.
+
+It emits structured events rather than final artifacts directly:
 
 - request start
 - first token
@@ -258,19 +273,13 @@ The Live Capture Agent observes request/response traffic at or near the inferenc
 - speculative decoding acceptance-rate observation
 - error/cancel/timeout
 
-### Event Normalizer
+### Event Normalizers
 
-The Event Normalizer converts raw capture events into AIPerf canonical measurement events. This is where profile-mode and live-mode definitions must converge.
+Telemetry and traffic capture can have different collectors and event schemas, but they should normalize into AIPerf-compatible events and artifacts. This is where profile-mode and live-mode definitions must converge.
 
 ### Live Metrics Sink
 
-The Live Metrics Sink aggregates normalized events into AIPerf metrics for the TUI, optional web views, and persistent artifacts.
-
-### Telemetry Collector
-
-The Telemetry Collector captures hardware, node, backend, and frontend telemetry from Prometheus-compatible endpoints. This is separate from request metrics: request metrics come from API events, while hardware/backend telemetry comes from systems such as DCGM, node-exporter, or serving-stack metrics endpoints.
-
-The collector should preserve worker-level metadata so users can inspect disaggregated serving systems under the hood. For example, a Dynamo deployment may have distinct prefill and decode workers. Live AIPerf should allow users to compare metrics by role, worker index, process or rank, hostname, and GPU so they can identify whether a live performance issue is caused by the frontend, prefill workers, decode workers, hardware utilization, KV-cache behavior, or cross-role imbalance.
+The Live Metrics Sink aggregates normalized telemetry events and, when enabled, request events into AIPerf metrics for the TUI, optional web views, and persistent artifacts. Metrics that require request lifecycle events should be clearly marked unavailable when only telemetry scraping is enabled.
 
 ### SATF Trace Sink
 
@@ -282,9 +291,9 @@ The Privacy Manifest travels with each artifact and describes exactly what was c
 
 # Implementation Details
 
-## Normalized Live Event
+## Normalized Request Event
 
-The exact schema should be finalized during implementation, but the normalized event model should support records similar to:
+The exact schema should be finalized during implementation, but the optional traffic-capture path should support normalized request records similar to:
 
 ```json
 {
@@ -305,7 +314,7 @@ The exact schema should be finalized during implementation, but the normalized e
 }
 ```
 
-This is illustrative, not a final schema. The important point is that live metrics and trace export consume the same normalized events.
+This is illustrative, not a final schema. The important point is that request-derived live metrics and trace export consume the same normalized request events. Telemetry-only deployments should use their own normalized telemetry events and should not require this request event shape.
 
 ## SATF Output
 
@@ -410,6 +419,7 @@ Local capture should support:
 - Exact SATF fields/extensions required for prefix/cache and acceptance-rate capture.
 - Whether telemetry prototype code is vendored, merged, pluginized, or wrapped.
 - Whether web views are absorbed into AIPerf, kept internal, or exposed as reusable components.
+- Whether traffic capture and trace anonymization should remain in this DEP or be split into a dedicated follow-on DEP after the live telemetry path lands.
 
 # Implementation Phases
 
@@ -428,6 +438,7 @@ Local capture should support:
 - Decide command naming.
 - Confirm SATF fields/extensions needed for prefix/cache and acceptance-rate capture.
 - Decide telemetry code reuse strategy.
+- Define the review and gating criteria for enabling optional traffic capture.
 
 **Not Supported:**
 
@@ -466,7 +477,7 @@ Local capture should support:
 
 **Supported API / Behavior:**
 
-- Capture request lifecycle events at the API boundary.
+- Optionally capture request lifecycle events at the API boundary.
 - Compute live TTFT, ITL, throughput, latency, error rate, and token distributions.
 - Render live metrics using AIPerf conventions.
 - Persist captured metrics as artifacts.
@@ -487,7 +498,7 @@ Local capture should support:
 
 **Supported API / Behavior:**
 
-- Emit content-free SATF traces from live traffic.
+- Emit content-free SATF traces from live traffic when optional traffic capture is enabled.
 - Preserve sessions, turns, dependencies, tool-call structure, timings, token counts, and inter-turn delays.
 - Validate output with SATF validation tooling.
 - Replay captured traces through AIPerf agentic load generation.
@@ -539,7 +550,7 @@ Local capture should support:
 
 **Reason Rejected:**
 
-Live metrics and anonymized trace capture share the same hard part: trusted production traffic observation near the inference API boundary. They should remain modular implementation workstreams, but they should be part of the same Live AIPerf project.
+Live metrics and anonymized trace capture do not share the same trust boundary, and this DEP should not imply that metrics require traffic capture. However, they do share enough product surface, artifact identity, metric definitions, timing/correlation needs, and replay workflow to remain under the Live AIPerf umbrella. The accepted design is one product area with independently deployable telemetry and traffic-capture paths.
 
 ## Alt 2: Use Existing Observability Tools Only
 
