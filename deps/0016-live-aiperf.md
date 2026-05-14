@@ -370,7 +370,9 @@ Recommended hashing policy:
 - Use HMAC-SHA256 or equivalent keyed hashing for block fingerprints.
 - Customer controls the secret.
 - Store only a key id or policy id in the artifact.
-- Allow customers to choose whether hashes are stable within one capture, across captures, or never linkable.
+- In the default `replay-hash` mode, fingerprints are stable within one capture artifact so replay can preserve shared-prefix/KV-cache behavior.
+- Cross-capture stable fingerprints are opt-in and require an explicit customer-controlled key policy.
+- Fingerprints that are not linkable even within one capture are incompatible with replay-faithful `replay-hash` mode and belong to the lower-fidelity `shape-only` mode.
 - Include tokenizer name/version, chat template identifier, block size, and normalization policy.
 - Make cross-tenant stable hashes impossible by default.
 - Be explicit that keyed block fingerprints preserve equality structure by design.
