@@ -27,7 +27,7 @@
 This DEP proposes **Live AIPerf**: a production-aware extension to AIPerf that can observe live inference traffic and emit two related outputs:
 
 1. **Live Metrics**: AIPerf-conventioned metrics computed from production or benchmark traffic in real time, including TTFT, ITL, request latency, output token throughput, and speculative decoding/MTP acceptance rate when available.
-2. **Live Trace Capture and Anonymization**: privacy-safe trace artifacts that preserve performance-relevant workload shape, preferably in Standard Agentic Trace Format (SATF), with default support for content-free performance traces and optional support for block-hashed or content-redacted traces.
+2. **Live Trace Capture and Anonymization**: privacy-safe trace artifacts that preserve replay-relevant workload structure, preferably in Standard Agentic Trace Format (SATF), with default support for content-free traces that retain keyed block fingerprints for shared-prefix/KV-cache replay fidelity.
 
 These should be built as two independently deployable live-data paths under one Live AIPerf umbrella:
 
@@ -51,7 +51,7 @@ Live AIPerf closes that gap through two complementary mechanisms. First, it can 
 
 - Observe production inference traffic without taking deployments offline.
 - Compute live metrics using the same conventions as AIPerf profile-mode runs.
-- Capture privacy-safe traces that can be replayed as realistic benchmark inputs.
+- Capture privacy-safe traces that can be replayed as realistic benchmark inputs, including shared-prefix/KV-cache behavior by default through keyed block fingerprints.
 - Preserve agentic workload structure: sessions, turns, tool calls, tool returns, delays, dependencies, and prefix relationships.
 - Capture speculative decoding/MTP acceptance-rate signals from real production use cases when the serving stack exposes them.
 - Correlate user-visible request metrics with "under the hood" telemetry from disaggregated serving workers, including prefill and decode workers.
@@ -103,6 +103,8 @@ When observable, Live AIPerf **SHOULD** support:
 
 ### REQ 3: Privacy-Safe Trace Capture
 
+The default trace capture mode **MUST** be content-free and replay-faithful. It **MUST** preserve block-level equality structure through keyed block fingerprints or equivalent prefix identity metadata so AIPerf can replay shared-prefix and KV-cache behavior without persisting raw content.
+
 The default trace capture mode **MUST NOT** persist:
 
 - prompt text
@@ -116,6 +118,7 @@ The default trace capture mode **MUST NOT** persist:
 The default trace capture mode **SHOULD** preserve:
 
 - token counts
+- keyed token/block fingerprints or equivalent prefix identity metadata
 - timing
 - status/stop/error codes
 - dependency relationships
@@ -124,6 +127,8 @@ The default trace capture mode **SHOULD** preserve:
 - sampling and generation parameters when safe
 - cache/prefix metadata when observable
 - speculative decoding acceptance rate
+
+Shape-only traces that omit block identity **MAY** be supported behind an explicit flag, but they **MUST** be documented as lower-fidelity traces that cannot faithfully replay shared-prefix or KV-cache hit-rate behavior.
 
 ### REQ 4: Agentic Trace Export
 
@@ -202,14 +207,14 @@ Illustrative command:
 ```bash
 aiperf capture --url https://deployment.example.com \
   --format satf \
-  --privacy perf-only \
+  --privacy replay-hash \
   --output ./captures/prod-agentic.satf.json
 ```
 
 Initial privacy modes:
 
-- `perf-only`: no text, no token ids, performance metadata only.
-- `block-hash`: token/block fingerprints using customer-controlled secret material.
+- `replay-hash`: default content-free mode. Stores timing, token counts, dependencies, tool structure, and keyed token/block fingerprints so AIPerf can preserve shared-prefix/KV-cache behavior during replay.
+- `shape-only`: no text, no token ids, and no block identity. Supports workload-shape replay only and cannot faithfully reproduce KV-cache hit rate.
 - `redacted-content`: sanitized content-bearing SATF using NeMo Anonymizer or another configured content anonymization stage.
 
 ## Workflow 3: Replay Captured Workloads
@@ -283,7 +288,7 @@ The Live Metrics Sink aggregates normalized telemetry events and, when enabled, 
 
 ### SATF Trace Sink
 
-The SATF Trace Sink writes anonymized trace artifacts. By default, this sink should not receive raw content. It should receive enough metadata to preserve session shape, dependencies, timings, token counts, input reuse, tool-call structure, and replay parameters.
+The SATF Trace Sink writes anonymized trace artifacts. By default, this sink should not receive raw content. It should receive enough metadata to preserve session shape, dependencies, timings, token counts, keyed block identity, input reuse, tool-call structure, and replay parameters.
 
 ### Privacy Manifest
 
@@ -318,14 +323,17 @@ This is illustrative, not a final schema. The important point is that request-de
 
 ## SATF Output
 
-The default SATF output should be performance-only:
+The default SATF output should be content-free and replay-faithful:
 
 - session and turn ids are pseudonymized.
 - content store is omitted.
 - context and output text references are omitted.
 - token counts and timing are preserved.
+- keyed block fingerprints, prefix group ids, or equivalent block identity metadata are preserved.
 - tool-call structure is preserved, but tool names and argument/result content are redacted or bucketed unless explicitly allowed.
 - prefix/cache observations are represented using SATF-supported fields or agreed extensions.
+
+This default intentionally leaks equality structure: reviewers and downstream tools can see that two requests share a token block or prefix group. That leakage is necessary for faithful shared-prefix and KV-cache replay, but it should be protected with customer-controlled keyed hashing rather than raw content or unsalted hashes.
 
 ## Artifact Layout
 
@@ -353,7 +361,7 @@ This intentionally resembles existing nested run layouts while adding first-clas
 
 The default promise should be:
 
-> Live AIPerf can characterize and replay production-shaped traffic without storing production content.
+> Live AIPerf can replay production-shaped traffic, including shared-prefix/KV-cache behavior, without storing production content.
 
 Raw SHA-256 of token blocks is not enough for customer-safe anonymization. Low-entropy prompts, common tool strings, or known templates can be dictionary-attacked.
 
@@ -365,6 +373,7 @@ Recommended hashing policy:
 - Allow customers to choose whether hashes are stable within one capture, across captures, or never linkable.
 - Include tokenizer name/version, chat template identifier, block size, and normalization policy.
 - Make cross-tenant stable hashes impossible by default.
+- Be explicit that keyed block fingerprints preserve equality structure by design.
 
 Content is not the only leakage path. Session shape can reveal proprietary workflows.
 
@@ -417,6 +426,7 @@ Local capture should support:
 - Final command naming: `aiperf watch`, `aiperf monitor`, `aiperf capture`, or a grouped `aiperf live` namespace.
 - Final normalized event schema.
 - Exact SATF fields/extensions required for prefix/cache and acceptance-rate capture.
+- Final semantics for `replay-hash` and `shape-only` privacy modes.
 - Whether telemetry prototype code is vendored, merged, pluginized, or wrapped.
 - Whether web views are absorbed into AIPerf, kept internal, or exposed as reusable components.
 - Whether traffic capture and trace anonymization should remain in this DEP or be split into a dedicated follow-on DEP after the live telemetry path lands.
@@ -500,6 +510,7 @@ Local capture should support:
 
 - Emit content-free SATF traces from live traffic when optional traffic capture is enabled.
 - Preserve sessions, turns, dependencies, tool-call structure, timings, token counts, and inter-turn delays.
+- Preserve keyed block fingerprints or equivalent prefix identity metadata for shared-prefix/KV-cache replay.
 - Validate output with SATF validation tooling.
 - Replay captured traces through AIPerf agentic load generation.
 
@@ -519,6 +530,7 @@ Local capture should support:
 **Supported API / Behavior:**
 
 - Block-hashed trace mode with HMAC policy.
+- Shape-only trace mode for deployments that explicitly choose lower-fidelity replay without block identity.
 - Mooncake import/export adapter.
 - Optional NeMo Anonymizer integration for content-bearing SATF traces.
 - Structural anonymization controls and privacy report.
@@ -584,7 +596,7 @@ Live AIPerf should integrate with existing observability tools where useful, but
 
 **Reason Rejected:**
 
-The default product promise must be content-free or privacy-safe capture. Optional content-bearing export can be added later, but raw production content capture should not be the default architecture.
+The default product promise must be content-free replay-faithful capture. Optional content-bearing export can be added later, and lower-fidelity shape-only export can be available behind an explicit flag, but raw production content capture should not be the default architecture.
 
 # Background
 
@@ -614,7 +626,7 @@ At a high level, SATF represents sessions as DAGs of LLM inference events, tool 
 - a performance layer for token counts, timings, dependency relationships, input reuse, and optional KV/block information
 - a reproduction layer for optional content store, context references, and output references
 
-That split allows Live AIPerf to emit useful performance traces without persisting prompt text, completion text, tool arguments, or tool results.
+That split allows Live AIPerf to emit useful replay traces without persisting prompt text, completion text, tool arguments, or tool results.
 
 ### Offline Mooncake Anonymization Prototype
 
@@ -636,7 +648,7 @@ This work can seed adapters and implementation details, but should not define th
 
 Recommended role:
 
-- Default Live AIPerf emits content-free SATF performance traces.
+- Default Live AIPerf emits content-free SATF replay traces with keyed block fingerprints or equivalent prefix identity metadata.
 - Optional content-bearing trace export can pass SATF content payloads through NeMo Anonymizer.
 - AIPerf owns the trace structure, timing, token counts, hashing policy, replay fit, and privacy manifest.
 
