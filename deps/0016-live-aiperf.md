@@ -54,8 +54,8 @@ Live AIPerf closes that gap through two complementary mechanisms. First, it can 
 - Capture privacy-safe traces that can be replayed as realistic benchmark inputs, including shared-prefix/KV-cache behavior by default through keyed block fingerprints.
 - Preserve agentic workload structure: sessions, turns, tool calls, tool returns, delays, dependencies, and prefix relationships.
 - Capture speculative decoding/MTP acceptance-rate signals from real production use cases when the serving stack exposes them.
-- Correlate user-visible request metrics with "under the hood" telemetry from disaggregated serving workers, including prefill and decode workers.
-- Support K8s, Slurm, and SRT Slurm deployment paths.
+- Correlate user-visible request metrics with exported serving telemetry from disaggregated serving workers, including prefill and decode workers.
+- Support K8s production deployment paths and local/debug workflows.
 - Reuse proven telemetry capture primitives where they fit while making AIPerf the user-facing product surface.
 
 ### Non Goals
@@ -82,6 +82,8 @@ The two paths **SHOULD** use shared AIPerf metric definitions, timestamps, artif
 ### REQ 2: AIPerf-Conventioned Live Metrics
 
 Live metrics **MUST** use the same definitions as AIPerf profile-mode metrics wherever the same signal is available.
+
+The current AIPerf metric definitions are documented in the [AIPerf metrics reference](https://github.com/ai-dynamo/aiperf/blob/main/docs/metrics-reference.md).
 
 At minimum, Live AIPerf **SHOULD** support:
 
@@ -155,8 +157,6 @@ Every captured artifact **MUST** include a machine-readable privacy manifest tha
 Live AIPerf **SHOULD** support:
 
 - K8s sidecar, daemon, or proxy deployments
-- Slurm-based benchmark environments
-- SRT Slurm environments
 - local/debug capture against a single OpenAI-compatible endpoint
 
 ### REQ 7: Worker-Level Telemetry for Disaggregated Serving
@@ -180,6 +180,8 @@ Live AIPerf should expose three closely related workflows:
 1. watch live metrics
 2. capture anonymized traces
 3. replay captured workloads
+
+The command names below are illustrative. Implementations **SHOULD** allow live metrics and trace capture to run together from a single Live AIPerf deployment or invocation when both are enabled, so users do not need duplicate collectors for the same endpoint unless they intentionally split trust boundaries or operational ownership.
 
 ## Workflow 1: Watch Live Metrics
 
@@ -260,7 +262,7 @@ flowchart LR
 
 The Telemetry Collector captures hardware, node, backend, and frontend telemetry from Prometheus-compatible endpoints. This is the low-touch path: it should not require request/response capture and should not require changing the live traffic path.
 
-The collector should preserve worker-level metadata so users can inspect disaggregated serving systems under the hood. For example, a Dynamo deployment may have distinct prefill and decode workers. Live AIPerf should allow users to compare metrics by role, worker index, process or rank, hostname, and GPU so they can identify whether a live performance issue is caused by the frontend, prefill workers, decode workers, hardware utilization, KV-cache behavior, or cross-role imbalance.
+The collector should preserve worker-level metadata so users can inspect exported telemetry from disaggregated serving systems. For example, a Dynamo deployment may have distinct prefill and decode workers. Live AIPerf should allow users to compare metrics by role, worker index, process or rank, hostname, and GPU so they can identify whether a live performance issue is caused by the frontend, prefill workers, decode workers, hardware utilization, KV-cache behavior, or cross-role imbalance.
 
 ### Optional Traffic Capture Agent
 
@@ -409,10 +411,6 @@ Primary customer production path:
 - persistent object-store export
 - integration with AIPerf K8s operator over time
 
-### Slurm / SRT Slurm
-
-Live AIPerf should support Slurm-based benchmark labs and internal performance work, including environments managed by [SRT Slurm](https://github.com/NVIDIA/srt-slurm).
-
 ### Local / Debug
 
 Local capture should support:
@@ -472,7 +470,7 @@ Local capture should support:
 - Supports local/S3 storage.
 - Supports DCGM and node-exporter at minimum.
 - Preserves worker-role metadata for disaggregated serving systems, including prefill/decode comparisons when exposed by the serving stack.
-- Works in Slurm, SRT Slurm, and local debug flows.
+- Works in K8s and local debug flows.
 
 **Not Supported:**
 
