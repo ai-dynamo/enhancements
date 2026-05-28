@@ -22,7 +22,7 @@
 
 # Summary
 
-Use the upstream [InferenceObjective](https://github.com/kubernetes-sigs/gateway-api-inference-extension) CRD
+Use the upstream K8s [InferenceObjective](https://github.com/kubernetes-sigs/gateway-api-inference-extension) CRD
 (`inference.networking.x-k8s.io/v1alpha2`) to drive per-request priority
 in Dynamo's KV-aware router **without** requiring the full GAIE EPP stack.
 
@@ -38,124 +38,69 @@ Today Dynamo treats `nvext.agent_hints.priority` as already-trusted
 input — the assumption is that *some other service in front of Dynamo*
 (an authenticated gateway, an SDK proxy, a service mesh policy) is
 responsible for populating, sanitizing, or stripping that field
-before the request lands. Dynamo itself does not authenticate the
-field, does not bound it (the upper end is unclamped), and does not
-distinguish a tenant-asserted value from a platform-assigned one. In
-other words, the priority you see in `nvext` is whatever the most
-recent hop chose to put there, and Dynamo simply trusts it. That is
+before the request lands.  Dynamo simply trusts it. That is
 fine for single-tenant dev and for deployments where an external
 gateway already does this work — but it leaves Dynamo with no
 first-class story for production multi-tenant priority. The CRD is
 that first-class story.
 
-Priority is a property of the **workload**, not the code. ML engineers
-already think in terms of workloads — training jobs, batch inference,
-realtime serving. The CRD maps directly to that mental model. It also
-gives operators four concrete properties that a CLI flag, environment
-variable, or request-body field cannot:
 
-1. **Runtime priority changes without redeploy.** An ops engineer can
+1. **Gateway API ecosystem compatibility.** The
+   `InferenceObjective` CRD is the emerging Kubernetes-native way to
+   express per-use-case priority and SLOs. Adopting it lets Dynamo
+   participate in the CNCF Inference ecosystem
+2. **Runtime priority changes without redeploy.** An ops engineer can
    change a priority by editing one YAML object at any time — no
    container restart, no config reload, no redeploy. With a CLI flag
    or env var, every priority change requires restarting the frontend
    pod. With a request-body field, the change has to land in every
    client codebase. With the CRD, it's one `kubectl patch` (or a
    GitOps PR) and the watcher picks it up sub-second.
-2. **Gateway API ecosystem compatibility.** The
-   `InferenceObjective` CRD is the emerging Kubernetes-native way to
-   express per-use-case priority and SLOs. Adopting it lets Dynamo
-   participate in the Gateway API Inference Extension ecosystem
-   without coupling to the full EPP stack — the same header contract
-   works whether you're behind a GAIE gateway or just a plain
-   Dynamo frontend. We want Dynamo to be Kubernetes-friendly as
-   much as we can.
-3. **Separation of dev ergonomics from production governance.** For
-   local dev and quick experiments, the body-level
-   `nvext.agent_hints.priority` is simpler and requires zero
-   infrastructure. The CRD is for production multi-tenant deployments
-   where priority should be managed as infrastructure, not embedded
-   in application code. Both paths coexist; the operator chooses the
-   posture per environment via `inference_objective_policy` (see §9).
-4. **A future single source of truth for class metadata.** This is
-   actually the strongest argument for the future
+
+3. **A future single source of truth for Planner.** 
    `InferenceObjective` extensions noted in §Forward Compatibility:
    today it takes three separate config surfaces (DGDR `sla`,
    GlobalRouter JSON grids, per-pool Planner JSON) to describe one
    logical "this class wants TTFT 200ms" intent. A single
    `InferenceObjective` with `targetTTFT` would let one CRD instance
    be the source of truth that both the GlobalRouter (routing) and
-   the per-pool Planners (scaling) consume. We get `priority` for
-   free today, and the same integration point absorbs SLOs / quotas
-   / LoRA authorization later — without rewriting any of the three
-   config surfaces it replaces.
+   the per-pool Planners (scaling) consume. 
 
-**Without the CRD:** every client has to know its own priority and pass
-it correctly in every request. Priority logic ends up scattered across
-inference clients — the chat app hardcodes `"priority": 100`, the batch
-pipeline hardcodes `"priority": -10`, and when someone forgets or gets
-it wrong, a batch job starves realtime traffic.
+4. **Separation of dev ergonomics from production governance.** For
+   local dev and quick experiments, the body-level
+   `nvext.agent_hints.priority` is simpler and requires zero
+   infrastructure. The CRD is for production multi-tenant deployments
+   where priority should be managed as infrastructure, not embedded
+   in application code. Both paths coexist; the operator chooses the
+   posture per environment via `inference_objective_policy` (see §9).
 
-**With the CRD:** you define the priority once, give it a human-readable
-name, and every request just says "I'm a `realtime-chat` request" via
-one header. When product decides realtime-chat should be higher
-priority, nobody touches any inference client — one `kubectl patch` (or
-a GitOps PR) updates the YAML object.
+5. Trust: priority is platform policy, not client assertion
+  The deeper reason for the CRD is **authorization**, not just ergonomics.
 
-## Trust: priority is platform policy, not client assertion
+  In the current code path, a client can put any integer they like into
+  `nvext.agent_hints.priority` — including `i32::MAX`. The frontend
+  clamps the bottom (`priority.max(0)` in `lib/llm/src/preprocessor.rs:687`)
+  but not the top, so a single request with `priority: 2_000_000_000`
+  sits at the head of the FCFS heap permanently and starves every other
+  arrival. There is no per-tenant cap, no auth on the field, no rate
+  limit. It is identical in trust model to letting clients set their own
+  `Authorization: admin` header. In production deployments today the
+  de facto answer is "Dynamo trusts its inputs; put it behind an
+  authenticated edge" — but that's an implicit assumption nowhere
+  enforced in the code.
 
-The deeper reason for the CRD is **authorization**, not just ergonomics.
+  The CRD path inverts this:
 
-In the current code path, a client can put any integer they like into
-`nvext.agent_hints.priority` — including `i32::MAX`. The frontend
-clamps the bottom (`priority.max(0)` in `lib/llm/src/preprocessor.rs:687`)
-but not the top, so a single request with `priority: 2_000_000_000`
-sits at the head of the FCFS heap permanently and starves every other
-arrival. There is no per-tenant cap, no auth on the field, no rate
-limit. It is identical in trust model to letting clients set their own
-`Authorization: admin` header. In production deployments today the
-de facto answer is "Dynamo trusts its inputs; put it behind an
-authenticated edge" — but that's an implicit assumption nowhere
-enforced in the code.
+  - The client **names a policy** (`x-gateway-inference-objective: gold`).
+  - The frontend **resolves the name** against an in-memory map populated
+    from RBAC-protected `InferenceObjective` resources in the cluster.
+  - The number is set by the *platform team* in a YAML object subject to
+    Kubernetes RBAC, audit logs, and admission webhooks — not by the
+    request payload.
 
-The CRD path inverts this:
-
-- The client **names a policy** (`x-gateway-inference-objective: gold`).
-- The frontend **resolves the name** against an in-memory map populated
-  from RBAC-protected `InferenceObjective` resources in the cluster.
-- The number is set by the *platform team* in a YAML object subject to
-  Kubernetes RBAC, audit logs, and admission webhooks — not by the
-  request payload.
-
-A client can ask for `gold`, but only the principals with `create`
-permission on `inferenceobjectives.inference.networking.x-k8s.io` in
-that namespace can define what `gold` means. A client cannot guess a
-name they don't have, cannot mint a new objective, and cannot exceed
-the priority value the platform team sanctioned for it. That's the
-difference between **"client claims a priority"** and **"platform
-authorizes a class"**.
-
-The CRD exists so that the priority number isn't asserted by the
-request. The request only *names* a policy, and the policy is an
-authenticated, RBAC-scoped, lifecycle-managed Kubernetes object.
-
-This shifts the threat model from "we trust everyone who can reach
-the HTTP endpoint" to "we trust everyone who has RBAC on
-`InferenceObjective` resources in the namespace" — which is the
-normal Kubernetes authorization story and integrates with whatever
-identity, audit, and policy tooling the cluster already runs. See §9
-(Trust Model) for the concrete knobs that enforce this in code.
-
-| Without CRD | With CRD |
-|------------|----------|
-| Every client hardcodes a priority number | Clients use a human-readable name (or nothing at all) |
-| Changing priority = code change + redeploy | Changing priority = one `kubectl patch` |
-| Changing priority means restarting the frontend (CLI flag / env var) | Changing priority is a runtime YAML edit, picked up sub-second |
-| "What priority should I use?" conversation per team | Platform team manages the policy centrally |
-| Batch jobs get randomly killed under load | Low-priority workloads are shed first, automatically |
-| Priority config scattered across N codebases | Priority config is one YAML file in your GitOps repo |
-| Any client can claim any priority — including `i32::MAX` | Priority value is set by the *platform team* in a YAML object subject to Kubernetes RBAC, audit logs, and admission webhooks |
-| No notion of "who is allowed to be priority 100" | RBAC on `inferenceobjectives.inference.networking.x-k8s.io` is the authorization surface |
-| Outside the Gateway API ecosystem | Native interop with GAIE / Inference Gateway tooling |
+  The CRD exists so that the priority number isn't asserted by the
+  request. The request only *names* a policy, and the policy is an
+  authenticated, RBAC-scoped, lifecycle-managed Kubernetes object.
 
 For **local dev and quick experiments**, the body-level
 `agent_hints.priority` still works and requires zero infrastructure.
