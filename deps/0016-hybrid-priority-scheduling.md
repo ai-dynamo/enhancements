@@ -51,7 +51,7 @@ that first-class story.
 Priority is a property of the **workload**, not the code. ML engineers
 already think in terms of workloads — training jobs, batch inference,
 realtime serving. The CRD maps directly to that mental model. It also
-gives operators three concrete properties that a CLI flag, environment
+gives operators four concrete properties that a CLI flag, environment
 variable, or request-body field cannot:
 
 1. **Runtime priority changes without redeploy.** An ops engineer can
@@ -76,6 +76,18 @@ variable, or request-body field cannot:
    where priority should be managed as infrastructure, not embedded
    in application code. Both paths coexist; the operator chooses the
    posture per environment via `inference_objective_policy` (see §9).
+4. **A future single source of truth for class metadata.** This is
+   actually the strongest argument for the future
+   `InferenceObjective` extensions noted in §Forward Compatibility:
+   today it takes three separate config surfaces (DGDR `sla`,
+   GlobalRouter JSON grids, per-pool Planner JSON) to describe one
+   logical "this class wants TTFT 200ms" intent. A single
+   `InferenceObjective` with `targetTTFT` would let one CRD instance
+   be the source of truth that both the GlobalRouter (routing) and
+   the per-pool Planners (scaling) consume. We get `priority` for
+   free today, and the same integration point absorbs SLOs / quotas
+   / LoRA authorization later — without rewriting any of the three
+   config surfaces it replaces.
 
 **Without the CRD:** every client has to know its own priority and pass
 it correctly in every request. Priority logic ends up scattered across
@@ -1330,12 +1342,12 @@ hundreds.  Recommendation: ship with `tier` + `reason` only and add
 
 This DEP picks up only `spec.priority` from `InferenceObjective`. A workload class is realistically more than one integer — production deployments will eventually want TTFT/TPOT SLOs, fairness/quota policies, class-bound LoRA adapters, queueing/eviction policies, and chargeback labels attached to the same named class.
 
-For now those concerns are **delegated upstream** of Dynamo:
+For now those concerns are **delegated upstream** of Dynamo and, in the case of SLAs, **fragmented across three existing config surfaces**:
 
-- **Latency SLOs** are configured deployment-wide via `PlannerConfig.optimization_target=sla` in the planner, not per-class. The planner sizes the fleet to one SLA target per DGD.
+- **Latency SLOs** are *not* on the GlobalPlanner — it's a budget-and-policy execution layer that arbitrates GPU totals, not SLAs. Per-pool SLA targets exist in the single-endpoint multi-pool GlobalPlanner topology, but they're split across three config surfaces today: DGDR `spec.sla.{ttft,itl}` (drives profiling and worker-shape selection), GlobalRouter JSON `prefill_pool_selection_strategy.ttft_*` / `decode_pool_selection_strategy.itl_*` (drives runtime routing), and each pool's local Planner config `ttft` / `itl` with `optimization_target=sla` (drives autoscaling). For single-DGD deployments the SLO is set deployment-wide via `PlannerConfig.optimization_target=sla` and applies to the whole DGD, not per-class.
 - **Fairness/quota and tenant rate limiting** live at the API gateway in front of Dynamo (Kong, Envoy, the GAIE gateway) — Dynamo treats inbound requests as already authenticated and already rate-limited.
 
-The reflector and `InferenceObjectiveMap` introduced here are deliberately structured so future fields slot in by extending the struct, not by reshaping the integration. When upstream adds `targetTTFT`, `fairShare`, `allowedLoraAdapters`, etc., they become additional columns in the same map — and the SLA, quota, and LoRA-authorization concerns currently delegated upstream can move into the CRD without changing the request hot path or the trust model.
+The reflector and `InferenceObjectiveMap` introduced here are deliberately structured so future fields slot in by extending the struct, not by reshaping the integration. When upstream adds `targetTTFT`, `fairShare`, `allowedLoraAdapters`, etc., they become additional columns in the same map — and the SLA / quota / LoRA-authorization concerns currently delegated upstream and fragmented across DGDR / GlobalRouter / Planner can collapse into a single `InferenceObjective` instance that all three consume, without changing the request hot path or the trust model.
 
 # Background
 
