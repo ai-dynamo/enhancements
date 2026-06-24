@@ -43,6 +43,8 @@ P1 work comes after the base infrastructure and Dynamo deployment are working. T
 | GPU-Aware Checks | Add checks for the default GPU deployment path, including GPU node readiness, GPU resource availability, and Nvidia device plugin or operator setup |
 | Second Cloud Example | Add another provider as a separate Terraform example after the first provider works |
 
+![Figure 3: Optional P1 Robustness Layer](0016_images/figure4-p1-robustness-layer.png)
+
 ### 3.3 Future Extension Plan
 
 The internship should focus on getting from a clean account to a working Dynamo deployment. Work beyond the deployment reference, such as access control, quota management, or long-running service ownership, can be revisited later if there is a clear user need.
@@ -63,7 +65,7 @@ Any destructive cleanup should require explicit opt-in and should only target re
 
 ### 4.1 V1 Deployment Pipeline
 
-The V1 pipeline is README-first and Terraform-native:
+The V1 pipeline is README-first and Terraform-native. Terraform remains the source of truth for cloud infrastructure; Terraform-native features should be used first for input validation, plan review, and user guidance. Helper scripts may be added later only where Terraform does not cover the workflow.
 
 1. Choose the provider example.
 2. Review prerequisites and configure the required Terraform inputs for the selected provider.
@@ -75,17 +77,6 @@ The V1 pipeline is README-first and Terraform-native:
 8. Follow documented cleanup steps when finished.
 
 Later work may add Terraform-native guidance and lightweight K8s/Dynamo checks, but those checks should not block the V1 deployment path.
-
-### 4.2 Terraform and Repository Boundaries
-
-Terraform remains the source of truth for cloud infrastructure. Cloud-specific Terraform root modules should remain visible and reviewable under the provider example folders.
-
-Terraform-native features should be used first for input validation, plan review, and user guidance. Helper scripts may be added later for smoke testing, diagnostics, or cleanup guidance where Terraform does not cover the workflow.
-
-
-### Figure 3: Optional P1 Robustness Layer
-
-![Figure 3: Optional P1 Robustness Layer](0016_images/figure4-p1-robustness-layer.png)
 
 ## 5. Project Roadmap (12 Weeks)
 
