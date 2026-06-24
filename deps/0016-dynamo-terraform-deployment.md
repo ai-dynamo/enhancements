@@ -26,7 +26,7 @@ Once the base deployment path works, follow-up work can make the experience easi
 | Terraform Root Module | Cloud-specific Terraform example for the selected provider. | User can run `terraform init`, `terraform plan`, and `terraform apply` from the documented example folder. |
 | Managed K8s Infra | Provision the K8s infra needed by the selected Dynamo deployment path | Cluster is created and accessible with documented kubeconfig / access instructions |
 | K8s Bootstrap Resources | Document the K8s resources required to prepare the cluster for Dynamo installation. | User can apply the required bootstrap resources, such as namespaces, RBAC, service accounts, CRDs, and Helm-installed resources, depending on the selected deployment path. |
-| Dynamo Deployment Path | Users can follow Dynamo documentation to deploy a DGD for the selected workload. | User can follow Dynamo documentation to deploy a DGD for the selected workload. |
+| Dynamo Deployment Path | Document the Dynamo deployment path for the selected workload. | User can deploy a DGD onto the prepared cluster by following the documented path. |
 | Basic Verification and CleanUp | Provide simple verification and cleanup instructions | User can confirm the deployment is running and follow documented cleanup steps |
 
 ### 3.2 P1: Optional Improvements
@@ -79,8 +79,6 @@ The V1 pipeline is README-first and Terraform-native. Terraform remains the sour
 Later work may add Terraform-native guidance and lightweight K8s/Dynamo checks, but those checks should not block the V1 deployment path.
 
 ## 5. Project Roadmap (12 Weeks)
-
-The following timeline outlines the development of the Dynamo Terraform Deployment Reference, prioritizing the AWS path before adding optional improvements.
 
 | Week | Deliverable | Success Criteria | Priority |
 |------|-------------|-----------------|----------|
