@@ -43,7 +43,7 @@ P1 work comes after the base infrastructure and Dynamo deployment are working. T
 | GPU-Aware Checks | Add checks for the default GPU deployment path, including GPU node readiness, GPU resource availability, and Nvidia device plugin or operator setup |
 | Second Cloud Example | Add another provider as a separate Terraform example after the first provider works |
 
-![Figure 3: Optional P1 Robustness Layer](0016_images/figure4-p1-robustness-layer.png)
+![Optional P1 Robustness Layer](0016_images/figure3-p1-robustness-layer.png)
 
 ### 3.3 Future Extension Plan
 
