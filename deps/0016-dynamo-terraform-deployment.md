@@ -147,7 +147,7 @@ The following timeline outlines the development of the Dynamo Terraform Deployme
 
 ## 6. Success Metrics
 
-P0 succeeds if the selected provider works end to end: Terraform provisions the required managed Kubernetes infrastructure, the cluster is prepared with documented bootstrap resource, Dynamo is deployed using the documented Kubernetes or Helm path, and the user can verify that the deployment is running.
+P0 succeeds if a user can follow the README for the selected provider and reach a running Dynamo deployment.
 
 The repository should remain Terraform-native. Cloud-specific Terraform root modules should stay visible and reviewable, and any helper scripts should stay close to the documented workflow.
 
