@@ -18,10 +18,6 @@ Once the base deployment path works, follow-up work can make the experience easi
 
 ## 3. Goals and Scopes
 
-The goal of this project is to build a Terraform-native deployment reference for Dynamo. Terraform should remain the primary infrastructure provisioning tool, aligned with the team's existing practice and with what infrastructure users are already familiar with.
-
-The primary user experience should be README-first: choose the relevant Terraform example, follow the documented Terraform workflow, prepare the resulting Kubernetes cluster with the required bootstrap resource, deploy Dynamo, and verify that it is running.
-
 ### 3.1 P0: Core Deliverables
 
 | Component | Description | Success Criteria |
