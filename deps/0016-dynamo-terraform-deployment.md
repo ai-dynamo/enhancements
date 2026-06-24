@@ -84,8 +84,6 @@ The V1 pipeline is README-first and Terraform-native:
 
 Later work may add Terraform-native guidance and lightweight K8s/Dynamo checks, but those checks should not block the V1 deployment path.
 
-![Figure 3: V1 Deployment Pipeline](0016_images/figure3-dynamo-runtime-layer.png)
-
 ### 4.2 Terraform and Repository Boundaries
 
 Terraform remains the source of truth for cloud infrastructure. Cloud-specific Terraform root modules should remain visible and reviewable under the provider example folders.
