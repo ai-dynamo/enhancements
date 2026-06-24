@@ -82,45 +82,6 @@ Terraform remains the source of truth for cloud infrastructure. Cloud-specific T
 
 Terraform-native features should be used first for input validation, plan review, and user guidance. Helper scripts may be added later for smoke testing, diagnostics, or cleanup guidance where Terraform does not cover the workflow.
 
-Possible repository structure:
-
-```
-examples/
-  aws/
-    README.md
-    main.tf
-    providers.tf
-    variables.tf
-    outputs.tf
-    terraform.tfvars.example
-
-modules/
-  eks/
-    main.tf
-    variables.tf
-    outputs.tf
-
-k8s/
-  bootstrap/
-    gpu-operator/
-    dynamo-platform/
-  dynamo/
-    values.example.yaml
-    manifests/
-
-docs/
-  getting-started.md
-  troubleshooting.md
-  dynamo-deployment.md
-
-# Optional P1 helper
-scripts/
-  validate
-  smoke-test
-  cleanup-plan
-```
-
-The exact layout can change based on the existing Dynamo repo conventions, but the main idea is to keep provider-specific Terraform examples easy to find and keep the Dynamo Kubernetes deployment files reusable where practical.
 
 ### Figure 3: Optional P1 Robustness Layer
 
