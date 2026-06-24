@@ -6,15 +6,11 @@ This document describes the design for a Terraform-native Dynamo deployment refe
 
 V1 focuses on one cloud provider end to end. The goal is to make the path from a clean cloud account to a running Dynamo deployment easy to follow through repository structure, Terraform examples, Kubernetes deployment instructions, and README guidance.
 
-The core deliverable is a working deployment path: a user can choose the relevant Terraform example, run the documented Terraform workflow, provision the required Kubernetes infrastructure, prepare the cluster with the required bootstrap resources, deploy Dynamo, and verify that it is running.
-
 The first implementation should focus on getting one deployment path working well. If time allows after that, the project can improve Terraform-native guidance, diagnostics, cleanup support, GPU-specific checks, or add another cloud provider example.
 
 ## 2. Problem Statement
 
 There is not currently a Dynamo IaC example intended for a user to deploy end to end. Velonix can be used as a reference architecture for how internal infrastructure is structured, but it is CI/CD infrastructure and is not meant to be deployed directly by an external user.
-
-A new user should be able to enter the repo, choose the right Terraform example, understand the prerequisites, run the standard Terraform workflow, prepare the resulting Kubernetes cluster with the required bootstrap resources, deploy Dynamo, and verify that it is running.
 
 The main gap is not only Terraform code. It is the end-to-end path around the code: repo layout, README guidance, required inputs, Terraform infrastructure steps, Kubernetes Bootstrap steps, Dynamo deployment steps, verification, and cleanup instructions.
 
