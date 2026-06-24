@@ -122,24 +122,6 @@ scripts/
 
 The exact layout can change based on the existing Dynamo repo conventions, but the main idea is to keep provider-specific Terraform examples easy to find and keep the Dynamo Kubernetes deployment files reusable where practical.
 
-### 4.3 Optional Guidance and Checks After V1
-
-After the V1 deployment path works, follow-up work should first use Terraform-native features to guide users, such as variable validation, `terraform validate`, `terraform plan`, preconditions, outputs, and README guidance. Lightweight scripts can be added later only where Terraform cannot cover the check, such as Kubernetes or Dynamo runtime verification.
-
-A possible split is:
-
-- **Terraform-side guidance:** required inputs, variable validation, `terraform fmt`/`validate`, `terraform plan` review, preconditions, and useful outputs.
-- **Kubernetes bootstrap checks:** Kubernetes access, namespace/RBAC readiness, bootstrap resource readiness, and optional GPU scheduling checks.
-- **Post-deployment checks:** basic smoke test or manual verification that Dynamo is running.
-
-Diagnostics and dry-run cleanup planning can build on these checks as optional follow-up work.
-
-**V1 main path:**
-README → Terraform → Kubernetes access → Bootstrap Cluster Resource → Deploy Dynamo → Verify → Cleanup docs
-
-**P1 optional layer:**
-Terraform-native Guidance → Smoke test automation → Diagnostics guidance → Dry-run cleanup planning
-
 ### Figure 3: Optional P1 Robustness Layer
 
 ![Figure 3: Optional P1 Robustness Layer](0016_images/figure4-p1-robustness-layer.png)
