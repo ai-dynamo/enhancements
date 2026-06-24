@@ -99,10 +99,4 @@ The following timeline outlines the development of the Dynamo Terraform Deployme
 
 ## 6. Success Metrics
 
-P0 succeeds if a user can follow the README for the selected provider and reach a running Dynamo deployment.
-
-The repository should remain Terraform-native. Cloud-specific Terraform root modules should stay visible and reviewable, and any helper scripts should stay close to the documented workflow.
-
-The documentation should be usable by someone other than the author. At least one engineer should be able to follow the README, reproduce the deployment path or dry-run flow, and feed any gaps back into the docs.
-
-P1 success is measured by useful follow-up improvements after the base path works, such as Terraform-native validation, smoke test automation, diagnostics guidance, cleanup planning, GPU-aware checks, or a second cloud example.
+The documentation should be usable by someone other than the author. Another engineer should be able to follow the README and reach a running Dynamo deployment.
