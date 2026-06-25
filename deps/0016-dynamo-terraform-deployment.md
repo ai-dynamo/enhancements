@@ -25,7 +25,7 @@ Once the base deployment path works, follow-up work can make the experience easi
 | Single-Cloud End-to-End Path | One required cloud path from clean account/config to running Dynamo deployment. | User can follow the README for the selected provider and reach a running Dynamo deployment |
 | Terraform Root Module | Cloud-specific Terraform example for the selected provider. | User can run `terraform init`, `terraform plan`, and `terraform apply` from the documented example folder. |
 | Managed K8s Infra | Provision the K8s infra needed by the selected Dynamo deployment path | Cluster is created and accessible with documented kubeconfig / access instructions |
-| K8s Bootstrap Resources | Document the K8s resources required to prepare the cluster for Dynamo installation. | User can apply the required bootstrap resources, such as namespaces, RBAC, service accounts, CRDs, and Helm-installed resources, depending on the selected deployment path. |
+| K8s Bootstrap Resources | Document the K8s resources required to prepare the cluster for Dynamo installation. | User can install GPU Operator and Dynamo Platform Helm chart (which installs the Dynamo Operator, CRDs, and NATS by default) and have a cluster ready for DGD deployment. |
 | Dynamo Deployment Path | Document the Dynamo deployment path for the selected workload. | User can deploy a DGD onto the prepared cluster by following the documented path. |
 | Basic Verification and CleanUp | Provide simple verification and cleanup instructions | User can confirm the deployment is running and follow documented cleanup steps |
 
@@ -47,11 +47,9 @@ P1 work comes after the base infrastructure and Dynamo deployment are working. T
 
 ### 3.3 Future Extension Plan
 
-The internship should focus on getting from a clean account to a working Dynamo deployment. Work beyond the deployment reference, such as access control, quota management, or long-running service ownership, can be revisited later if there is a clear user need.
+The internship should focus on getting from a clean account to a working Dynamo deployment. Work beyond the deployment reference can be revisited later.
 
-Future work may include stronger security checks, cost guidance, safer cleanup execution, autoscaling, longer-term monitoring, or deeper multi-cloud support.
-
-Any destructive cleanup should require explicit opt-in and should only target resources confidently tied to the current deployment.
+Any destructive cleanup should require explicit opt-in and should only target resources created by the current deployment.
 
 ## 4. Architecture
 
@@ -63,6 +61,12 @@ Any destructive cleanup should require explicit opt-in and should only target re
 
 ![Figure 2: Managed Kubernetes Cluster (EKS)](0016_images/figure2-k8s-bootstrap-layer.png)
 
+### Figure 3: Dynamo Deployment / Runtime Layer
+
+After the cluster is bootstrapped, a user applies a `DynamoGraphDeployment`. The Dynamo Operator reconciles it into a Frontend pod (OpenAI-compatible API and routing) and one or more Worker pods that request GPU resources and run the model engine (e.g. vLLM). Service discovery uses NATS and the Kubernetes API by default.
+
+![Figure 3: Dynamo Deployment and Runtime Layer](0016_images/figure3-dynamo-runtime-layer.png)
+
 ### 4.1 V1 Deployment Pipeline
 
 The V1 pipeline is README-first and Terraform-native. Terraform remains the source of truth for cloud infrastructure; Terraform-native features should be used first for input validation, plan review, and user guidance. Helper scripts may be added later only where Terraform does not cover the workflow.
@@ -71,7 +75,7 @@ The V1 pipeline is README-first and Terraform-native. Terraform remains the sour
 2. Review prerequisites and configure the required Terraform inputs for the selected provider.
 3. Run `terraform init`, `terraform plan`, and `terraform apply`.
 4. Configure Kubernetes access to the provisioned cluster.
-5. Apply the Kubernetes bootstrap resources required to prepare the cluster for Dynamo installation.
+5. Install GPU Operator and Dynamo Platform Helm chart (installs Dynamo Operator, CRDs, and NATS; etcd is optional and only needed for legacy `discovery=etcd` mode).
 6. Follow the Dynamo documentation to deploy a DynamoGraphDeployment for the selected workload.
 7. Verify that the deployment is running.
 8. Follow documented cleanup steps when finished.
