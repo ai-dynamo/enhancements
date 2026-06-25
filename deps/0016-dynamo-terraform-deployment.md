@@ -24,7 +24,7 @@ Once the base deployment path works, follow-up work can make the experience easi
 |-----------|-------------|-----------------|
 | Single-Cloud End-to-End Path | One required cloud path from clean account/config to running Dynamo deployment. | User can follow the README for the selected provider and reach a running Dynamo deployment |
 | Terraform Root Module | Cloud-specific Terraform example for the selected provider. | User can run `terraform init`, `terraform plan`, and `terraform apply` from the documented example folder. |
-| Managed K8s Infra | Provision the K8s infra needed by the selected Dynamo deployment path | Cluster is created and accessible with documented kubeconfig / access instructions |
+| K8s Infra | Provision the K8s infra needed by the selected Dynamo deployment path | Cluster is created and accessible with documented kubeconfig / access instructions |
 | K8s Bootstrap Resources | Document the K8s resources required to prepare the cluster for Dynamo installation. | User can install GPU Operator and Dynamo Platform Helm chart (which installs the Dynamo Operator, CRDs, and NATS by default) and have a cluster ready for DGD deployment. |
 | Dynamo Deployment Path | Document the Dynamo deployment path for the selected workload. | User can deploy a DGD onto the prepared cluster by following the documented path. |
 | Basic Verification and CleanUp | Provide simple verification and cleanup instructions | User can confirm the deployment is running and follow documented cleanup steps |
@@ -89,8 +89,8 @@ Later work may add Terraform-native guidance and lightweight K8s/Dynamo checks, 
 | 1 | Scope and provider alignment | Mentor agrees on the first cloud provider, V1 scope, repo location, dynamo helm chart and deployment design, and Dynamo deployment path to target. | P0 |
 | 2 | Repository and README skeleton | Provider example folder, README outline, required inputs, K8s bootstrap strategy, and cleanup section are drafted. | P0 |
 | 3 | Terraform root module skeleton | Terraform structure for the selected provider is in place with variables, outputs, and documented prerequisites. | P0 |
-| 4 | Managed Kubernetes provisioning | Terraform can plan/apply the core managed Kubernetes infrastructure for the selected provider, or blockers are documented. | P0 |
-| 5 | Cluster access and deployment handoff | User can access the provisioned cluster and apply documented k8s bootstrap resources | P0 |
+| 4 | Kubernetes provisioning | Terraform can plan/apply the core Kubernetes infrastructure for the selected provider, or blockers are documented. | P0 |
+| 5 | Cluster access and bootstrap | User can access the provisioned cluster and apply documented k8s bootstrap resources | P0 |
 | 6 | Dynamo deployment path | Dynamo can be deployed onto the prepared cluster by following the documented Dynamo path. | P0 |
 | 7 | Basic verification and cleanup docs | User can verify the deployment is running and follow documented cleanup steps. | P0 |
 | 8 | First-user trial run | Another engineer or mentor follows the README; gaps are captured and folded back into the docs. | P0 |
