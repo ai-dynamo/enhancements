@@ -63,7 +63,7 @@ Any destructive cleanup should require explicit opt-in and should only target re
 
 ### Figure 3: Dynamo Deployment / Runtime Layer
 
-After the cluster is bootstrapped, a user applies a `DynamoGraphDeployment`. The Dynamo Operator reconciles it into a Frontend pod (OpenAI-compatible API and routing) and one or more Worker pods that request GPU resources and run the model engine (e.g. vLLM). Service discovery uses NATS and the Kubernetes API by default.
+After the cluster is bootstrapped, a user applies a `DynamoGraphDeployment`. The Dynamo Operator reconciles it into workload resources via one of two paths: `DynamoComponentDeployment` resources, or Grove resources when Grove is installed and enabled. Either path results in a Frontend pod (OpenAI-compatible API and routing) and one or more Worker pods that request GPU resources and run the model engine (e.g. vLLM). Service discovery uses NATS and the Kubernetes API by default.
 
 ![Figure 3: Dynamo Deployment and Runtime Layer](0016_images/figure3-dynamo-runtime-layer.png)
 
@@ -74,7 +74,7 @@ The V1 pipeline is README-first and Terraform-native. Terraform remains the sour
 1. Choose the provider example.
 2. Review prerequisites and configure the required Terraform inputs for the selected provider.
 3. Run `terraform init`, `terraform plan`, and `terraform apply`.
-4. Configure Kubernetes access to the provisioned cluster.
+4. Configure kubectl access to the cluster.
 5. Install GPU Operator and Dynamo Platform Helm chart (installs Dynamo Operator, CRDs, and NATS; etcd is optional and only needed for legacy `discovery=etcd` mode).
 6. Follow the Dynamo documentation to deploy a DynamoGraphDeployment for the selected workload.
 7. Verify that the deployment is running.
@@ -93,7 +93,7 @@ Later work may add Terraform-native guidance and lightweight K8s/Dynamo checks, 
 | 5 | Cluster access and bootstrap | User can access the provisioned cluster and apply documented k8s bootstrap resources | P0 |
 | 6 | Dynamo deployment path | Dynamo can be deployed onto the prepared cluster by following the documented Dynamo path. | P0 |
 | 7 | Basic verification and cleanup docs | User can verify the deployment is running and follow documented cleanup steps. | P0 |
-| 8 | First-user trial run | Another engineer or mentor follows the README; gaps are captured and folded back into the docs. | P0 |
+| 8 | First-user trial run | Another engineer or mentor follows the README; gaps are documented and addressed. | P0 |
 | 9 | V1 hardening | Terraform inputs, docs, K8s bootstrap steps, and failure notes are cleaned up based on trial run feedback. | P0 |
 | 10 | P1 extension selection | Select one optional improvement based on time and mentor feedback: Terraform native guidance, smoke test automation, diagnostics guidance, GPU checks, cleanup planning, or a second cloud example. | P1 |
 | 11 | P1 implementation | Chosen P1 extension is implemented or prototyped without changing the Terraform-native V1 path. | P1 |
