@@ -42,6 +42,7 @@ P1 work comes after the base infrastructure and Dynamo deployment are working. T
 | Dry-Run Cleanup Planning | Help users identify resources from failed or partial deployments |
 | GPU-Aware Checks | Add checks for the default GPU deployment path, including GPU node readiness, GPU resource availability, and Nvidia device plugin or operator setup |
 | Second Cloud Example | Add another provider as a separate Terraform example after the first provider works |
+| Storage | Provision an S3 bucket and persistent volume to support larger models beyond small test workloads |
 
 ![Optional P1 Robustness Layer](0016_images/figure3-p1-robustness-layer.png)
 
@@ -74,11 +75,12 @@ The V1 pipeline is README-first and Terraform-native. Terraform remains the sour
 1. Choose the provider example.
 2. Review prerequisites and configure the required Terraform inputs for the selected provider.
 3. Run `terraform init`, `terraform plan`, and `terraform apply`.
-4. Configure kubectl access to the cluster.
+4. Configure kubectl access using the cluster name from Terraform output (e.g. `aws eks update-kubeconfig`).
 5. Install GPU Operator and Dynamo Platform Helm chart (installs Dynamo Operator, CRDs, and NATS; etcd is optional and only needed for legacy `discovery=etcd` mode).
-6. Follow the Dynamo documentation to deploy a DynamoGraphDeployment for the selected workload.
-7. Verify that the deployment is running.
-8. Follow documented cleanup steps when finished.
+6. Validate cluster readiness: confirm GPU nodes are ready, `nvidia.com/gpu` resources are available, and Dynamo Operator and NATS are running.
+7. Deploy a DynamoGraphDeployment using an example from the Dynamo repository (e.g. agg or disagg).
+8. Verify the deployment is running by port-forwarding the Frontend Service and sending a request to `/v1/chat/completions`.
+9. Follow documented cleanup steps when finished.
 
 Later work may add Terraform-native guidance and lightweight K8s/Dynamo checks, but those checks should not block the V1 deployment path.
 
