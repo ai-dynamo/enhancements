@@ -91,8 +91,10 @@ shared** by all three backends; stages 2–4 are where they diverge.
 | Type | `stage_output.images` — `list` (may hold one 5-D array) | `torch.Tensor` `(1, T, H, W, C)` `uint8` | `list[PIL.Image \| np.ndarray]` |
 | Normalization helper | `normalize_video_frames()` | `video[0].cpu().numpy()` | per-frame `np.array(...)` |
 
-> Three different in-memory shapes/types arrive at the encoder — this is exactly
-> what the future "thin conversion layer" will absorb.
+> Three different in-memory shapes/types are produced. Each backend's own
+> `to_canonical()` converter absorbs *its* shape into the canonical format, so
+> only the canonical `np.ndarray (T, H, W, 3) uint8` ever reaches the shared
+> encoder.
 
 ### Table 4 — Encoding (frames → bytes)
 
@@ -146,17 +148,39 @@ target of this work.
 ## Proposed Architecture
 
 Insert a single shared encoder between the backends and the existing file
-writer. Each backend feeds its raw pixels through a **thin conversion layer**
-(normalize to a canonical `np.ndarray (T, H, W, 3) uint8`), then calls the
-**unified encoder**, which dispatches to the right backend implementation.
+writer. The shared encoder accepts **only a canonical frame format** —
+`np.ndarray (T, H, W, 3) uint8` RGB. Each backend owns a small `to_canonical()`
+converter that maps *its own* native output into that format before calling
+`encode_video()`. Conversion logic that operates purely in the canonical domain
+(float→uint8 scaling, alpha drop, PIL→array stacking, contiguity) lives once in
+`dynamo.common` as small primitives; each backend converter composes those
+primitives with its own shape mapping.
+
+This keeps backend-specific shape knowledge inside the backend that produces it,
+and gives the shared encoder a single, narrow, well-typed input contract — no
+runtime type-sniffing, and adding a new backend never touches `dynamo.common`.
+
+> **Design note — why not one shared converter?** An earlier draft placed a
+> single `to_canonical_frames()` in `dynamo.common` that sniffed all three
+> backend shapes. That reintroduces the very "N-times change" coupling this DEP
+> removes (a new backend means editing shared code) and inverts the dependency
+> direction (shared infra knowing backend internals). Pushing conversion to the
+> producing edge fixes both.
 
 ```mermaid
 graph LR
-    V[vLLM frames] --> C[Thin conversion layer<br/>→ numpy T,H,W,3 uint8]
-    T[TRT-LLM frames] --> C
-    S[SGLang frames] --> C
+    V[vLLM frames] --> Cv[vLLM<br/>to_canonical]
+    T[TRT-LLM frames] --> Ct[TRT-LLM<br/>to_canonical]
+    S[SGLang frames] --> Cs[SGLang<br/>to_canonical]
 
-    C --> U{Unified encoder<br/>dispatch}
+    P[dynamo.common<br/>canonical primitives] -.shared by.-> Cv
+    P -.-> Ct
+    P -.-> Cs
+
+    Cv --> U{encode_video<br/>canonical only}
+    Ct --> U
+    Cs --> U
+
     U -->|NVIDIA| N[imageio → ffmpeg<br/>NVENC]
     U -->|new HW / codecs| F[ffmpeg CLI<br/>raw pipe]
 
@@ -164,6 +188,32 @@ graph LR
     F --> W
     W --> D[(file:// / s3:// …)]
 ```
+
+### Canonical frame format (encoder ABI)
+
+`encode_video()` accepts exactly one input shape and validates it on entry
+(raising `ValueError` on wrong ndim, channel count, or dtype):
+
+| Aspect | Contract |
+|---|---|
+| Type | `np.ndarray` |
+| Shape | `(T, H, W, 3)` |
+| dtype | `uint8` |
+| Range | `0–255` |
+| Channel order | RGB |
+
+**Per-backend converters** (each lives in its own package, next to the handler
+that produces the frames):
+
+| Backend | Native output | Converter |
+|---|---|---|
+| vLLM | `stage_output.images` — list holding one 5-D array | `dynamo.vllm` `to_canonical()` |
+| TensorRT-LLM | `torch.Tensor (1, T, H, W, C)` | `dynamo.trtllm` `to_canonical()` |
+| SGLang | `list[PIL.Image \| np.ndarray]` | `dynamo.sglang` `to_canonical()` |
+
+**Shared canonical-domain primitives** in `dynamo.common` (no backend
+knowledge), composed by the converters — e.g. `ensure_uint8_rgb(arr)`,
+`pil_frames_to_array(list)`, `drop_alpha(arr)`.
 
 ### Two encode paths
 
@@ -173,8 +223,10 @@ graph LR
 | **ffmpeg CLI (raw pipe)** | New hardware / codecs | imageio's ffmpeg plugin does **not** expose the options needed for hardware acceleration on non-NVIDIA encoders (device selection, `hwupload`, hardware filter chains). Driving `ffmpeg` directly via the command line (piping raw frames to stdin) is the only way to reach those encoders and to add codecs imageio doesn't surface. |
 
 The key principles: **(a)** the existing NVENC path is preserved unchanged;
-**(b)** the file-writing stage (`upload_to_fs`) is untouched; **(c)** all
-divergence collapses into one dispatch point.
+**(b)** the file-writing stage (`upload_to_fs`) is untouched; **(c)** codec /
+hardware divergence collapses into one dispatch point; **(d)** the encoder's
+input is the canonical format only — all backend-shape divergence is resolved
+*before* the shared layer, inside each backend's `to_canonical()`.
 
 ## Codecs and Hardware Support
 
@@ -254,28 +306,70 @@ where a backend wants them.
 | HW accelerator | `DYN_VIDEO_HW_ACCEL` (`auto`/`nvenc`/`xpu`/`cpu`) | `--video-hw-accel` |
 | HW device | `DYN_VIDEO_DEVICE` (index or render node) | `--video-device` |
 
-## Testing Impact
+## Testing
 
-Routing all three backends through the shared `encode_video()` changes which
-symbol each handler calls, so the existing tests that mock the old per-backend
-encode functions no longer line up. No test code has been changed yet; this
-section records what needs fixing when we return to it.
+## Principle
 
-### Table 5a — Affected tests
+The encoder is now one shared component with a narrow canonical ABI, so the
+tests mirror that split:
 
-| Test file | What it does today | Effect of the change | Fix |
-|---|---|---|---|
-| `components/src/dynamo/trtllm/tests/test_trtllm_video_diffusion.py` | Patches `…video_handler.encode_to_video_bytes` (≈9 sites) and asserts it is called with `fps=…, output_format="mp4"` | The handler now imports `encode_video`; patching the old name raises `AttributeError`, and the asserted kwargs no longer match | Repatch to `…video_handler.encode_video`; update assertions to the new signature (positional `fps`, `container="mp4"`) |
-| `components/src/dynamo/common/tests/test_video_utils.py` | Imports and exercises `encode_to_video_bytes` directly | Still passes — `encode_to_video_bytes` is retained — but gives **no coverage** of the new `encode_video` / `to_canonical_frames` path | Add cases for `encode_video` and the thin conversion layer (see 5b) |
-| SGLang / vLLM-Omni video output | No unit tests mock the old inline encoders (`_frames_to_video`, `export_to_video`) | No test breakage | None required |
+* **Encoder behavior is tested once, in `dynamo.common`**, against canonical
+  arrays — the shared suite has *no* backend knowledge.
+* **Each backend tests only its own `to_canonical()` converter and its handler
+  adapter.**
 
-### Table 5b — New coverage to add (later)
+No encoder logic is duplicated per backend, and "this backend emits shape X"
+lives with the backend, never in `dynamo.common`.
 
-| Area | Why |
+## Layer A — Shared encoder suite (`dynamo.common`)
+
+Location: `components/src/dynamo/common/tests/test_video_utils.py`.
+
+| Area | What it checks |
 |---|---|
-| `to_canonical_frames()` with each backend shape (`torch (1,T,H,W,C)`, list-with-5-D array, `list[PIL \| np]`) | Core of the unification; the one piece all three backends now depend on |
-| `encode_video()` dispatch (env-var resolution + `auto` → `nvenc`/`xpu`) | Verifies controls and platform auto-detection select the right path |
-| ffmpeg-CLI path (XPU) | Currently untested; mock `shutil.which` / `subprocess.run` and assert the VA-API command line |
+| Canonical primitives (`ensure_uint8_rgb`, `pil_frames_to_array`, `drop_alpha`) | float→uint8 scaling, alpha drop, PIL→array stacking, contiguity |
+| `encode_video()` ABI validation | rejects non-canonical input (wrong ndim / channel count / dtype) with `ValueError` |
+| `encode_video()` dispatch | control-resolution order (arg > `DYN_VIDEO_*` env > auto-detect) and `auto` → `nvenc`/`xpu`; both encode paths mocked |
+| ffmpeg-CLI path | mock `shutil.which` / `subprocess.run`; assert the VA-API command line |
+| Real round-trip (`skipif` no ffmpeg) | encode N canonical frames → demux/decode → assert frame count, `W×H`, container magic — the one test that touches a real bitstream |
+
+## Layer B — Backend adapter suites (per backend)
+
+Location: each backend's own `tests/`.
+
+| Test | What it checks |
+|---|---|
+| `to_canonical()` round-trip | build a known-truth canonical array with **distinctive per-pixel values** → synthesize the backend's real native shape from it → `to_canonical()` → assert **bit-exact equal** to the truth (distinctive values catch axis / channel-order bugs) |
+| Handler adapter | run the handler with `encode_video` patched; assert it passes canonical frames and forwards `fps` / `container` |
+| Response wrapping | `url` → storage upload; `b64_json` → base64 of the returned bytes |
+
+## Migration of existing tests
+
+| Test file | Change |
+|---|---|
+| `…/trtllm/tests/test_trtllm_video_diffusion.py` | Repatch the ≈9 `encode_to_video_bytes` sites to `encode_video`; drop the `output_format=` kwarg assertions (now `container=`, `fps` positional); move frame-shape handling into the new `to_canonical()` round-trip test |
+| `…/common/tests/test_video_utils.py` | Keep the `encode_to_video_bytes` coverage (function retained); add the Layer-A cases above. The removed `to_canonical_frames` god-function has no direct test — it is replaced by the primitives (Layer A) plus per-backend converters (Layer B) |
+| SGLang / vLLM-Omni video output | Add Layer-B suites (converter round-trip + handler adapter); no old inline encoder is mocked today, so nothing breaks |
+
+## CI placement — what we add, where it lands
+
+CI selects tests by **marker expression** (`pytest -m "…"`) over a repo-wide
+collection — no test file is enumerated in any workflow, so a correctly placed
+and marked file is picked up automatically. Every test carries one marker from
+each of Lifecycle / Test Type / Hardware (enforced by the `pytest-marker-report`
+pre-commit hook), and all markers are pre-registered (`--strict-markers`).
+
+| File | Markers | CI job (marker expr) |
+|---|---|---|
+| `components/src/dynamo/common/tests/test_video_utils.py` | `unit`, `pre_merge`, `gpu_0` (no backend marker) | CPU job: `pre_merge and not (vllm or sglang or trtllm) and gpu_0` |
+| `components/src/dynamo/trtllm/tests/test_trtllm_video_diffusion.py` | `unit`, `trtllm`, `pre_merge`, `gpu_0` | TRT-LLM job: `pre_merge and trtllm and gpu_0` |
+| `components/src/dynamo/vllm/tests/…` (Layer-B) | `unit`, `vllm`, `pre_merge`, `gpu_0` | vLLM job: `pre_merge and vllm and gpu_0` |
+| `components/src/dynamo/sglang/tests/…` (Layer-B) | `unit`, `sglang`, `pre_merge`, `gpu_0` | SGLang job: `pre_merge and sglang and gpu_0` |
+
+> Placement note: SGLang tests go under `sglang/tests/`, **not**
+> `sglang/request_handlers/` — the latter is excluded from pytest collection by
+> an `--ignore-glob` in `pyproject.toml`. All suites are fully mocked; the real
+> round-trip is CPU / libx264 and `skipif`-guarded, so no job needs a GPU.
 
 # Alternate Solutions
 
