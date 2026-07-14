@@ -99,7 +99,7 @@ Consistent with Principle 2, this design uses the same router-directed source mo
 
 Figure 1 summarizes the component boundaries and an example destination-initiated peer transfer; dashed green outlines denote optional deployment components.
 
-![KV Cache Controller component overview](component_overview.svg)
+![KV Cache Controller component overview](./0016_images/component_overview.svg)
 
 **Framework / Engine**
 - Sole owner of GPU memory: all block allocation, eviction decisions, scheduling
