@@ -17,7 +17,7 @@ explanation and details.
 2. Identify a `code-owner` or `maintainer` of the DEP repository to
    shepard the process.
 
-3. Create a draft PR and iterate with co-authors, Sponser
+3. Create a draft PR and iterate with co-authors, Sponsor
 
-4. When ready for review, mark as ready and work with Sponser to set a
+4. When ready for review, mark as ready and work with Sponsor to set a
    review date.
