@@ -96,6 +96,14 @@ ext_proc request
 This mirrors the useful part of the llm-d / GAIE flow (PrepareData, then
 admission, then scheduling) without the surrounding machinery.
 
+```
+Parse body → Build LLMRequest → Admission (flow control)
+    → PrepareData plugins  ← tokenization runs here
+    → Admission plugins
+    → Scheduler (Filter → Score → Pick)
+    → PreRequest plugins → route to model server
+```
+
 ## What becomes pluggable, and what does not
 
 | Stage | Pluggable now? | Rationale |
@@ -125,6 +133,7 @@ are not making parsing, scoring, or picking pluggable at this time.
   stops the request.
 * The scheduler then runs unchanged, consuming the token data that PrepareData
   produced.
+* We should also reconsider how to do priority scheduling to decide if we want to align with GAIE. See related [proposal](https://github.com/ai-dynamo/enhancements/pull/90/changes)
 
 ## Configuration
 
