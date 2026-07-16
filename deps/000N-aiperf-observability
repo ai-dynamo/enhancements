@@ -1,0 +1,166 @@
+# RFC: Live Telemetry + MLflow Experiment Tracking for AIPerf
+
+**Target repo:** `ai-dynamo/aiperf`  
+**Last updated:** 2026-01-20
+
+## Summary
+
+This RFC proposes two capabilities for NVIDIA AIPerf:
+
+1. **Live OpenTelemetry (OTel) metrics emission** during benchmark execution to enable real-time monitoring and partial-result visibility. This avoids the current "all-or-nothing" experience where a benchmark failure can leave users with little or no usable data.
+
+2. **Optional MLflow integration** for experiment tracking: run grouping, parameter/metric comparison, artifact storage, reproducibility metadata, and dashboards—largely leveraging MLflow's built-in capabilities.
+
+These additions are intended to be opt-in and preserve AIPerf's current artifact outputs and directory layout.
+
+## Motivation
+
+AIPerf already produces strong post-run artifacts (JSON/CSV exports, inputs, logs) in a structured artifact directory. However, for long runs or high-load scenarios, failures happen (timeouts, connection issues, port exhaustion, backend instability). Today, users often lack:
+
+- Real-time visibility (progress, errors, throughput trends while the benchmark is running)
+- Partial result preservation (so a failure does not wipe out all data)
+- A consistent system-of-record for comparing runs across model versions, server builds, traffic profiles, and tuning knobs
+
+OpenTelemetry provides a standard way to stream metrics to existing monitoring stacks, and MLflow provides run management, comparison UI, and artifact storage for benchmark experiments.
+
+## Goals & Non-Goals
+
+### Goals
+
+- Real-time observability into benchmark progress and health (latency/throughput/error trends)
+- Preserve partial results even on failure
+- Enable experiment management via MLflow: grouping, comparison, artifact collection, and searchable metadata
+
+### Non-Goals (initial)
+
+- Do not replace existing AIPerf artifacts; continue writing current JSON/CSV exports and logs
+- Do not require an external telemetry backend or MLflow server; default remains local/offline
+- Do not add new benchmark modes; this RFC focuses on instrumentation + tracking
+
+## Proposal A: Live OpenTelemetry Metrics
+
+### Metrics to emit
+
+Emit OpenTelemetry metrics during execution:
+
+#### Run-level gauges
+
+- in-flight requests
+- effective request rate (when applicable)
+- active workers/processes
+- phase markers (warmup vs measurement vs cooldown)
+
+#### Counters
+
+- requests started / completed
+- errors (grouped: timeout, HTTP status family, connection, server error)
+- cancellations triggered (if request cancellation enabled)
+
+#### Histograms
+
+- TTFT, ITL, TPOT, E2E latency
+- tokens/sec (overall and per-request or per-timeslice)
+- input/output token counts (bucketed)
+
+#### Goodput/SLO metrics (when enabled)
+
+- goodput vs total throughput
+
+### Labels (dimensions)
+
+Use low-cardinality labels:
+
+- `benchmark_name`, `run_id`, `mode`, `endpoint_type`, `model`, `tokenizer`
+- `concurrency`, `request_rate`, `max_concurrency`
+- `aiperf_version`, `git_sha` (if available)
+
+### Export paths
+
+Support two exporters:
+
+1. **OTLP exporter:** send to an OpenTelemetry Collector which can route to Prometheus/Grafana/Datadog/etc. OTLP exporters preserve the OTel data model and are widely supported.
+
+2. **Prometheus scrape exporter:** expose a `/metrics` endpoint.
+
+### How this solves "all-or-nothing"
+
+Metrics are continuously emitted; even if the run fails, users still have:
+
+- a time series of progress/error/latency trends
+- the last-known values for key stats
+- a stronger basis for root-cause analysis
+
+## Proposal B: MLflow Integration (Experiment Tracking)
+
+MLflow Tracking provides APIs/UI to log parameters, metrics, and artifacts and compare runs over time.
+
+### What AIPerf gets from MLflow
+
+By integrating with MLflow, users can immediately benefit from:
+
+- Experiment grouping (runs organized under an Experiment)
+- Search/filter runs by params/tags/metrics
+- Comparison UI for metrics across runs
+- Artifact storage: store AIPerf JSON/CSV exports, logs, plots, inputs
+- Reproducibility metadata by logging configs and versions consistently
+
+### What AIPerf should log
+
+#### Parameters
+
+- All benchmark configuration knobs (mode, endpoint type, model/tokenizer identifiers, traffic profile, seed, schedule/timeslice configuration, goodput thresholds, etc.)
+
+#### Metrics
+
+- Final aggregate metrics: p50/p90/p95/p99 for TTFT/ITL/TPOT/E2E, throughput (RPS/TPS), error rates, goodput
+- Timeslice metrics as step-series (if enabled)
+
+#### Tags
+
+- Engine/backend name, model identifier, build ID, environment descriptors
+
+#### Artifacts
+
+- Existing AIPerf exports (`profile_export_aiperf.json`/`.csv`, raw exports)
+- benchmark inputs/config snapshot
+- logs, plots (if generated)
+
+## Design
+
+### Add a "Telemetry & Tracking" abstraction layer
+
+Introduce lightweight interfaces:
+
+#### `MetricsEmitter`
+
+- `record_request(...)`, `record_timeslice(...)`, `set_gauge(...)`, `flush()`, `close()`
+- Implementations:
+  - `NoopEmitter` (default)
+  - `OTelEmitter` (OTLP/Prometheus)
+
+#### `ExperimentTracker`
+
+- `start_run(metadata)`, `log_params`, `log_metrics`, `log_artifacts`, `end_run(status)`
+- Implementations:
+  - `NoopTracker`
+  - `MLflowTracker`
+
+This keeps the core benchmark loop clean and matches AIPerf's modular design goals.
+
+### Failure handling
+
+Emitters/trackers must be best-effort:
+
+- never crash the benchmark when telemetry is unavailable
+- use bounded queues/timeouts
+- on fatal benchmark error: flush checkpoint + close gracefully
+
+### Backward compatibility
+
+- Default behavior unchanged
+- New features are opt-in
+- Current artifact directory structure and export formats remain intact
+
+## Implementation
+
+I'm happy to implement these changes and upstream them as PRs (preferably phased PRs to keep reviews manageable), and to follow maintainers' preferences for metric names, artifact schema, and CLI ergonomics.
