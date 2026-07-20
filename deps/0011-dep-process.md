@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All 
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# DEP-0011: The Dynamo Enhancement Proposal (DEP) Process
+# DEP-0011: The DEP Process and SIG Governance
 
 **Status**: Draft
 
