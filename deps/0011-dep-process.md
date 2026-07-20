@@ -21,7 +21,7 @@ SPDX-License-Identifier: Apache-2.0
 
 **Review Date**: TBD
 
-**Pull Request**: [ai-dynamo/enhancements#__N_PR__](https://github.com/ai-dynamo/enhancements/pull/__N_PR__)
+**Pull Request**: [ai-dynamo/enhancements#98](https://github.com/ai-dynamo/enhancements/pull/98)
 
 **Implementation PR / Tracking Issue**: render + comment mirror on [ai-dynamo/dynamo#11687](https://github.com/ai-dynamo/dynamo/pull/11687); tracking issue [ai-dynamo/enhancements#97](https://github.com/ai-dynamo/enhancements/issues/97)
 
