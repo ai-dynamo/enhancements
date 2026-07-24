@@ -32,7 +32,7 @@ SPDX-License-Identifier: Apache-2.0
 
 I recommend Dynamo adopt one DEP process: proposals live in the dedicated `ai-dynamo/enhancements` repository, and each one renders as a page on the Dynamo docs site (Fern, `docs.nvidia.com/dynamo`) with a one-way mirror of its GitHub review. The mirror surfaces line-level review comments anchored on the exact text, the pull-request conversation, and the tracking-issue thread, each with a deep-link back to GitHub to reply.
 
-Dynamo is a multi-product, multi-repo project. Most DEPs cut across the Router, the Planner, KVBM, Deploy, the LLM engine, and OPS, so no single code repository is their natural home. A dedicated proposals repository is the model that projects with our topology use — Rust, Kubernetes, React, Swift, Python, Vue — for exactly that reason. As Dynamo adopts SIG-based governance (Special Interest Groups, or SIGs, the Kubernetes governance model), a SIG owns a DEP, not a code repo, so the dedicated repo is the right structure, not a compromise. The historical cost of a dedicated repository was weaker visibility and no line-level design discussion. We built the fix and proved it. On the live docs preview, a real 509-line DEP (Nova, `ai-dynamo/enhancements` PR #61) rendered with the majority of its human line-level review anchored inline on the exact text and the remainder in a graceful fallback panel, plus the PR conversation and the tracking-issue thread, in both light and dark mode. Bot and CI comments are filtered out.
+Dynamo is a multi-product, multi-repo project. Most DEPs cut across several of the owned areas the repository's CODEOWNERS taxonomy defines, so no single code repository is their natural home. A dedicated proposals repository is the model that projects with our topology use — Rust, Kubernetes, React, Swift, Python, Vue — for exactly that reason. As Dynamo adopts SIG-based governance (Special Interest Groups, or SIGs, the Kubernetes governance model), a SIG owns a DEP, not a code repo, so the dedicated repo is the right structure, not a compromise. The historical cost of a dedicated repository was weaker visibility and no line-level design discussion. We built the fix and proved it. On the live docs preview, a real 509-line DEP (Nova, `ai-dynamo/enhancements` PR #61) rendered with the majority of its human line-level review anchored inline on the exact text and the remainder in a graceful fallback panel, plus the PR conversation and the tracking-issue thread, in both light and dark mode. Bot and CI comments are filtered out.
 
 Net: keep the dedicated-repo model that fits a multi-repo project, and add the rendering and discussion layer that gives it public visibility and inline design review. Authoring stays GitHub-native and low-burden. Readers get one clean, shareable, cross-linked page.
 
@@ -112,7 +112,7 @@ Net: this takes the dedicated-repo model — correct for a multi-repo project �
 
 The strongest argument against a dedicated repository is that planning docs stored away from the code lead to confusion and missed documentation. That is a real risk, and it is the reason single-repo projects colocate proposals with code.
 
-The rendering layer answers it head-on. Rendered DEPs live on the same docs site as every other piece of Dynamo documentation, cross-linked to the repositories and components they affect, and indexed alongside the rest of the docs. A reader finds a DEP the same way they find any Dynamo doc — by searching or browsing one site. Compare that to the alternative the objection implies: proposal folders scattered across the Router, Planner, Deploy, LLM-engine, and OPS repositories, each with its own path and none holding the cross-cutting ones. Discoverability is higher with one rendered, indexed home than with per-repo folders. The residual risk — that a DEP goes stale after the code moves on — exists in any location; the status lifecycle below handles it, not the choice of repository.
+The rendering layer answers it head-on. Rendered DEPs live on the same docs site as every other piece of Dynamo documentation, cross-linked to the repositories and components they affect, and indexed alongside the rest of the docs. A reader finds a DEP the same way they find any Dynamo doc — by searching or browsing one site. Compare that to the alternative the objection implies: proposal folders scattered across the code repositories, each with its own path and none holding the cross-cutting ones. Discoverability is higher with one rendered, indexed home than with per-repo folders. The residual risk — that a DEP goes stale after the code moves on — exists in any location; the status lifecycle below handles it, not the choice of repository.
 
 ### Native PR ↔ Issue Linking Is Preserved
 
@@ -317,7 +317,7 @@ These are open for DEP review to settle. This proposal does not decide them.
 
 **Cons**:
 
-* No home for a cross-cutting DEP that spans the Router, Planner, Deploy, LLM engine, and OPS.
+* No home for a cross-cutting DEP that spans many owned areas at once.
 * Duplication and drift when someone copies a proposal across repositories.
 
 **Reason Rejected**:
@@ -349,7 +349,7 @@ The recommended option is not free. It adds a rendering layer to maintain, a one
 
 Dynamo's design-proposal process has moved twice, and this DEP is the third step.
 
-**The dedicated repository came first.** `ai-dynamo/enhancements` was created as the home for Dynamo Enhancement Proposals, with a KEP-style layout and an approved process DEP (`deps/0000-dep-process.md`). Proposals were markdown files under `deps/`, added by pull request — the same shape this DEP recommends.
+**The dedicated repository came first.** `ai-dynamo/enhancements` was created as the home for Dynamo Enhancement Proposals, with a KEP-style layout and an approved process DEP (`deps/0000-dep-process.md`). Proposals were markdown files under `deps/`, added by pull request — the dedicated-proposals-repo model that Kubernetes (KEPs), Python (PEPs), and Rust (RFCs) use for cross-cutting design (see Precedent), and the shape this DEP recommends.
 
 **Cross-cutting DEPs then drifted to GitHub issues on `ai-dynamo/dynamo`.** An issue-per-DEP model was adopted inside the code repository because it was low-friction and because GitHub's native pull-request-to-issue linking (`Fixes #123`) and the linked-pull-requests panel came for free. Most of that convenience turned out to be a same-repository feature: across repositories a closing keyword only produces a cross-reference, and Dynamo's implementation PRs land across many repos, so the linking that motivated the move never held for cross-cutting work (see Native PR ↔ Issue Linking Is Preserved).
 
