@@ -200,12 +200,46 @@ This mirrors the useful part of the llm-d / GAIE flow (PrepareData, then
 admission, then scheduling) without the surrounding machinery.
 
 ```
-Parse body → Build LLMRequest → Admission (flow control)
-    → PrepareData plugins  ← tokenization runs here
-    → Admission plugins
+Parse body → Build LLMRequest → Admission (flow control)   ← builtin, not pluggable
+    → DataProducer plugins   ← tokenization runs here
+    → Admitter plugins       ← can reject
     → Scheduler (Filter → Score → Pick)
     → PreRequest plugins → route to model server
 ```
+
+### Alignment with llm-d's two admission layers
+
+llm-d admits in two distinct places. The distinction is easy to miss because both
+are called "admission", and it is worth naming here because it is what makes this
+DEP's single shedding seam a deliberate choice rather than an arbitrary one:
+
+* **Flow control** runs first and is a *builtin*. Capacity rejection
+  (`maxBytes` / `maxRequests`), TTL eviction, and priority-band traversal are
+  infrastructure that protects the gateway process itself, so they are not
+  swappable. Priority-band selection is, in their words, "hardcoded and not
+  pluggable," and the queue contract states that "capacity management occurs
+  outside the queue implementation." Only the *signal* (`SaturationDetector`), the
+  *curve* (`UsageLimitPolicy`), and the *order* (`FairnessPolicy`,
+  `OrderingPolicy`) are plugins.
+* **`Admitter` plugins** run after `DataProducer` and before scheduling, and these
+  *can* reject outright. `latency-slo-admitter` ships in-tree.
+
+The load-shedding plugin proposed here is the `Admitter`: same pipeline position,
+same ordering relative to data preparation, same ability to reject. That
+correspondence is the reason the seam sits where it does.
+
+Excluding the flow-control layer (see Non Goals) is therefore not in tension with
+making shedding pluggable — upstream does not make that layer pluggable either.
+Dynamo's existing generic sheds are the local equivalent of it and stay as they
+are: the per-class caps enforced by `queue_rejection()` in `policy_queue.rs`, the
+EPP's in-flight semaphore (`DYN_EPP_MAX_INFLIGHT_REQUESTS`), and the worker engine
+request limit.
+
+The upstream split between the saturation *signal* and the admit/reject *decision*
+is a refinement this DEP does not currently make — it proposes one plugin that
+does both. Whether to split them is worth settling alongside REQ 1, since making
+the signal itself the seam would turn "one source of truth for overload" from a
+convention into a structural property.
 
 ## What becomes pluggable, and what does not
 
@@ -408,6 +442,11 @@ lands second will need a small merge resolution in `picker.rs` and `epp.rs`.
 * Over-engineered for current needs. The two plugins plus the shared state view cover
   the real use cases (custom tokenizer, custom overload policy). Additional
   extension points can be proposed later if a concrete need appears.
+* The gap is also narrower than it looks. `DataProducer` and `Admitter` are the only
+  two plugin points llm-d places between request parsing and scheduling, so this
+  proposal already matches upstream over that span. What Alt 1 adds beyond it is the
+  flow-control machinery and pluggable scoring — both already Non Goals, and the
+  former not pluggable upstream either.
 
 ## Alt 2 Keep load shedding / tokenization out of the EPP (gateway-level only)
 
