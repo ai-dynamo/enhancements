@@ -44,7 +44,7 @@ rebuilt privately by every implementation. Everything else — parsing, the KV-a
 scheduler/picker, and bookkeeping — stays built in. We deliberately do not reproduce
 the full llm-d pipeline.
 
-The worker-state view is the load-bearing addition. A shedding policy that cannot
+The worker-state view is a critical addition. A shedding policy that cannot
 see KV-cache and prefill saturation is not a shedding policy, and today no extension
 point can see it: `EndpointPicker::pick` receives request metadata and an endpoint
 list carrying pod identity only, so any out-of-tree policy must stand up a parallel
@@ -68,26 +68,19 @@ policy must fork it. Three concrete needs drive this proposal:
   serving must look at KV-cache and queue saturation, not generic request rate.
   It belongs inside the EPP and users want to supply their own policy. Dynamo's
   frontend already sheds load (HTTP 529); the GAIE path needs the same, made
-  extensible. The *built-in* half of this is in flight in
+  extensible. The frontend's shed is a routing failure surfaced as an error, discovered after the request has already been parsed and tokenized. But customers pressing on explicit rejection versus implicit shed. The frontend returns 529 (configurable via DYN_HTTP_OVERLOAD_STATUS_CODE) with no retry hint. The EPP will return 429 with Retry-After. Both choices are intentional: 429 is what a gateway and its failover logic already understand, and the retry hint is new capability rather than parity.
+  The *built-in* half of this is in flight in
   [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865), which
   reuses the frontend's `KvWorkerMonitor` and adds a `PickError::Saturated
-  { retry_after_secs }` variant surfaced as HTTP 429 with `Retry-After`. That
-  makes shedding an explicit, gateway-routable routing signal rather than an
-  implicit shed-by-timeout — but the thresholds are process-wide environment
-  variables and the predicate is fixed. What remains is the seam that lets a
-  deployment supply its own predicate.
-- **Policy state must be shared, not rebuilt.** Every interesting overload or
-  prioritization policy consumes the same family of signals: active decode blocks
-  and KV used blocks against `kv_total_blocks`, and active prefill tokens against
+  { retry_after_secs }` variant surfaced as HTTP 429 with `Retry-After`. What remains is the wiring for the plugin. Caveat: One frontend capability also does not carry
+  over: `POST`/`GET /busy_threshold` retunes thresholds per model on a live fleet,
+  whereas the EPP reads env vars once at startup. Closing that is out of scope here but needs to be done.
+- **Policy state must be shared.** Every prioritization policy consumes the same family of signals: active decode blocks and KV used blocks against `kv_total_blocks`, and active prefill tokens against
   `max_num_batched_tokens`. The EPP already tracks these in `WorkerLoadState`. They
   are not reachable from any extension point, so each out-of-tree policy would have
-  to re-derive them from its own subscription — duplicate plumbing, and a second
+  to re-derive them from its own subscription. We want to avoid duplicate plumbing, and a second
   source of truth that can silently disagree with the one the built-in shedder uses.
-  The disagreement is not hypothetical: decode overload is *latched*, clearing only
-  once both the active-blocks and kv-used-blocks signals fall back under threshold,
-  so a reimplementation fed identical raw metrics but lacking the latch will flap
-  where the built-in shedder holds steady. This is the single most requested item
-  from integrators (REQ 1) and the main change in this revision.
+  This leads to (REQ 1).
 
 ## Goals
 
@@ -98,10 +91,12 @@ policy must fork it. Three concrete needs drive this proposal:
   of truth.
 * Move today's inline tokenization behind the default PrepareData plugin with no
   behavior change.
-* Ship a default load-shedding plugin with parity to the frontend's
-  saturation / busy-threshold behavior.
-* Keep the architecture simple; an unconfigured Rust EPP behaves as it does
-  today.
+* Ship a default load-shedding plugin that reuses the frontend's saturation /
+  busy-threshold *detection* — the same `KvWorkerMonitor`, thresholds, and
+  overloaded-worker exclusion — while deliberately diverging on the decision surface:
+  an explicit pre-tokenization gate rather than a routing failure surfaced as an
+  error, and HTTP 429 with `Retry-After` rather than 529. Full parity is not the
+  goal; a shared detector with a gateway-appropriate contract is.
 * Allow users to add plugins via compile-time registration in a custom Rust EPP
   binary/image.
 
@@ -114,8 +109,9 @@ policy must fork it. Three concrete needs drive this proposal:
   request, but it does not participate in scoring or selection.
 * Steering the router's internal scoring from an EPP extension — for example
   zeroing a worker's prefix-overlap credit, retuning the KV indexer's TTL decay, or
-  forcing an index resync for one worker. These are legitimate needs (see REQ 4)
-  but they are operations on the router's own state, not on the EPP's request path,
+  forcing an index resync for one worker. Integrators have asked for these, and they
+  are legitimate needs, but they are operations on the router's own state, not on the
+  EPP's request path,
   and giving the EPP a back door into them would create exactly the coupling the
   first non-goal avoids. They belong to the router and its policy-class admission
   API.
@@ -153,38 +149,38 @@ gateway, with a retry hint. **Met by
 { retry_after_secs }` → HTTP 429 with `Retry-After`. Because it is an ordinary error
 variant, an out-of-tree policy can return it too.
 
-### REQ 3 Response usage on the completion callback
 
-The terminal response's token usage — at minimum
-`usage.prompt_tokens_details.cached_tokens` — must reach the picker so a deployment
-can compare predicted prefix overlap against the observed cache hit. **Met by
-[dynamo#11868](https://github.com/ai-dynamo/dynamo/pull/11868)** ("Enable
-cached_tokens in EPP response", DYNO-93), which adds
-`on_request_complete_with_usage`. Note this is a
-per-request feedback input, not telemetry: the `dynamo_epp_cached_tokens` histogram
-added alongside it is labelled by model only and cannot be joined to an individual
-pick decision.
+### REQ 3 Class-aware shed thresholds
 
-### REQ 4 Closed-loop calibration of the predictor
+Today the threshold is one number for everybody. For example, shed when a worker is over 85% KV-block occupancy. The #11865 rejects only when every eligible worker is over it. So the pool has exactly two states: open to all, or closed to all. The moment saturation is crossed, a 200-token chat request and a 100k-token request get treated identically: both get a 429. The customers want flexibility here as not all requests are equal under load. The EPP already knows prompt size because it tokenized, and a retry marker is one header away so we can extend this.
+The router side already has most of the machinery: the KV router already assigns a request to a class either by explicit name or by an uncached ISL bucket — that is, bucketed on the tokens that actually need prefilling, which is a better cost proxy than raw prompt length. So request-size-aware classes exist; what's missing is expressing shed thresholds per class rather than process-wide.
 
-Sustained disagreement between predicted overlap and reported `cached_tokens` should
-be able to act on the predictor: retune decay parameters where routing is
-approximate, and demote or resync a diverged worker where it is event-driven.
-**Out of scope for this DEP**, and worth being explicit about why. The actions are
-operations on router state, unreachable from `EndpointPicker` — an extension can
-wrap the picker but cannot change how the picker scores. Recording the error ledger
-is already possible with REQ 3; acting on it is router work. Note also that the EPP
-has no approximate-routing mode today, so the parameter-adaptation half of this
-requirement has no surface to act on.
+The classifier itself is reusable — `PolicyProfile::resolve_class_index` is public, not
+scheduler-internal. The complication is its argument: it takes *uncached* tokens, and
+the EPP cannot know those at shed time. Overlap comes from the KV index query inside
+`pick()`, whereas the shed gate runs before the body is even decoded. So this
+requirement resolves into one of three options, which differ in cost and in whether the
+router changes at all:
 
-### REQ 5 Class-aware shed thresholds
+1. **Classify on raw token count in the EPP.** No router change. The EPP keeps its own
+   per-class threshold table and buckets on prompt length. Cheapest, but the EPP's
+   class for a request then disagrees with the router's, so one request can be a
+   "small" shed class and a "large" queue class at the same time — the two-sources-of-
+   truth problem this DEP objects to elsewhere, in a new place.
+2. **Move the shed gate after tokenization and the overlap query.** No router change,
+   and class identity stays consistent, but it gives up the cheap pre-parse refusal
+   that distinguishes the EPP's shed from the frontend's error-driven one.
+3. **Push the decision into the router**, where uncached tokens and class assignment
+   already sit together. This is the only option requiring a router contract change:
+   `AdmissionDecision` is `Bypass | Ready | Defer` today, with no rejection variant, so
+   the policy-class admission API can hold a request indefinitely but cannot shed one.
 
-A uniform threshold turns "nearly full" into "closed for everyone at once," which is
-when retry amplification starts. Shedding should be able to distinguish request
-classes — keeping small first attempts flowing while shedding oversized retries,
-which are the cheapest to redirect. **Not met in the EPP.** The EPP already knows
-prompt size because it tokenized, and a retry marker is one header away. The router
-side already has most of the machinery; see the division of labor below.
+A related question is where per-class thresholds are configured. They arguably belong
+beside the class definitions in the router's policy YAML — which already carries a
+per-class `admission:` envelope — rather than in EPP environment variables, since
+splitting class definitions from class thresholds invites drift.
+
+This DEP does not pick one yet; the choice should be made before implementation starts.
 
 # Proposal
 
@@ -311,7 +307,7 @@ you cheaply refuse work you should never start, and the scheduler is where you h
 work that is worth waiting for. Building a third mechanism to span them would be a
 mistake.
 
-This division also gives REQ 5 its natural home. Policy classes are already assigned
+This division also gives REQ 3 its natural home. Policy classes are already assigned
 either by explicit class name or by a `(policy family, uncached-ISL bucket)` pair —
 that is, **request-size-aware classes already exist** in the router, which is most of
 what class-aware shedding asks for. The remaining work is connective rather than new
@@ -353,7 +349,7 @@ loading in this first cut.
 4. Add the config plumbing to select / chain plugins, with the built-in shedder as
    the default load-shedding plugin.
 5. Express shed thresholds per policy class rather than process-wide, reusing the
-   router's existing class assignment. Satisfies REQ 5.
+   router's existing class assignment. Satisfies REQ 3.
 6. Document the authoring model and ship one example custom plugin alongside the
    existing GAIE docs.
 
@@ -368,7 +364,7 @@ frozen around the wrong shape.
   fleet-level loop. One worker-state surface should feed both the Relay and the
   EPP's policies rather than two parallel paths.
 * [Priority scheduling proposal](https://github.com/ai-dynamo/enhancements/pull/90) —
-  decides whether EPP-side prioritization aligns with GAIE; REQ 5 depends on the
+  decides whether EPP-side prioritization aligns with GAIE; REQ 3 depends on the
   outcome.
 * [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865) — "Enable load
   shedding in the EPP" (DEP-1073). Adds the built-in shedder this DEP's default plugin
@@ -377,9 +373,11 @@ frozen around the wrong shape.
   `WorkerLoadState` is exactly what REQ 1 proposes to expose.
 * [dynamo#11868](https://github.com/ai-dynamo/dynamo/pull/11868) — "Enable
   cached_tokens in EPP response" (DYNO-93). Parses `usage` from the response body and
-  adds `on_request_complete_with_usage`, giving a policy the observed cache hit to
-  compare against its predicted overlap. Satisfies REQ 3 and is the precondition for
-  the error ledger described in REQ 4.
+  adds `on_request_complete_with_usage`. Not a plugin concern — it extends a built-in
+  `EndpointPicker` callback, and neither plugin point in this proposal runs on the
+  response path — but it is adjacent in-flight work in the same crate, and it supplies
+  the observed cache hit that integrators want for comparing predicted overlap against
+  actual, which this DEP treats as router work rather than an extension point.
 
 The two are complements, not overlaps: #11865 reads worker capacity on the request
 path to decide whether to admit, and #11868 reads request outcome on the response
