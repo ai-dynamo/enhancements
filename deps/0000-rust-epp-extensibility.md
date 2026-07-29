@@ -1,4 +1,4 @@
-# Make the Dynamo Rust EPP Extensible (PrepareData + Load Shedding)
+# Make the Dynamo Rust EPP Extensible (PrepareData + Load Shedding + Worker State)
 
 **Status**: Draft
 
@@ -16,9 +16,13 @@
 
 **Review Date**: [TBD]
 
-**Pull Request**: [TBD — link to this PR in ai-dynamo/enhancements]
+**Pull Request**: [ai-dynamo/enhancements#96](https://github.com/ai-dynamo/enhancements/pull/96)
 
-**Implementation PR / Tracking Issue**: [TBD — link to ai-dynamo/dynamo tracking issue]
+**Implementation PR / Tracking Issue**: [TBD — link to ai-dynamo/dynamo tracking issue].
+Related in-flight work: [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865)
+(built-in load shedding, DEP-1073) and
+[dynamo#11868](https://github.com/ai-dynamo/dynamo/pull/11868) (response usage on the
+completion hook).
 
 # Summary
 
@@ -29,19 +33,29 @@ follows the GAIE / llm-d pipeline and supports plugins — is being deprecated, 
 the Rust EPP becomes the single EPP and must absorb the extensibility that
 previously only existed in Go.
 
-This proposal adds a minimal, two-hook extension model to the Rust EPP so users
-can supply their own code at exactly two points: **PrepareData** (per-request
-data preparation before scheduling; tokenization is the first use) and **load
-shedding / admission** (reject a request under overload before scheduling).
-Everything else — parsing, the KV-aware scheduler/picker, and bookkeeping —
-stays built in. We deliberately do not reproduce the full llm-d pipeline.
+This proposal adds a minimal extension model to the Rust EPP: **two hooks and one
+shared input**. The hooks are **PrepareData** (per-request data preparation before
+scheduling; tokenization is the first use) and **load shedding / admission** (reject
+a request under overload before scheduling). The shared input is a read-only
+**worker-state view** — the KV and prefill load signal that overload decisions
+actually depend on — exposed once at the extension boundary instead of being
+rebuilt privately by every implementation. Everything else — parsing, the KV-aware
+scheduler/picker, and bookkeeping — stays built in. We deliberately do not reproduce
+the full llm-d pipeline.
+
+The worker-state view is the load-bearing addition. A shedding policy that cannot
+see KV-cache and queue saturation is not a shedding policy, and today no extension
+point can see it: `EndpointPicker::pick` receives request metadata and an endpoint
+list carrying pod identity only, so any out-of-tree policy must stand up a parallel
+state feed. Exposing state as an input is deliberately *not* the same as making
+scoring pluggable, which remains a non-goal.
 
 # Motivation
 
 The Go EPP is being deprecated, and its plugin-based extensibility goes away with
 it. The Rust EPP cannot currently be extended: all logic lives in one router
 implementation, so users who want custom tokenization or custom load-shedding
-policy must fork it. Two concrete needs drive this proposal:
+policy must fork it. Three concrete needs drive this proposal:
 
 - **Tokenization must be swappable.** Different deployments tokenize differently
   (in-process, vLLM `/render`, estimate/byte-packing). llm-d moved tokenized
@@ -53,12 +67,30 @@ policy must fork it. Two concrete needs drive this proposal:
   serving must look at KV-cache and queue saturation, not generic request rate.
   It belongs inside the EPP and users want to supply their own policy. Dynamo's
   frontend already sheds load (HTTP 529); the GAIE path needs the same, made
-  extensible.
+  extensible. The *built-in* half of this is in flight in dynamo#11865, which
+  reuses the frontend's `KvWorkerMonitor` and adds a `PickError::Saturated
+  { retry_after_secs }` variant surfaced as HTTP 429 with `Retry-After`. That
+  makes shedding an explicit, gateway-routable routing signal rather than an
+  implicit shed-by-timeout — but the thresholds are process-wide environment
+  variables and the predicate is fixed. What remains is the seam that lets a
+  deployment supply its own predicate.
+- **Policy state must be shared, not rebuilt.** Every interesting overload or
+  prioritization policy consumes the same family of signals: active decode blocks
+  against `kv_total_blocks`, active prefill tokens against `max_num_batched_tokens`,
+  queue depth. The EPP already computes these. They are not reachable from any
+  extension point, so each out-of-tree policy would have to re-derive them from
+  its own subscription — duplicate plumbing, and a second source of truth that can
+  silently disagree with the one the built-in shedder uses. This is the single
+  most requested item from integrators (REQ 1) and the main change in this
+  revision.
 
 ## Goals
 
 * Provide exactly two extension points in the Rust EPP: PrepareData and load
   shedding / admission.
+* Expose one read-only worker-state view as a first-class input, consumed by the
+  built-in shedder and available to any hook, so policy state has a single source
+  of truth.
 * Move today's inline tokenization behind the default PrepareData hook with no
   behavior change.
 * Ship a default load-shedding hook with parity to the frontend's
@@ -70,27 +102,97 @@ policy must fork it. Two concrete needs drive this proposal:
 
 ### Non Goals
 
-* Pluggable scorers, pickers, or profile handlers. This interface depends on the Dynamo Router and the change has to come with the change in its interfaces. 
+* Pluggable scorers, pickers, or profile handlers. This interface depends on the
+  Dynamo Router and the change has to come with the change in its interfaces.
+  Exposing worker state as a read-only *input* (above) does not breach this: a
+  policy may read the same signals the scheduler reads, and may reject or defer a
+  request, but it does not participate in scoring or selection.
+* Steering the router's internal scoring from an EPP extension — for example
+  zeroing a worker's prefix-overlap credit, retuning the KV indexer's TTL decay, or
+  forcing an index resync for one worker. These are legitimate needs (see REQ 4)
+  but they are operations on the router's own state, not on the EPP's request path,
+  and giving the EPP a back door into them would create exactly the coupling the
+  first non-goal avoids. They belong to the router and its policy-class admission
+  API.
 * DataProducer dependency graphs, fairness / priority-band queues, request
   eviction, or the `flowControl` feature gate from llm-d.
 * Dynamic plugin loading (`.so` / WASM).
 * Any dependency on the deprecated Go EPP or its config schema.
+
+## Requirements
+
+These come from a production integrator running the Rust EPP behind agentgateway,
+who intends to supply their own load-shedding and prioritization policy. Their
+framing is worth recording because it narrows the design: for them load shedding is
+primarily a *routing signal* — a fast explicit rejection that failover can act on,
+replacing implicit shed-by-timeout that wastes prefill compute — and prioritization
+is about retry-versus-first-attempt and request size, not tenant tiers.
+
+### REQ 1 Worker state as a first-class input
+
+Worker state feeds (KV blocks, prefill tokens, queue depth) must be an input to the
+extension boundary rather than something each policy derives itself. **Not yet met.**
+`pick()` receives request metadata and an endpoint list of pod identity only; in
+practice the server passes an empty endpoint slice because pickers resolve endpoints
+internally. All load signal is private to the concrete router. This is the gap this
+revision closes.
+
+### REQ 2 Shed semantics distinguishable from failure
+
+Rejection under overload must be distinguishable from an error and routable by the
+gateway, with a retry hint. **Met by dynamo#11865** via `PickError::Saturated
+{ retry_after_secs }` → HTTP 429 with `Retry-After`. Because it is an ordinary error
+variant, an out-of-tree policy can return it too.
+
+### REQ 3 Response usage on the completion hook
+
+The terminal response's token usage — at minimum
+`usage.prompt_tokens_details.cached_tokens` — must reach the picker so a deployment
+can compare predicted prefix overlap against the observed cache hit. **Met by
+dynamo#11868**, which adds `on_request_complete_with_usage`. Note this is a
+per-request feedback input, not telemetry: the `dynamo_epp_cached_tokens` histogram
+added alongside it is labelled by model only and cannot be joined to an individual
+pick decision.
+
+### REQ 4 Closed-loop calibration of the predictor
+
+Sustained disagreement between predicted overlap and reported `cached_tokens` should
+be able to act on the predictor: retune decay parameters where routing is
+approximate, and demote or resync a diverged worker where it is event-driven.
+**Out of scope for this DEP**, and worth being explicit about why. The actions are
+operations on router state, unreachable from `EndpointPicker` — an extension can
+wrap the picker but cannot change how the picker scores. Recording the error ledger
+is already possible with REQ 3; acting on it is router work. Note also that the EPP
+has no approximate-routing mode today, so the parameter-adaptation half of this
+requirement has no surface to act on.
+
+### REQ 5 Class-aware shed thresholds
+
+A uniform threshold turns "nearly full" into "closed for everyone at once," which is
+when retry amplification starts. Shedding should be able to distinguish request
+classes — keeping small first attempts flowing while shedding oversized retries,
+which are the cheapest to redirect. **Not met in the EPP.** The EPP already knows
+prompt size because it tokenized, and a retry marker is one header away. The router
+side already has most of the machinery; see the division of labor below.
 
 # Proposal
 
 ## Overview
 
 Keep the existing request flow and insert two hook points around the existing
-scheduler:
+scheduler, both reading one shared worker-state view:
 
 ```
-ext_proc request
+                                        worker-state view (read-only, shared)
+                                            |            |
+ext_proc request                            v            v
   -> parse body / build request        (built in)
   -> PrepareData hook                   (pluggable)  <-- tokenization lives here
   -> Load-shedding / admission hook     (pluggable)  <-- reject under overload
   -> Scheduler: pick worker             (built in, existing KV router)
   -> attach routing headers / tokens    (built in)
   -> return decision to Envoy
+  -> response hooks                     (built in)  <-- prefill complete, usage
 ```
 
 This mirrors the useful part of the llm-d / GAIE flow (PrepareData, then
@@ -112,12 +214,14 @@ Parse body → Build LLMRequest → Admission (flow control)
 | Parse body / build request | No | Stable, shared parsing |
 | PrepareData (tokenization) | Yes | Users need different tokenizers; enables prefix-cache routing and tokens-in forwarding |
 | Load shedding (admission) | Yes | Users need their own overload policy |
+| Worker-state view | No — read-only input | Not a stage. One shared source of truth for the signals policies need (REQ 1) |
 | Scheduler (worker pick) | No (for now) | The existing KV-aware router stays the default; can be revisited later |
 | Bookkeeping / headers | No | Internal correctness |
 
 The Rust EPP is currently `ext_proc` + scheduler; this proposal adds exactly two
-pluggable stages in front of the scheduler and leaves the scheduler built in. We
-are not making parsing, scoring, or picking pluggable at this time.
+pluggable stages in front of the scheduler, one read-only input feeding them, and
+leaves the scheduler built in. We are not making parsing, scoring, or picking
+pluggable at this time.
 
 ## How the hooks work (conceptually)
 
@@ -134,6 +238,74 @@ are not making parsing, scoring, or picking pluggable at this time.
 * The scheduler then runs unchanged, consuming the token data that PrepareData
   produced.
 * We should also reconsider how to do priority scheduling to decide if we want to align with GAIE. See related [proposal](https://github.com/ai-dynamo/enhancements/pull/90/changes)
+
+## Worker state as a first-class input
+
+A load-shedding hook is only as good as what it can see. Today the EPP computes the
+overload signal in `KvWorkerMonitor` and keeps it private to the concrete router, so
+a hook would either be handed a pre-baked boolean or have to build its own feed. The
+first is not a policy seam; the second duplicates plumbing and creates a second
+source of truth that can disagree with the built-in shedder.
+
+Instead, the same state the built-in shedder consumes is exposed once, read-only, at
+the extension boundary:
+
+* **Per-worker load**, in the terms the thresholds are already expressed in: active
+  decode blocks against `kv_total_blocks`, active prefill tokens against
+  `max_num_batched_tokens`, and queue depth.
+* **The derived overloaded-worker set**, so a policy can ask the cheap question
+  ("is anything free?") without recomputing the expensive one.
+* **A distinction between structurally eligible and currently available workers**,
+  matching the split the router's admission contract already makes, so a policy can
+  tell "no worker can ever serve this" from "every worker is busy right now."
+
+Three properties keep this from turning into a scoring API. The view is **read-only**:
+a policy observes, it does not mutate router state. It is a **snapshot** with a
+consistent view across a single decision, not a live handle that invites a policy to
+poll in a loop. And it is **typed and narrow** — named accessors for signals we
+already maintain, not a metadata bag — so adding a fact is a deliberate act and the
+boundary stays reviewable.
+
+This is what makes the decorator authoring model honest. Wrapping the stock router
+in an outer policy already works mechanically — the trait is a normal Rust trait and
+the server is generic over it — but a wrapper that cannot see load can only reject
+blindly or reorder what comes back. With the state view it can make the same class
+of decision the built-in shedder makes, which is the whole point of the seam.
+
+## Relationship to the router's policy-class admission API
+
+Dynamo already has a second extension boundary that is easy to miss and must not be
+duplicated: `PolicyClassAdmissionPolicy`, in
+`lib/kv-router/src/scheduling/queue_admission/`. It is contract-complete — per-class
+lifecycle events, an opaque per-class configuration envelope each policy
+deserializes itself, and crucially a `Defer` / `MakeReady` pair, so it can *hold* a
+request rather than only rejecting it. It has no production implementations today
+and is not wired into the EPP.
+
+The two boundaries answer different questions and should stay that way:
+
+| | EPP hooks (this DEP) | Router policy-class admission |
+|---|---|---|
+| Scope | One request at the gateway edge | A class of requests inside the scheduler |
+| Vocabulary | Admit or reject, now | Admit, defer, release, place |
+| Signal | Worker state at pick time | Queue state and class capacity over time |
+| Answer to overload | Shed with 429 + `Retry-After` | Queue and release when capacity returns |
+
+Shedding at the edge and queueing in the scheduler are complements: the edge is where
+you cheaply refuse work you should never start, and the scheduler is where you hold
+work that is worth waiting for. Building a third mechanism to span them would be a
+mistake.
+
+This division also gives REQ 5 its natural home. Policy classes are already assigned
+either by explicit class name or by a `(policy family, uncached-ISL bucket)` pair —
+that is, **request-size-aware classes already exist** in the router, which is most of
+what class-aware shedding asks for. The remaining work is connective rather than new
+machinery: the EPP knows prompt size and can see a retry marker, so it can label a
+request with a policy class, and shed thresholds can then be expressed per class
+instead of process-wide. Whether that label rides the existing `policy_class` hint
+(the frontend takes a `policy-class` metadata key; the selection service takes an
+`x-dynamo-meta-policy-class` header) or a dedicated EPP-side mapping is an
+implementation question this DEP defers.
 
 ## Configuration
 
@@ -154,12 +326,38 @@ loading in this first cut.
 
 ## Delivery outline
 
-1. Introduce the two hook points in the Rust EPP and move today's inline
-   tokenization behind the default PrepareData hook (no behavior change).
-2. Add a default load-shedding hook (saturation / busy-threshold parity with the
-   frontend) and the config plumbing to select / chain hooks.
-3. Document the authoring model and ship one example custom hook alongside the
+1. Land the built-in shedder (dynamo#11865): `KvWorkerMonitor` reuse,
+   `PickError::Saturated { retry_after_secs }`, HTTP 429 with `Retry-After`.
+   Satisfies REQ 2 and gives the later hook a reference implementation.
+2. Expose the worker-state view as a read-only input and refactor the built-in
+   shedder to consume it, proving the boundary carries a real policy before any
+   third party depends on it. Satisfies REQ 1.
+3. Introduce the two hook points and move today's inline tokenization behind the
+   default PrepareData hook (no behavior change).
+4. Add the config plumbing to select / chain hooks, with the built-in shedder as
+   the default load-shedding hook.
+5. Express shed thresholds per policy class rather than process-wide, reusing the
+   router's existing class assignment. Satisfies REQ 5.
+6. Document the authoring model and ship one example custom hook alongside the
    existing GAIE docs.
+
+Step 2 before step 3 is deliberate. Shipping hooks first would mean publishing a
+seam whose only real policy input is still private, which is how a boundary ends up
+frozen around the wrong shape.
+
+# Related Proposals
+
+* [DEP: Multi-DC KV-Aware Request Routing](https://github.com/ai-dynamo/dynamo/issues/11225) —
+  its Relay publishes the same family of worker/serving signals upward for the
+  fleet-level loop. One worker-state surface should feed both the Relay and the
+  EPP's policies rather than two parallel paths.
+* [Priority scheduling proposal](https://github.com/ai-dynamo/enhancements/pull/90) —
+  decides whether EPP-side prioritization aligns with GAIE; REQ 5 depends on the
+  outcome.
+* [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865) — built-in load
+  shedding (REQ 2).
+* [dynamo#11868](https://github.com/ai-dynamo/dynamo/pull/11868) — response usage on
+  the completion hook (REQ 3).
 
 # Alternate Solutions
 
@@ -179,9 +377,9 @@ loading in this first cut.
 
 **Reason Rejected:**
 
-* Over-engineered for current needs. The two hooks cover the real use cases
-  (custom tokenizer, custom overload policy). Additional extension points can be
-  proposed later if a concrete need appears.
+* Over-engineered for current needs. The two hooks plus the shared state view cover
+  the real use cases (custom tokenizer, custom overload policy). Additional
+  extension points can be proposed later if a concrete need appears.
 
 ## Alt 2 Keep load shedding / tokenization out of the EPP (gateway-level only)
 
@@ -199,3 +397,32 @@ loading in this first cut.
 
 * Both capabilities are inherently LLM-aware and belong in the EPP, consistent
   with llm-d and Dynamo's own frontend admission behavior.
+
+## Alt 3 Ship the hooks without exposing worker state
+
+Leave the state feed private and let each out-of-tree policy build its own — the
+`EndpointPicker` trait is already wrappable, so an integrator can decorate the stock
+router and subscribe to worker events independently.
+
+**Pros:**
+
+* Smallest possible boundary; no new types to maintain or version.
+* Nothing to get wrong in the state view's shape before we have several policies to
+  generalize from.
+
+**Cons:**
+
+* Two sources of truth for overload. A policy's private feed and the built-in
+  shedder's `KvWorkerMonitor` can disagree, and the resulting behavior — shed by one,
+  admitted by the other — is very hard to debug from outside.
+* Duplicate plumbing in every deployment that wants a custom policy, which is the
+  specific cost REQ 1 was raised to avoid.
+* The hook seam would be mostly decorative: a shedding hook that cannot see
+  saturation can only apply request-shaped heuristics, so the interesting policies
+  would still live in forks.
+
+**Reason Rejected:**
+
+* This is effectively the status quo with extra ceremony. If the seam ships without
+  the input the policy needs, integrators keep forking and we still own the
+  compatibility burden of a published trait.
