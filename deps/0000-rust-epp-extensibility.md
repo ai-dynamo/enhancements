@@ -326,9 +326,7 @@ Three properties hold that line:
 
 Dynamo already has a second extension boundary that is easy to miss and must not be
 duplicated: `PolicyClassAdmissionPolicy`, in
-`lib/kv-router/src/scheduling/queue_admission/`. It is contract-complete — per-class
-lifecycle events, an opaque per-class configuration envelope each policy
-deserializes itself, and crucially a `Defer` / `MakeReady` pair, so it can *hold* a
+`lib/kv-router/src/scheduling/queue_admission/`. The router can *hold* a
 request rather than only rejecting it. It has no production implementations today
 and is not wired into the EPP.
 
@@ -346,16 +344,6 @@ you cheaply refuse work you should never start, and the scheduler is where you h
 work that is worth waiting for. Building a third mechanism to span them would be a
 mistake.
 
-This division also gives REQ 3 its natural home. Policy classes are already assigned
-either by explicit class name or by a `(policy family, uncached-ISL bucket)` pair —
-that is, **request-size-aware classes already exist** in the router, which is most of
-what class-aware shedding asks for. The remaining work is connective rather than new
-machinery: the EPP knows prompt size and can see a retry marker, so it can label a
-request with a policy class, and shed thresholds can then be expressed per class
-instead of process-wide. Whether that label rides the existing `policy_class` hint
-(the frontend takes a `policy-class` metadata key; the selection service takes an
-`x-dynamo-meta-policy-class` header) or a dedicated EPP-side mapping is an
-implementation question this DEP defers.
 
 ## Configuration
 
