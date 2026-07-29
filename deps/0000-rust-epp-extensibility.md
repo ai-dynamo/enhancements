@@ -34,8 +34,8 @@ follows the GAIE / llm-d pipeline and supports plugins — is being deprecated, 
 the Rust EPP becomes the single EPP and must absorb the extensibility that
 previously only existed in Go.
 
-This proposal adds a minimal extension model to the Rust EPP: **two hooks and one
-shared input**. The hooks are **PrepareData** (per-request data preparation before
+This proposal adds a minimal extension model to the Rust EPP: **two plugin points and
+one shared input**. The plugins are **PrepareData** (per-request data preparation before
 scheduling; tokenization is the first use) and **load shedding / admission** (reject
 a request under overload before scheduling). The shared input is a read-only
 **worker-state view** — the KV and prefill load signal that overload decisions
@@ -94,15 +94,15 @@ policy must fork it. Three concrete needs drive this proposal:
 * Provide exactly two extension points in the Rust EPP: PrepareData and load
   shedding / admission.
 * Expose one read-only worker-state view as a first-class input, consumed by the
-  built-in shedder and available to any hook, so policy state has a single source
+  built-in shedder and available to any plugin, so policy state has a single source
   of truth.
-* Move today's inline tokenization behind the default PrepareData hook with no
+* Move today's inline tokenization behind the default PrepareData plugin with no
   behavior change.
-* Ship a default load-shedding hook with parity to the frontend's
+* Ship a default load-shedding plugin with parity to the frontend's
   saturation / busy-threshold behavior.
 * Keep the architecture simple; an unconfigured Rust EPP behaves as it does
   today.
-* Allow users to add hooks via compile-time registration in a custom Rust EPP
+* Allow users to add plugins via compile-time registration in a custom Rust EPP
   binary/image.
 
 ### Non Goals
@@ -153,7 +153,7 @@ gateway, with a retry hint. **Met by
 { retry_after_secs }` → HTTP 429 with `Retry-After`. Because it is an ordinary error
 variant, an out-of-tree policy can return it too.
 
-### REQ 3 Response usage on the completion hook
+### REQ 3 Response usage on the completion callback
 
 The terminal response's token usage — at minimum
 `usage.prompt_tokens_details.cached_tokens` — must reach the picker so a deployment
@@ -190,20 +190,20 @@ side already has most of the machinery; see the division of labor below.
 
 ## Overview
 
-Keep the existing request flow and insert two hook points around the existing
+Keep the existing request flow and insert two plugin points around the existing
 scheduler, both reading one shared worker-state view:
 
 ```
                                         worker-state view (read-only, shared)
-                                            |            |
-ext_proc request                            v            v
-  -> parse body / build request        (built in)
-  -> PrepareData hook                   (pluggable)  <-- tokenization lives here
-  -> Load-shedding / admission hook     (pluggable)  <-- reject under overload
-  -> Scheduler: pick worker             (built in, existing KV router)
-  -> attach routing headers / tokens    (built in)
+                                             |            |
+ext_proc request                             v            v
+  -> parse body / build request         (built in)
+  -> PrepareData plugin                  (pluggable)  <-- tokenization lives here
+  -> Load-shedding / admission plugin    (pluggable)  <-- reject under overload
+  -> Scheduler: pick worker              (built in, existing KV router)
+  -> attach routing headers / tokens     (built in)
   -> return decision to Envoy
-  -> response hooks                     (built in)  <-- prefill complete, usage
+  -> response callbacks                  (built in)  <-- prefill complete, usage
 ```
 
 This mirrors the useful part of the llm-d / GAIE flow (PrepareData, then
@@ -234,17 +234,17 @@ pluggable stages in front of the scheduler, one read-only input feeding them, an
 leaves the scheduler built in. We are not making parsing, scoring, or picking
 pluggable at this time.
 
-## How the hooks work (conceptually)
+## How the plugins work (conceptually)
 
-* A hook is a small piece of user code selected by name in configuration.
-* **PrepareData** hooks run first and can attach prepared data (starting with
+* A plugin is a small piece of user code selected by name in configuration.
+* **PrepareData** plugins run first and can attach prepared data (starting with
   token IDs / multimodal metadata) to the request. Tokenization ships as the
-  default PrepareData hook. If token data is already present (e.g. a pre-tokenized
-  request), the hook is skipped. PrepareData is fail-open: if a hook errors, the
+  default PrepareData plugin. If token data is already present (e.g. a pre-tokenized
+  request), the plugin is skipped. PrepareData is fail-open: if a plugin errors, the
   request still proceeds and scheduling falls back to prompt-based behavior.
-* **Load-shedding** hooks run next and default to allow: each hook may reject
+* **Load-shedding** plugins run next and default to allow: each plugin may reject
   (mapped to HTTP 429 / 503, with 529 available for Dynamo clients); if none
-  reject, the request proceeds. Multiple hooks can be chained and any rejection
+  reject, the request proceeds. Multiple plugins can be chained and any rejection
   stops the request.
 * The scheduler then runs unchanged, consuming the token data that PrepareData
   produced.
@@ -252,9 +252,9 @@ pluggable at this time.
 
 ## Worker state as a first-class input
 
-A load-shedding hook is only as good as what it can see. Today the EPP computes the
+A load-shedding plugin is only as good as what it can see. Today the EPP computes the
 overload signal in `KvWorkerMonitor` and keeps it private to the concrete router, so
-a hook would either be handed a pre-baked boolean or have to build its own feed. The
+a plugin would either be handed a pre-baked boolean or have to build its own feed. The
 first is not a policy seam; the second duplicates plumbing and creates a second
 source of truth that can disagree with the built-in shedder.
 
@@ -299,7 +299,7 @@ and is not wired into the EPP.
 
 The two boundaries answer different questions and should stay that way:
 
-| | EPP hooks (this DEP) | Router policy-class admission |
+| | EPP plugins (this DEP) | Router policy-class admission |
 |---|---|---|
 | Scope | One request at the gateway edge | A class of requests inside the scheduler |
 | Vocabulary | Admit or reject, now | Admit, defer, release, place |
@@ -325,17 +325,17 @@ implementation question this DEP defers.
 ## Configuration
 
 The Rust EPP gets a small, self-contained config (a mounted file / env var read
-at startup) with just two things: which PrepareData hook to use, and an ordered
-list of load-shedding hooks to run. No CRD and no dependency on the Go EPP's
-config schema. Built-in hooks (a default tokenizer and a default
+at startup) with just two things: which PrepareData plugin to use, and an ordered
+list of load-shedding plugins to run. No CRD and no dependency on the Go EPP's
+config schema. Built-in plugins (a default tokenizer and a default
 saturation / busy-threshold shedder) are always available; users select their own
 by name. Sensible defaults mean an unconfigured Rust EPP behaves as it does
 today.
 
 ## User authoring model (compile-time)
 
-Users implement a hook in Rust, register it by name, and build a custom Rust EPP
-binary that links the framework plus their hook, then publish that image and
+Users implement a plugin in Rust, register it by name, and build a custom Rust EPP
+binary that links the framework plus their plugin, then publish that image and
 point the GAIE `InferencePool` at it. This is compile-time only — no dynamic
 loading in this first cut.
 
@@ -344,20 +344,20 @@ loading in this first cut.
 1. Land the built-in shedder
    ([dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865)): `KvWorkerMonitor` reuse,
    `PickError::Saturated { retry_after_secs }`, HTTP 429 with `Retry-After`.
-   Satisfies REQ 2 and gives the later hook a reference implementation.
+   Satisfies REQ 2 and gives the later plugin a reference implementation.
 2. Expose the worker-state view as a read-only input and refactor the built-in
    shedder to consume it, proving the boundary carries a real policy before any
    third party depends on it. Satisfies REQ 1.
-3. Introduce the two hook points and move today's inline tokenization behind the
-   default PrepareData hook (no behavior change).
-4. Add the config plumbing to select / chain hooks, with the built-in shedder as
-   the default load-shedding hook.
+3. Introduce the two plugin points and move today's inline tokenization behind the
+   default PrepareData plugin (no behavior change).
+4. Add the config plumbing to select / chain plugins, with the built-in shedder as
+   the default load-shedding plugin.
 5. Express shed thresholds per policy class rather than process-wide, reusing the
    router's existing class assignment. Satisfies REQ 5.
-6. Document the authoring model and ship one example custom hook alongside the
+6. Document the authoring model and ship one example custom plugin alongside the
    existing GAIE docs.
 
-Step 2 before step 3 is deliberate. Shipping hooks first would mean publishing a
+Step 2 before step 3 is deliberate. Shipping plugins first would mean publishing a
 seam whose only real policy input is still private, which is how a boundary ends up
 frozen around the wrong shape.
 
@@ -371,7 +371,7 @@ frozen around the wrong shape.
   decides whether EPP-side prioritization aligns with GAIE; REQ 5 depends on the
   outcome.
 * [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865) — "Enable load
-  shedding in the EPP" (DEP-1073). Adds the built-in shedder this DEP's default hook
+  shedding in the EPP" (DEP-1073). Adds the built-in shedder this DEP's default plugin
   is built from: `KvWorkerMonitor` reuse, `PickError::Saturated { retry_after_secs }`,
   and HTTP 429 with `Retry-After`. Satisfies REQ 2, and its private
   `WorkerLoadState` is exactly what REQ 1 proposes to expose.
@@ -404,7 +404,7 @@ lands second will need a small merge resolution in `picker.rs` and `epp.rs`.
 
 **Reason Rejected:**
 
-* Over-engineered for current needs. The two hooks plus the shared state view cover
+* Over-engineered for current needs. The two plugins plus the shared state view cover
   the real use cases (custom tokenizer, custom overload policy). Additional
   extension points can be proposed later if a concrete need appears.
 
@@ -425,7 +425,7 @@ lands second will need a small merge resolution in `picker.rs` and `epp.rs`.
 * Both capabilities are inherently LLM-aware and belong in the EPP, consistent
   with llm-d and Dynamo's own frontend admission behavior.
 
-## Alt 3 Ship the hooks without exposing worker state
+## Alt 3 Ship the plugins without exposing worker state
 
 Leave the state feed private and let each out-of-tree policy build its own — the
 `EndpointPicker` trait is already wrappable, so an integrator can decorate the stock
@@ -444,7 +444,7 @@ router and subscribe to worker events independently.
   admitted by the other — is very hard to debug from outside.
 * Duplicate plumbing in every deployment that wants a custom policy, which is the
   specific cost REQ 1 was raised to avoid.
-* The hook seam would be mostly decorative: a shedding hook that cannot see
+* The plugin seam would be mostly decorative: a shedding plugin that cannot see
   saturation can only apply request-shaped heuristics, so the interesting policies
   would still live in forks.
 
