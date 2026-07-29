@@ -35,12 +35,13 @@ the Rust EPP becomes the single EPP and must absorb the extensibility that
 previously only existed in Go.
 
 This proposal adds a minimal extension model to the Rust EPP: **two plugin points and
-one shared input**. The plugins are **PrepareData** (per-request data preparation before
-scheduling; tokenization is the first use) and **load shedding / admission** (reject
-a request under overload before scheduling). The shared input is a read-only
+one shared input**. The plugins are **DataProducer** (per-request data preparation before
+scheduling; tokenization is the first use) and ** Admitter (load shedding) ** (reject
+a request under overload before scheduling). 
+
+The shared input is a read-only
 **worker-state view** — the KV and prefill load signal that overload decisions
-actually depend on — exposed once at the extension boundary instead of being
-rebuilt privately by every implementation. Everything else — parsing, the KV-aware
+actually depend on — exposed once at the extension boundary. Everything else — parsing, the KV-aware
 scheduler/picker, and bookkeeping — stays built in. We deliberately do not reproduce
 the full llm-d pipeline.
 
@@ -69,7 +70,7 @@ policy must fork it. Three concrete needs drive this proposal:
   It belongs inside the EPP and users want to supply their own policy. Dynamo's
   frontend already sheds load (HTTP 529); the GAIE path needs the same, made
   extensible. The frontend's shed is a routing failure surfaced as an error, discovered after the request has already been parsed and tokenized. But customers pressing on explicit rejection versus implicit shed. The frontend returns 529 (configurable via DYN_HTTP_OVERLOAD_STATUS_CODE) with no retry hint. The EPP will return 429 with Retry-After. Both choices are intentional: 429 is what a gateway and its failover logic already understand, and the retry hint is new capability rather than parity.
-  The *built-in* half of this is in flight in
+  The *built-in* half of this is in
   [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865), which
   reuses the frontend's `KvWorkerMonitor` and adds a `PickError::Saturated
   { retry_after_secs }` variant surfaced as HTTP 429 with `Retry-After`. What remains is the wiring for the plugin. Caveat: One frontend capability also does not carry
@@ -84,11 +85,8 @@ policy must fork it. Three concrete needs drive this proposal:
 
 ## Goals
 
-* Provide exactly two extension points in the Rust EPP: PrepareData and load
-  shedding / admission.
-* Expose one read-only worker-state view as a first-class input, consumed by the
-  built-in shedder and available to any plugin, so policy state has a single source
-  of truth.
+* Provide extension points in the Rust EPP: DataProducer and Admitter.
+* Expose one read-only worker-state view as a first-class input available to any plugin, so policy state has a single source of truth.
 * Move today's inline tokenization behind the default PrepareData plugin with no
   behavior change.
 * Ship a default load-shedding plugin that reuses the frontend's saturation /
@@ -115,15 +113,12 @@ policy must fork it. Three concrete needs drive this proposal:
   and giving the EPP a back door into them would create exactly the coupling the
   first non-goal avoids. They belong to the router and its policy-class admission
   API.
-* DataProducer dependency graphs, fairness / priority-band queues, request
-  eviction, or the `flowControl` feature gate from llm-d.
 * Dynamic plugin loading (`.so` / WASM).
 * Any dependency on the deprecated Go EPP or its config schema.
 
 ## Requirements
 
-These come from a production integrator running the Rust EPP behind agentgateway,
-who intends to supply their own load-shedding and prioritization policy. Their
+These come from clients who intend to supply their own load-shedding and prioritization policy. Their
 framing is worth recording because it narrows the design: for them load shedding is
 primarily a *routing signal* — a fast explicit rejection that failover can act on,
 replacing implicit shed-by-timeout that wastes prefill compute — and prioritization
@@ -131,8 +126,8 @@ is about retry-versus-first-attempt and request size, not tenant tiers.
 
 ### REQ 1 Worker state as a first-class input
 
-Worker state feeds (KV blocks, prefill tokens, queue depth) must be an input to the extension boundary rather than something each policy derives itself. Note that of these, KV blocks and prefill tokens are tracked today; queue depth is not, and this DEP proposes exposing what exists rather than adding a
-new signal. **Not yet met.**
+Worker state feeds (KV blocks, prefill tokens, queue depth) must be an input to plugins rather than something each policy derives itself. Note that of these, KV blocks and prefill tokens are tracked today; queue depth is not, and this DEP proposes exposing what exists rather than adding a
+new signal. 
 
 
 ### REQ 2 Shed semantics distinguishable from failure
@@ -187,9 +182,9 @@ scheduler, both reading one shared worker-state view:
                                         worker-state view (read-only, shared)
                                              |            |
 ext_proc request                             v            v
-  -> parse body / build request         (built in)
-  -> PrepareData plugin                  (pluggable)  <-- tokenization lives here
-  -> Load-shedding / admission plugin    (pluggable)  <-- reject under overload
+  -> parse body / build request          (built in)
+  -> DataProducer plugin                 (pluggable)  <-- tokenization lives here
+  -> Admitter (Load-shedding) plugin     (pluggable)  <-- reject under overload
   -> Scheduler: pick worker              (built in, existing KV router)
   -> attach routing headers / tokens     (built in)
   -> return decision to Envoy
@@ -200,7 +195,7 @@ This mirrors the useful part of the llm-d / GAIE flow (PrepareData, then
 admission, then scheduling) without the surrounding machinery.
 
 ```
-Parse body → Build LLMRequest → Admission (flow control)   ← builtin, not pluggable
+Parse body → Build LLMRequest → Flow control   ← builtin, not pluggable
     → DataProducer plugins   ← tokenization runs here
     → Admitter plugins       ← can reject
     → Scheduler (Filter → Score → Pick)
@@ -209,9 +204,7 @@ Parse body → Build LLMRequest → Admission (flow control)   ← builtin, not 
 
 ### Alignment with llm-d's two admission layers
 
-llm-d admits in two distinct places. The distinction is easy to miss because both
-are called "admission", and it is worth naming here because it is what makes this
-DEP's single shedding seam a deliberate choice rather than an arbitrary one:
+llm-d admits in two distinct places:
 
 * **Flow control** runs first and is a *builtin*. Capacity rejection
   (`maxBytes` / `maxRequests`), TTL eviction, and priority-band traversal are
@@ -222,24 +215,16 @@ DEP's single shedding seam a deliberate choice rather than an arbitrary one:
   *curve* (`UsageLimitPolicy`), and the *order* (`FairnessPolicy`,
   `OrderingPolicy`) are plugins.
 * **`Admitter` plugins** run after `DataProducer` and before scheduling, and these
-  *can* reject outright. `latency-slo-admitter` ships in-tree.
+  *can* reject outright. The `latency-slo-admitter`plugin is an example here.
 
 The load-shedding plugin proposed here is the `Admitter`: same pipeline position,
 same ordering relative to data preparation, same ability to reject. That
 correspondence is the reason the seam sits where it does.
 
-Excluding the flow-control layer (see Non Goals) is therefore not in tension with
-making shedding pluggable — upstream does not make that layer pluggable either.
-Dynamo's existing generic sheds are the local equivalent of it and stay as they
-are: the per-class caps enforced by `queue_rejection()` in `policy_queue.rs`, the
-EPP's in-flight semaphore (`DYN_EPP_MAX_INFLIGHT_REQUESTS`), and the worker engine
-request limit.
 
 The upstream split between the saturation *signal* and the admit/reject *decision*
 is a refinement this DEP does not currently make — it proposes one plugin that
-does both. Whether to split them is worth settling alongside REQ 1, since making
-the signal itself the seam would turn "one source of truth for overload" from a
-convention into a structural property.
+does both. This is TBD.
 
 ## What becomes pluggable, and what does not
 
@@ -247,8 +232,8 @@ convention into a structural property.
 |-------|----------------|-----------|
 | `ext_proc` protocol / server | No | Transport; not a policy decision |
 | Parse body / build request | No | Stable, shared parsing |
-| PrepareData (tokenization) | Yes | Users need different tokenizers; enables prefix-cache routing and tokens-in forwarding |
-| Load shedding (admission) | Yes | Users need their own overload policy |
+| DataProducer (tokenization) | Yes | Users need different tokenizers; enables prefix-cache routing and tokens-in forwarding |
+| Admitter (Load shedding) | Yes | Users need their own overload policy |
 | Worker-state view | No — read-only input | Not a stage. One shared source of truth for the signals policies need (REQ 1) |
 | Scheduler (worker pick) | No (for now) | The existing KV-aware router stays the default; can be revisited later |
 | Bookkeeping / headers | No | Internal correctness |
@@ -261,12 +246,12 @@ pluggable at this time.
 ## How the plugins work (conceptually)
 
 * A plugin is a small piece of user code selected by name in configuration.
-* **PrepareData** plugins run first and can attach prepared data (starting with
+* **DataProducer** plugins run first and can attach prepared data (starting with
   token IDs / multimodal metadata) to the request. Tokenization ships as the
   default PrepareData plugin. If token data is already present (e.g. a pre-tokenized
   request), the plugin is skipped. PrepareData is fail-open: if a plugin errors, the
   request still proceeds and scheduling falls back to prompt-based behavior.
-* **Load-shedding** plugins run next and default to allow: each plugin may reject
+* **Admitter (Load-shedding)** plugins run next and default to allow: each plugin may reject
   (mapped to HTTP 429 / 503, with 529 available for Dynamo clients); if none
   reject, the request proceeds. Multiple plugins can be chained and any rejection
   stops the request.
@@ -277,13 +262,9 @@ pluggable at this time.
 ## Worker state as a first-class input
 
 A load-shedding plugin is only as good as what it can see. Today the EPP computes the
-overload signal in `KvWorkerMonitor` and keeps it private to the concrete router, so
-a plugin would either be handed a pre-baked boolean or have to build its own feed. The
-first is not a policy seam; the second duplicates plumbing and creates a second
-source of truth that can disagree with the built-in shedder.
-
-None of this is new data. `KvWorkerMonitor` already holds
-`worker_load_states: Arc<DashMap<u64, WorkerLoadState>>`, kept current by its own
+overload signal in `KvWorkerMonitor` and keeps it private to the concrete router. 
+`KvWorkerMonitor` already holds `worker_load_states: Arc<DashMap<u64, WorkerLoadState>>`, 
+kept current by its own
 background task against the Dynamo runtime and already recomputing the derived
 overloaded set on every update. There is nothing to fetch: the gap is that this `Arc`
 is a private field and the trait boundary has no parameter to pass it through. The
@@ -291,34 +272,55 @@ cheap fix is for the monitor to publish an immutable snapshot into a `watch` cha
 a pattern it already uses internally — so the update path pays the cost and each
 decision takes one refcount bump rather than a map traversal.
 
-Instead, the same state the built-in shedder consumes is exposed once, read-only, at
-the extension boundary:
+For the Admitter the following data is needed. Upstream needs the same class of input:
+llm-d's only shipping admitter, `latency-slo-admitter`, reads `KVCacheUsagePercent`
+from endpoint metrics and `DispatchedRequestCount` from endpoint attributes, and admits
+a sheddable request when any endpoint is idle or cold. Same question, same kind of
+per-endpoint load data.
 
-* **Per-worker load**, in the terms the thresholds are already expressed in: active
-  decode blocks and KV used blocks against `kv_total_blocks`, and active prefill
-  tokens against `max_num_batched_tokens`, per dp_rank. Queue depth is *not* part of
-  this set today; adding it would be a deliberate extension of the view, not an
-  assumed member of it.
-* **The derived overloaded-worker set**, so a policy can ask the cheap question
-  ("is anything free?") without recomputing the expensive one — and, more
-  importantly, get the same latched answer the built-in shedder acts on rather than
-  an unlatched approximation of it.
-* **A distinction between structurally eligible and currently available workers**,
-  matching the split the router's admission contract already makes, so a policy can
-  tell "no worker can ever serve this" from "every worker is busy right now."
+**1. Raw per-worker load.** The same numbers the built-in thresholds compare against,
+per worker and per dp_rank: `active_decode_blocks` and `kv_used_blocks` against
+`kv_total_blocks`, and `active_prefill_tokens` against `max_num_batched_tokens`. A
+plugin that wants a different rule — shed at 70% instead of 85%, or weigh prefill
+pressure differently — reads these and decides for itself. Queue depth is
+deliberately absent: nothing tracks a per-worker pending count today, so adding it
+would be a separate change rather than something to assume is available.
 
-Three properties keep this from turning into a scoring API. The view is **read-only**:
-a policy observes, it does not mutate router state. It is a **snapshot** with a
-consistent view across a single decision, not a live handle that invites a policy to
-poll in a loop. And it is **typed and narrow** — named accessors for signals we
-already maintain, not a metadata bag — so adding a fact is a deliberate act and the
-boundary stays reviewable.
+**2. The precomputed overloaded-worker set.** Which workers are currently too busy. A
+plugin uses this to decide whether to admit the request. If some workers are free, it
+admits and lets normal routing pick one. If they are all busy, the plugin decides what
+to do with *this* request — for example reject low-priority traffic with 429 and
+`Retry-After` but let high-priority traffic through. That per-request choice is the
+point, since the built-in shedder is all-or-nothing.
 
-This is what makes the decorator authoring model honest. Wrapping the stock router
-in an outer policy already works mechanically — the trait is a normal Rust trait and
-the server is generic over it — but a wrapper that cannot see load can only reject
-blindly or reorder what comes back. With the state view it can make the same class
-of decision the built-in shedder makes, which is the whole point of the seam.
+**3. Structurally eligible versus currently available workers.** Two sets, matching
+the split `WorkerEligibilitySnapshot` already makes in the router's admission
+contract:
+
+* No structurally eligible worker means nothing in the fleet can ever serve this
+  request. Retrying will not help.
+* Structurally eligible but none available means every capable worker is busy right
+  now. Retrying will help.
+
+This distinction decides what the gateway gets told, which makes it load bearing for
+REQ 2: only the second case should become 429 with `Retry-After`. The first is a
+permanent failure, and attaching a retry hint to it actively misleads the gateway's
+failover logic. A policy that cannot see both sets cannot tell the two apart.
+
+### What keeps this from becoming a scoring API which we do not want to chage
+
+Exposing state is not the same as making selection pluggable, which stays a Non Goal.
+Three properties hold that line:
+
+* **Read-only.** A plugin observes. It cannot mark a worker overloaded, retune a
+  threshold, or touch the KV index, so it has no way to steer selection through the
+  state view.
+* **A snapshot, not a live handle.** One frozen picture per decision, so two reads
+  within a single decision agree and there is nothing to poll in a loop. It is also
+  cheap to pass: a refcount bump rather than a map traversal.
+* **Typed and narrow.** Named accessors for signals we already maintain, not a
+  `HashMap<String, Value>`. Adding a fact becomes a reviewable code change instead of
+  a plugin quietly depending on a key nobody knew existed.
 
 ## Relationship to the router's policy-class admission API
 
