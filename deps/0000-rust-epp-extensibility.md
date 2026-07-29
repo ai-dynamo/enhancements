@@ -131,15 +131,9 @@ is about retry-versus-first-attempt and request size, not tenant tiers.
 
 ### REQ 1 Worker state as a first-class input
 
-Worker state feeds (as the integrator framed it: KV blocks, prefill tokens, queue
-depth) must be an input to the extension boundary rather than something each policy
-derives itself. Note that of these, KV blocks and prefill tokens are tracked today;
-queue depth is not, and this DEP proposes exposing what exists rather than adding a
+Worker state feeds (KV blocks, prefill tokens, queue depth) must be an input to the extension boundary rather than something each policy derives itself. Note that of these, KV blocks and prefill tokens are tracked today; queue depth is not, and this DEP proposes exposing what exists rather than adding a
 new signal. **Not yet met.**
-`pick()` receives request metadata and an endpoint list of pod identity only; in
-practice the server passes an empty endpoint slice because pickers resolve endpoints
-internally. All load signal is private to the concrete router. This is the gap this
-revision closes.
+
 
 ### REQ 2 Shed semantics distinguishable from failure
 
@@ -253,6 +247,15 @@ overload signal in `KvWorkerMonitor` and keeps it private to the concrete router
 a plugin would either be handed a pre-baked boolean or have to build its own feed. The
 first is not a policy seam; the second duplicates plumbing and creates a second
 source of truth that can disagree with the built-in shedder.
+
+None of this is new data. `KvWorkerMonitor` already holds
+`worker_load_states: Arc<DashMap<u64, WorkerLoadState>>`, kept current by its own
+background task against the Dynamo runtime and already recomputing the derived
+overloaded set on every update. There is nothing to fetch: the gap is that this `Arc`
+is a private field and the trait boundary has no parameter to pass it through. The
+cheap fix is for the monitor to publish an immutable snapshot into a `watch` channel —
+a pattern it already uses internally — so the update path pays the cost and each
+decision takes one refcount bump rather than a map traversal.
 
 Instead, the same state the built-in shedder consumes is exposed once, read-only, at
 the extension boundary:
