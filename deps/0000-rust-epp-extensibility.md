@@ -19,10 +19,11 @@
 **Pull Request**: [ai-dynamo/enhancements#96](https://github.com/ai-dynamo/enhancements/pull/96)
 
 **Implementation PR / Tracking Issue**: [TBD — link to ai-dynamo/dynamo tracking issue].
-Related in-flight work: [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865)
-(built-in load shedding, DEP-1073) and
-[dynamo#11868](https://github.com/ai-dynamo/dynamo/pull/11868) (response usage on the
-completion hook).
+Related in-flight work:
+[dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865) — built-in load
+shedding (DEP-1073), and
+[dynamo#11868](https://github.com/ai-dynamo/dynamo/pull/11868) — cached_tokens in the
+EPP response (DYNO-93).
 
 # Summary
 
@@ -44,7 +45,7 @@ scheduler/picker, and bookkeeping — stays built in. We deliberately do not rep
 the full llm-d pipeline.
 
 The worker-state view is the load-bearing addition. A shedding policy that cannot
-see KV-cache and queue saturation is not a shedding policy, and today no extension
+see KV-cache and prefill saturation is not a shedding policy, and today no extension
 point can see it: `EndpointPicker::pick` receives request metadata and an endpoint
 list carrying pod identity only, so any out-of-tree policy must stand up a parallel
 state feed. Exposing state as an input is deliberately *not* the same as making
@@ -67,7 +68,8 @@ policy must fork it. Three concrete needs drive this proposal:
   serving must look at KV-cache and queue saturation, not generic request rate.
   It belongs inside the EPP and users want to supply their own policy. Dynamo's
   frontend already sheds load (HTTP 529); the GAIE path needs the same, made
-  extensible. The *built-in* half of this is in flight in dynamo#11865, which
+  extensible. The *built-in* half of this is in flight in
+  [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865), which
   reuses the frontend's `KvWorkerMonitor` and adds a `PickError::Saturated
   { retry_after_secs }` variant surfaced as HTTP 429 with `Retry-After`. That
   makes shedding an explicit, gateway-routable routing signal rather than an
@@ -76,13 +78,16 @@ policy must fork it. Three concrete needs drive this proposal:
   deployment supply its own predicate.
 - **Policy state must be shared, not rebuilt.** Every interesting overload or
   prioritization policy consumes the same family of signals: active decode blocks
-  against `kv_total_blocks`, active prefill tokens against `max_num_batched_tokens`,
-  queue depth. The EPP already computes these. They are not reachable from any
-  extension point, so each out-of-tree policy would have to re-derive them from
-  its own subscription — duplicate plumbing, and a second source of truth that can
-  silently disagree with the one the built-in shedder uses. This is the single
-  most requested item from integrators (REQ 1) and the main change in this
-  revision.
+  and KV used blocks against `kv_total_blocks`, and active prefill tokens against
+  `max_num_batched_tokens`. The EPP already tracks these in `WorkerLoadState`. They
+  are not reachable from any extension point, so each out-of-tree policy would have
+  to re-derive them from its own subscription — duplicate plumbing, and a second
+  source of truth that can silently disagree with the one the built-in shedder uses.
+  The disagreement is not hypothetical: decode overload is *latched*, clearing only
+  once both the active-blocks and kv-used-blocks signals fall back under threshold,
+  so a reimplementation fed identical raw metrics but lacking the latch will flap
+  where the built-in shedder holds steady. This is the single most requested item
+  from integrators (REQ 1) and the main change in this revision.
 
 ## Goals
 
@@ -130,8 +135,11 @@ is about retry-versus-first-attempt and request size, not tenant tiers.
 
 ### REQ 1 Worker state as a first-class input
 
-Worker state feeds (KV blocks, prefill tokens, queue depth) must be an input to the
-extension boundary rather than something each policy derives itself. **Not yet met.**
+Worker state feeds (as the integrator framed it: KV blocks, prefill tokens, queue
+depth) must be an input to the extension boundary rather than something each policy
+derives itself. Note that of these, KV blocks and prefill tokens are tracked today;
+queue depth is not, and this DEP proposes exposing what exists rather than adding a
+new signal. **Not yet met.**
 `pick()` receives request metadata and an endpoint list of pod identity only; in
 practice the server passes an empty endpoint slice because pickers resolve endpoints
 internally. All load signal is private to the concrete router. This is the gap this
@@ -140,7 +148,8 @@ revision closes.
 ### REQ 2 Shed semantics distinguishable from failure
 
 Rejection under overload must be distinguishable from an error and routable by the
-gateway, with a retry hint. **Met by dynamo#11865** via `PickError::Saturated
+gateway, with a retry hint. **Met by
+[dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865)** via `PickError::Saturated
 { retry_after_secs }` → HTTP 429 with `Retry-After`. Because it is an ordinary error
 variant, an out-of-tree policy can return it too.
 
@@ -149,7 +158,9 @@ variant, an out-of-tree policy can return it too.
 The terminal response's token usage — at minimum
 `usage.prompt_tokens_details.cached_tokens` — must reach the picker so a deployment
 can compare predicted prefix overlap against the observed cache hit. **Met by
-dynamo#11868**, which adds `on_request_complete_with_usage`. Note this is a
+[dynamo#11868](https://github.com/ai-dynamo/dynamo/pull/11868)** ("Enable
+cached_tokens in EPP response", DYNO-93), which adds
+`on_request_complete_with_usage`. Note this is a
 per-request feedback input, not telemetry: the `dynamo_epp_cached_tokens` histogram
 added alongside it is labelled by model only and cannot be joined to an individual
 pick decision.
@@ -237,7 +248,7 @@ pluggable at this time.
   stops the request.
 * The scheduler then runs unchanged, consuming the token data that PrepareData
   produced.
-* We should also reconsider how to do priority scheduling to decide if we want to align with GAIE. See related [proposal](https://github.com/ai-dynamo/enhancements/pull/90/changes)
+* We should also reconsider how to do priority scheduling to decide if we want to align with GAIE. See related [proposal](https://github.com/ai-dynamo/enhancements/pull/90)
 
 ## Worker state as a first-class input
 
@@ -251,10 +262,14 @@ Instead, the same state the built-in shedder consumes is exposed once, read-only
 the extension boundary:
 
 * **Per-worker load**, in the terms the thresholds are already expressed in: active
-  decode blocks against `kv_total_blocks`, active prefill tokens against
-  `max_num_batched_tokens`, and queue depth.
+  decode blocks and KV used blocks against `kv_total_blocks`, and active prefill
+  tokens against `max_num_batched_tokens`, per dp_rank. Queue depth is *not* part of
+  this set today; adding it would be a deliberate extension of the view, not an
+  assumed member of it.
 * **The derived overloaded-worker set**, so a policy can ask the cheap question
-  ("is anything free?") without recomputing the expensive one.
+  ("is anything free?") without recomputing the expensive one — and, more
+  importantly, get the same latched answer the built-in shedder acts on rather than
+  an unlatched approximation of it.
 * **A distinction between structurally eligible and currently available workers**,
   matching the split the router's admission contract already makes, so a policy can
   tell "no worker can ever serve this" from "every worker is busy right now."
@@ -326,7 +341,8 @@ loading in this first cut.
 
 ## Delivery outline
 
-1. Land the built-in shedder (dynamo#11865): `KvWorkerMonitor` reuse,
+1. Land the built-in shedder
+   ([dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865)): `KvWorkerMonitor` reuse,
    `PickError::Saturated { retry_after_secs }`, HTTP 429 with `Retry-After`.
    Satisfies REQ 2 and gives the later hook a reference implementation.
 2. Expose the worker-state view as a read-only input and refactor the built-in
@@ -354,10 +370,21 @@ frozen around the wrong shape.
 * [Priority scheduling proposal](https://github.com/ai-dynamo/enhancements/pull/90) —
   decides whether EPP-side prioritization aligns with GAIE; REQ 5 depends on the
   outcome.
-* [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865) — built-in load
-  shedding (REQ 2).
-* [dynamo#11868](https://github.com/ai-dynamo/dynamo/pull/11868) — response usage on
-  the completion hook (REQ 3).
+* [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865) — "Enable load
+  shedding in the EPP" (DEP-1073). Adds the built-in shedder this DEP's default hook
+  is built from: `KvWorkerMonitor` reuse, `PickError::Saturated { retry_after_secs }`,
+  and HTTP 429 with `Retry-After`. Satisfies REQ 2, and its private
+  `WorkerLoadState` is exactly what REQ 1 proposes to expose.
+* [dynamo#11868](https://github.com/ai-dynamo/dynamo/pull/11868) — "Enable
+  cached_tokens in EPP response" (DYNO-93). Parses `usage` from the response body and
+  adds `on_request_complete_with_usage`, giving a policy the observed cache hit to
+  compare against its predicted overlap. Satisfies REQ 3 and is the precondition for
+  the error ledger described in REQ 4.
+
+The two are complements, not overlaps: #11865 reads worker capacity on the request
+path to decide whether to admit, and #11868 reads request outcome on the response
+path after the decision is already made. They do touch the same files, so whichever
+lands second will need a small merge resolution in `picker.rs` and `epp.rs`.
 
 # Alternate Solutions
 
