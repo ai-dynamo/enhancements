@@ -272,28 +272,25 @@ cheap fix is for the monitor to publish an immutable snapshot into a `watch` cha
 a pattern it already uses internally — so the update path pays the cost and each
 decision takes one refcount bump rather than a map traversal.
 
-For the Admitter the following data is needed. Upstream needs the same class of input:
-llm-d's only shipping admitter, `latency-slo-admitter`, reads `KVCacheUsagePercent`
-from endpoint metrics and `DispatchedRequestCount` from endpoint attributes, and admits
-a sheddable request when any endpoint is idle or cold. Same question, same kind of
-per-endpoint load data.
+For the Admitter the following data is needed. 
 
 **1. Raw per-worker load.** The same numbers the built-in thresholds compare against,
 per worker and per dp_rank: `active_decode_blocks` and `kv_used_blocks` against
 `kv_total_blocks`, and `active_prefill_tokens` against `max_num_batched_tokens`. A
-plugin that wants a different rule — shed at 70% instead of 85%, or weigh prefill
-pressure differently — reads these and decides for itself. Queue depth is
-deliberately absent: nothing tracks a per-worker pending count today, so adding it
-would be a separate change rather than something to assume is available.
+plugin that wants a different rule (i.e. shed at 70% instead of 85%, or weigh prefill
+pressure differently) reads these  numbers so that it can decide for itself. 
 
-**2. The precomputed overloaded-worker set.** Which workers are currently too busy. A
+**2. We need to add the Queue depth to the worker state view.
+Workers already publish per-worker, per-dp_rank queued request counts and token sums in the forward-pass metrics stream, but that stream does not feed the router. A solution is needed here.
+
+**3. The precomputed overloaded-worker set.** Which workers are currently too busy. A
 plugin uses this to decide whether to admit the request. If some workers are free, it
 admits and lets normal routing pick one. If they are all busy, the plugin decides what
 to do with *this* request — for example reject low-priority traffic with 429 and
 `Retry-After` but let high-priority traffic through. That per-request choice is the
 point, since the built-in shedder is all-or-nothing.
 
-**3. Structurally eligible versus currently available workers.** Two sets, matching
+**4. Structurally eligible versus currently available workers.** Two sets, matching
 the split `WorkerEligibilitySnapshot` already makes in the router's admission
 contract:
 
@@ -349,8 +346,8 @@ mistake.
 
 The Rust EPP gets a small, self-contained config (a mounted file / env var read
 at startup) with just two things: which PrepareData plugin to use, and an ordered
-list of load-shedding plugins to run. No CRD and no dependency on the Go EPP's
-config schema. Built-in plugins (a default tokenizer and a default
+list of load-shedding plugins to run. No CRD and no dependenc. 
+Built-in plugins (a default tokenizer and a default
 saturation / busy-threshold shedder) are always available; users select their own
 by name. Sensible defaults mean an unconfigured Rust EPP behaves as it does
 today.
