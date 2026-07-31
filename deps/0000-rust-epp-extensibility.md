@@ -1,4 +1,4 @@
-# Make the Dynamo Rust EPP Extensible (PrepareData + Load Shedding + Worker State)
+# Make the Dynamo Rust EPP Extensible through Plugins
 
 **Status**: Draft
 
@@ -28,28 +28,23 @@ EPP response (DYNO-93).
 # Summary
 
 The Dynamo Rust EPP (`dynamo-ext-proc`) today is effectively two things: the
-Envoy `ext_proc` server and a single, hard-wired router that tokenizes the
+Envoy `ext_proc` server and a hard-wired router that tokenizes the
 prompt and picks a worker. There are no extension points. The Go EPP — which
 follows the GAIE / llm-d pipeline and supports plugins — is being deprecated, so
 the Rust EPP becomes the single EPP and must absorb the extensibility that
 previously only existed in Go.
 
-This proposal adds a minimal extension model to the Rust EPP: **two plugin points and
+This proposal adds a minimal extension model to the Rust EPP: **two plugin types and
 one shared input**. The plugins are **DataProducer** (per-request data preparation before
-scheduling; tokenization is the first use) and ** Admitter (load shedding) ** (reject
+scheduling; tokenization is the first use) and **Admitter (load shedding)** (reject
 a request under overload before scheduling). 
 
-The shared input is a read-only
-**worker-state view** — the KV and prefill load signal that overload decisions
-actually depend on — exposed once at the extension boundary. Everything else — parsing, the KV-aware
-scheduler/picker, and bookkeeping — stays built in. We deliberately do not reproduce
-the full llm-d pipeline.
-
+All plugins will need to have read-only worker-state view (the KV and prefill load signal)
 The worker-state view is a critical addition. A shedding policy that cannot
 see KV-cache and prefill saturation is not a shedding policy, and today no extension
 point can see it: `EndpointPicker::pick` receives request metadata and an endpoint
 list carrying pod identity only, so any out-of-tree policy must stand up a parallel
-state feed. Exposing state as an input is deliberately *not* the same as making
+state feed. Exposing state as an input is deliberately not the same as making
 scoring pluggable, which remains a non-goal.
 
 # Motivation
@@ -70,33 +65,57 @@ policy must fork it. Three concrete needs drive this proposal:
   It belongs inside the EPP and users want to supply their own policy. Dynamo's
   frontend already sheds load (HTTP 529); the GAIE path needs the same, made
   extensible. The frontend's shed is a routing failure surfaced as an error, discovered after the request has already been parsed and tokenized. But customers pressing on explicit rejection versus implicit shed. The frontend returns 529 (configurable via DYN_HTTP_OVERLOAD_STATUS_CODE) with no retry hint. The EPP will return 429 with Retry-After. Both choices are intentional: 429 is what a gateway and its failover logic already understand, and the retry hint is new capability rather than parity.
-  The *built-in* half of this is in
-  [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865), which
-  reuses the frontend's `KvWorkerMonitor` and adds a `PickError::Saturated
+  The beginning of its implementation is in [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865), which reuses the frontend's `KvWorkerMonitor` and adds a `PickError::Saturated
   { retry_after_secs }` variant surfaced as HTTP 429 with `Retry-After`. What remains is the wiring for the plugin. Caveat: One frontend capability also does not carry
-  over: `POST`/`GET /busy_threshold` retunes thresholds per model on a live fleet,
+  over: `POST`/`GET /busy_threshold` returns thresholds per model on a live fleet,
   whereas the EPP reads env vars once at startup. Closing that is out of scope here but needs to be done.
-- **Policy state must be shared.** Every prioritization policy consumes the same family of signals: active decode blocks and KV used blocks against `kv_total_blocks`, and active prefill tokens against
-  `max_num_batched_tokens`. The EPP already tracks these in `WorkerLoadState`. They
-  are not reachable from any extension point, so each out-of-tree policy would have
-  to re-derive them from its own subscription. We want to avoid duplicate plumbing, and a second
-  source of truth that can silently disagree with the one the built-in shedder uses.
-  This leads to (REQ 1).
+- **Policy state** must be shared, not rebuilt. Any policy reasoning about saturation needs the signals the built-in thresholds are already expressed in: active_decode_blocks and kv_used_blocks against kv_total_blocks, and active_prefill_tokens against max_num_batched_tokens. These span two feeds — numerators from the ActiveLoad stream, denominators from the runtime-config watch — and WorkerLoadState already joins them. It lives in dynamo-llm, which the EPP links today, so the EPP should construct a KvWorkerMonitor and reuse it rather than grow a parallel implementation. Tracking is only half the gap: the state is a private field and EndpointPicker::pick has no parameter. We need to expose it to enable plugins:
+
+```bash
+async fn pick(
+    &self,
+    req: &RequestInfo,
+    endpoints: &[Endpoint], 
+    load: &WorkerLoadView, // here
+) -> Result<PickResult, PickError>;
+
+pub struct WorkerLoadView{}
+  load: FxHashMap<WorkerWithDpRank, WorkerLoad>
+  overloaded: FxHashSet<WorkerId>,
+  /// Thresholds in force when the snapshot was taken.
+  thresholds: LoadThresholdConfig,
+  observed_at: Instant,
+}
+
+pub struct WorkerLoadState {
+    pub active_decode_blocks: HashMap<u32, u64>,
+    pub kv_used_blocks: HashMap<u32, u64>,
+    pub kv_total_blocks: HashMap<u32, u64>,
+    pub active_prefill_tokens: HashMap<u32, u64>,
+    /// max_num_batched_tokens from runtime config (same for all dp_ranks)
+    pub max_num_batched_tokens: HashMap<u32, u64>,
+    decode_overload_latches: HashMap<u32, DecodeOverloadLatchState>,
+}
+```
+  
 
 ## Goals
+
 
 * Provide extension points in the Rust EPP: DataProducer and Admitter.
 * Expose one read-only worker-state view as a first-class input available to any plugin, so policy state has a single source of truth.
 * Move today's inline tokenization behind the default PrepareData plugin with no
   behavior change.
 * Ship a default load-shedding plugin that reuses the frontend's saturation /
-  busy-threshold *detection* — the same `KvWorkerMonitor`, thresholds, and
-  overloaded-worker exclusion — while deliberately diverging on the decision surface:
+  busy-threshold detection (the same `KvWorkerMonitor`, thresholds, and
+  overloaded-worker exclusion) while deliberately diverging on the decision surface:
   an explicit pre-tokenization gate rather than a routing failure surfaced as an
   error, and HTTP 429 with `Retry-After` rather than 529. Full parity is not the
   goal; a shared detector with a gateway-appropriate contract is.
 * Allow users to add plugins via compile-time registration in a custom Rust EPP
   binary/image.
+* We deliberately do not reproduce the full llm-d pipeline.
+
 
 ### Non Goals
 
@@ -118,16 +137,14 @@ policy must fork it. Three concrete needs drive this proposal:
 
 ## Requirements
 
-These come from clients who intend to supply their own load-shedding and prioritization policy. Their
-framing is worth recording because it narrows the design: for them load shedding is
+Clients want to supply their own load-shedding and prioritization policy. For them load shedding is
 primarily a *routing signal* — a fast explicit rejection that failover can act on,
-replacing implicit shed-by-timeout that wastes prefill compute — and prioritization
+replacing implicit shed-by-timeout that wastes prefill compute . Also for them prioritization
 is about retry-versus-first-attempt and request size, not tenant tiers.
 
 ### REQ 1 Worker state as a first-class input
 
-Worker state feeds (KV blocks, prefill tokens, queue depth) must be an input to plugins rather than something each policy derives itself. Note that of these, KV blocks and prefill tokens are tracked today; queue depth is not, and this DEP proposes exposing what exists rather than adding a
-new signal. 
+Worker state feeds (KV blocks, prefill tokens, queue depth) must be an input to plugins rather than something each policy derives itself. Note that of these, KV blocks and prefill tokens are tracked today; queue depth is not, and this DEP proposes exposing in. 
 
 
 ### REQ 2 Shed semantics distinguishable from failure
@@ -304,7 +321,7 @@ REQ 2: only the second case should become 429 with `Retry-After`. The first is a
 permanent failure, and attaching a retry hint to it actively misleads the gateway's
 failover logic. A policy that cannot see both sets cannot tell the two apart.
 
-### What keeps this from becoming a scoring API which we do not want to chage
+### What keeps this from becoming a scoring API which we do not want to change
 
 Exposing state is not the same as making selection pluggable, which stays a Non Goal.
 Three properties hold that line:
@@ -346,7 +363,7 @@ mistake.
 
 The Rust EPP gets a small, self-contained config (a mounted file / env var read
 at startup) with just two things: which PrepareData plugin to use, and an ordered
-list of load-shedding plugins to run. No CRD and no dependenc. 
+list of load-shedding plugins to run. No CRD and no dependency. 
 Built-in plugins (a default tokenizer and a default
 saturation / busy-threshold shedder) are always available; users select their own
 by name. Sensible defaults mean an unconfigured Rust EPP behaves as it does
@@ -376,10 +393,7 @@ loading in this first cut.
    router's existing class assignment. Satisfies REQ 3.
 6. Document the authoring model and ship one example custom plugin alongside the
    existing GAIE docs.
-
-Step 2 before step 3 is deliberate. Shipping plugins first would mean publishing a
-seam whose only real policy input is still private, which is how a boundary ends up
-frozen around the wrong shape.
+   
 
 # Related Proposals
 
