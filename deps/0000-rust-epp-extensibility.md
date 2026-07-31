@@ -123,13 +123,13 @@ pub struct WorkerLoadState {
   Dynamo Router and the change has to come with the change in its interfaces.
   Exposing worker state as a read-only *input* (above) does not breach this: a
   policy may read the same signals the scheduler reads, and may reject or defer a
-  request, but it does not participate in scoring or selection.
+  request, but it does not participate in scoring or selection. The related proposal is 
+  reflected in these [slides](https://docs.google.com/presentation/d/1_k-ytG9QxgSUAOnLG7CZG90QM6Zjx3PvpzaI24N4_So/edit?slide=id.g3f6000d6429_0_0#slide=id.g3f6000d6429_0_0)
 * Steering the router's internal scoring from an EPP extension — for example
   zeroing a worker's prefix-overlap credit, retuning the KV indexer's TTL decay, or
-  forcing an index resync for one worker. Integrators have asked for these, and they
+  forcing an index resync for one worker. Clients have asked for these, and they
   are legitimate needs, but they are operations on the router's own state, not on the
-  EPP's request path,
-  and giving the EPP a back door into them would create exactly the coupling the
+  EPP's request path, and giving the EPP a back door into them would create exactly the coupling the
   first non-goal avoids. They belong to the router and its policy-class admission
   API.
 * Dynamic plugin loading (`.so` / WASM).
@@ -144,28 +144,45 @@ is about retry-versus-first-attempt and request size, not tenant tiers.
 
 ### REQ 1 Worker state as a first-class input
 
-Worker state feeds (KV blocks, prefill tokens, queue depth) must be an input to plugins rather than something each policy derives itself. Note that of these, KV blocks and prefill tokens are tracked today; queue depth is not, and this DEP proposes exposing in. 
+Worker state feeds (KV blocks, prefill tokens, queue depth) must be an input to plugins rather than something each policy derives itself. Note that of these, KV blocks and prefill tokens are tracked today; queue depth is not, and this DEP proposes exposing it. 
 
 
-### REQ 2 Shed semantics distinguishable from failure
+### REQ 2 New Shed semantics
 
-Rejection under overload must be distinguishable from an error and routable by the
-gateway, with a retry hint. **Met by
-[dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865)** via `PickError::Saturated
-{ retry_after_secs }` → HTTP 429 with `Retry-After`. Because it is an ordinary error
-variant, an out-of-tree policy can return it too.
+Today the FontEnd implements saturation detection and responds with http 529 error. The shedding decision outcome should not be an error or requeue inside the router, it should reside in the EPP as a custom-either retry or reject and sent to the gateway. We will use the FrontEnd logic with a change in this [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865)** via `PickError::Saturated
+{ retry_after_secs }` → HTTP 429 with `Retry-After`. 
+
 
 
 ### REQ 3 Class-aware shed thresholds
 
-Today the threshold is one number for everybody. For example, shed when a worker is over 85% KV-block occupancy. The #11865 rejects only when every eligible worker is over it. So the pool has exactly two states: open to all, or closed to all. The moment saturation is crossed, a 200-token chat request and a 100k-token request get treated identically: both get a 429. The customers want flexibility here as not all requests are equal under load. The EPP already knows prompt size because it tokenized, and a retry marker is one header away so we can extend this.
-The router side already has most of the machinery: the KV router already assigns a request to a class either by explicit name or by an uncached ISL bucket — that is, bucketed on the tokens that actually need prefilling, which is a better cost proxy than raw prompt length. So request-size-aware classes exist; what's missing is expressing shed thresholds per class rather than process-wide.
+Today the threshold is one number for everybody. For example, shed when a worker is over 85% KV-block occupancy. The #11865 rejects only when every eligible worker is over it. So the pool has exactly two states: open to all, or closed to all. The moment saturation is crossed, a 200-token chat request and a 100k-token request get treated identically: both get a 429. The customers want flexibility here as not all requests are equal under load. 
 
-The classifier itself is reusable — `PolicyProfile::resolve_class_index` is public, not
-scheduler-internal. The complication is its argument: it takes *uncached* tokens, and
-the EPP cannot know those at shed time. Overlap comes from the KV index query inside
-`pick()`, whereas the shed gate runs before the body is even decoded. So this
-requirement resolves into one of three options, which differ in cost and in whether the
+The customer wants to admit small first-attempts while shedding the oversized retries. For example an oversized retry might shed at 70% while a small first attempt keeps being admitted until 95%. So the class is (request size, retry-vs-first-attempt). Dynamo has no concept of the retry marker for a class. In this proposal the EPP would set policy_class = "retry" or "first_attempt".
+We will take the uncached_tokens argument as the proxy for the request size. This is better, since a 100k-token request with a 99k prefix hit is cheap and shouldn't be shed as if it were expensive. The classifier multiplies them, so the pair (size, retry) is the request_class.
+
+Today the shed decision is funtion_of(worker_state). The client wants function_of(worker_state, request_class).
+
+
+The router side already has some of the machinery in the KV router already assigns a request to a class either by explicit name or by an uncached ISL bucket — that is, bucketed on the tokens that actually need prefilling, which is a better cost proxy than raw prompt length.
+But it drives queueing, and the shed path never calls it. They're also in different crates: classification in dynamo-kv-router, shed threshold in dynamo-llm's monitor.
+
+
+The classifier itself is reusable and implemented in `PolicyProfile::resolve_class_index`. The complication is its argument: it takes *uncached* tokens, and the EPP cannot know those at shed time. Overlap comes from the KV index query inside `pick()`, whereas the shed gate runs before the body is even decoded. 
+
+```bash
+pub fn resolve_class_index(&self, requested: Option<&str>, uncached_tokens: usize) -> usize {
+    match &self.classifier {
+        PolicyClassifier::SyntheticSingle { class_index } => *class_index,
+        PolicyClassifier::FamilyBucket(classifier) => {
+            // TODO: Add bounded observability for unknown requested policy values.
+            classifier.class_index(requested, uncached_tokens)
+        }
+    }
+}
+```
+
+So this requirement resolves into one of three options, which differ in cost and in whether the
 router changes at all:
 
 1. **Classify on raw token count in the EPP.** No router change. The EPP keeps its own
@@ -181,9 +198,8 @@ router changes at all:
    `AdmissionDecision` is `Bypass | Ready | Defer` today, with no rejection variant, so
    the policy-class admission API can hold a request indefinitely but cannot shed one.
 
-A related question is where per-class thresholds are configured. They arguably belong
-beside the class definitions in the router's policy YAML — which already carries a
-per-class `admission:` envelope — rather than in EPP environment variables, since
+The per-class thresholds should be configured in the router's policy YAML — which already carries a
+per-class `admission:` envelope rather than in EPP environment variables, since
 splitting class definitions from class thresholds invites drift.
 
 This DEP does not pick one yet; the choice should be made before implementation starts.
@@ -393,7 +409,7 @@ loading in this first cut.
    router's existing class assignment. Satisfies REQ 3.
 6. Document the authoring model and ship one example custom plugin alongside the
    existing GAIE docs.
-   
+
 
 # Related Proposals
 
