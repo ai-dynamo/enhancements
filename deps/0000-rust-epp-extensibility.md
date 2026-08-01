@@ -190,17 +190,16 @@ router changes at all:
    class for a request then disagrees with the router's, so one request can be a
    "small" shed class and a "large" queue class at the same time — the two-sources-of-
    truth problem this DEP objects to elsewhere, in a new place.
-2. **Move the shed gate after tokenization and the overlap query.** No router change,
-   and class identity stays consistent, but it gives up the cheap pre-parse refusal
-   that distinguishes the EPP's shed from the frontend's error-driven one.
-3. **Push the decision into the router**, where uncached tokens and class assignment
+2. **Move the shed gate after tokenization.** We can feed raw prompt tokens as the size proxy to uncached_isl_buckets. But this would be counter-productive for the purpose. Raw ISL would systematically over-estimate cost on that traffic, so a mostly-cached large request would land in the "oversized" bucket and get shed — the precise mis-classification his design exists to prevent.
+3. **Move the gate after overlap sampling**. We will use true uncached ISL but have to run the query `find_matches on the indexer`. We will pay with time for the index query on a request we may to reject. But this extra cost is minor compared to the cost of tokenization. 
+4. **Push the decision into the router**, where uncached tokens and class assignment
    already sit together. This is the only option requiring a router contract change:
    `AdmissionDecision` is `Bypass | Ready | Defer` today, with no rejection variant, so
    the policy-class admission API can hold a request indefinitely but cannot shed one.
 
 The per-class thresholds should be configured in the router's policy YAML — which already carries a
 per-class `admission:` envelope rather than in EPP environment variables, since
-splitting class definitions from class thresholds invites drift.
+splitting class definitions from class thresholds invites drift. `RouterPolicyConfig::from_yaml`, `resolve_profile`, `PolicyProfile`, and both class-index methods are all public, so the EPP can use them. But `KvRouterConfig::loaded_policy_config()` is private, so the EPP either gets that made public or loads the YAML itself.
 
 This DEP does not pick one yet; the choice should be made before implementation starts.
 
