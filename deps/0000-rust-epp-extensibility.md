@@ -165,10 +165,8 @@ Today the shed decision is funtion_of(worker_state). The client wants function_o
 
 
 The router side already has some of the machinery in the KV router already assigns a request to a class either by explicit name or by an uncached ISL bucket — that is, bucketed on the tokens that actually need prefilling, which is a better cost proxy than raw prompt length.
-But it drives queueing, and the shed path never calls it. They're also in different crates: classification in dynamo-kv-router, shed threshold in dynamo-llm's monitor.
-
-
-The classifier itself is reusable and implemented in `PolicyProfile::resolve_class_index`. The complication is its argument: it takes *uncached* tokens, and the EPP cannot know those at shed time. Overlap comes from the KV index query inside `pick()`, whereas the shed gate runs before the body is even decoded. 
+But it drives queueing, and the shed path never calls it. They're also in different crates: classification in dynamo-kv-router, shed threshold in dynamo-llm's monitor. We need to use the classifier from it. 
+The classifier itself is implemented in `PolicyProfile::resolve_class_index`. The complication is its argument: it takes *uncached* tokens, and the EPP cannot know those at shed time. Overlap comes from the KV index query inside `pick()`, whereas the shed gate runs before the body is even decoded. 
 
 ```bash
 pub fn resolve_class_index(&self, requested: Option<&str>, uncached_tokens: usize) -> usize {
@@ -181,21 +179,32 @@ pub fn resolve_class_index(&self, requested: Option<&str>, uncached_tokens: usiz
     }
 }
 ```
+We can run this alg before we select the worker and feed the tokens from the prompt into uncached_tokens BUT this would result in making the shedding worse. Raw ISL would systematically over-estimate cost on that traffic, so a mostly-cached large request would land in the "oversized" bucket and get shed — the precise issue we want to prevent.
 
-So this requirement resolves into one of three options, which differ in cost and in whether the
-router changes at all:
+This complication forces use to move the class - aware shedding after the workers are picked. This incurs additional overhead for a request we can potentially drop but this preserves our routing semantics. 
+The route_decode() function returns the returns overlap_blocks we need for the `resolve_class_index`. The signature is `Result<(WorkerWithDpRank, overlap_blocks)>`. We can then run
+```bash
+let (decode_worker, overlap_blocks) = self.route_decode(/* ... */).await?;
 
-1. **Classify on raw token count in the EPP.** No router change. The EPP keeps its own
-   per-class threshold table and buckets on prompt length. Cheapest, but the EPP's
-   class for a request then disagrees with the router's, so one request can be a
-   "small" shed class and a "large" queue class at the same time — the two-sources-of-
-   truth problem this DEP objects to elsewhere, in a new place.
-2. **Move the shed gate after tokenization.** We can feed raw prompt tokens as the size proxy to uncached_isl_buckets. But this would be counter-productive for the purpose. Raw ISL would systematically over-estimate cost on that traffic, so a mostly-cached large request would land in the "oversized" bucket and get shed — the precise mis-classification his design exists to prevent.
-3. **Move the gate after overlap sampling**. We will use true uncached ISL but have to run the query `find_matches on the indexer`. We will pay with time for the index query on a request we may to reject. But this extra cost is minor compared to the cost of tokenization. 
-4. **Push the decision into the router**, where uncached tokens and class assignment
-   already sit together. This is the only option requiring a router contract change:
-   `AdmissionDecision` is `Bypass | Ready | Defer` today, with no rejection variant, so
-   the policy-class admission API can hold a request indefinitely but cannot shed one.
+let cached_tokens =
+    overlap_blocks as usize * self.decode_router.block_size() as usize;
+let uncached_tokens = tokens.len().saturating_sub(cached_tokens);
+```
+
+The following flow is proposed:
+Router::pick()                          epp.rs   — general method in EPP
+ ├─ GATE A                              epp.rs   — This is basic shedding implemented in [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865). This is not a plugin 
+ ├─ tokenize
+ ├─ Router::route_prefill()             epp.rs   — thin wrapper, no change
+ │    └─ PrefillRouter::…                        — kv-router, no change
+ ├─ Router::route_decode()              epp.rs   — thin wrapper, no change
+ │    └─ KvRouter::find_best_match()             — kv-router, no change
+ │         returns (worker, overlap_blocks)
+ ├─ GATE B                              epp.rs   — This will be a plugin for the new Class-Aware shedding  per customer request
+ ├─ resolve the worker endpoint
+ └─ Router::add_request()               epp.rs   — existing router book keeping
+      └─ KvRouter::add_request()                 — kv-router, no change
+
 
 The per-class thresholds should be configured in the router's policy YAML — which already carries a
 per-class `admission:` envelope rather than in EPP environment variables, since
