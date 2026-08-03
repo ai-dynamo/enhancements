@@ -37,9 +37,7 @@ previously only existed in Go.
 This proposal adds a minimal extension model to the Rust EPP: **two plugin types and
 one shared input**. The plugins are **DataProducer** (per-request data preparation before
 scheduling; tokenization is the first use) and **Admitter (load shedding)** (reject
-a request under overload). The Admitter runs after the scheduler has picked a worker and
-before the request is booked; "Why the Admitter runs after the scheduler" below explains
-why it sits there rather than in front of the scheduler as llm-d does.
+a request under overload before scheduling). 
 
 All plugins will need to have read-only worker-state view (the KV and prefill load signal)
 The worker-state view is a critical addition. A shedding policy that cannot
@@ -162,7 +160,7 @@ Today the shed decision is funtion_of(worker_state). The client wants function_o
 
 The router side already has some of the machinery. The KV router already assigns a request to a class either by explicit name or by an uncached ISL bucket, bucketing on the tokens that actually need prefilling, which is a better cost proxy than raw prompt length.
 But it drives queueing, and the shed path never calls it. They're also in different crates: classification in dynamo-kv-router, shed threshold in dynamo-llm's monitor. We need to use the classifier from the kv router. 
-The classifier itself is implemented in `PolicyProfile::resolve_class_index`. The complication is its argument: it takes *uncached* tokens, and the EPP cannot know those at shed time. Overlap comes from the KV index query inside `pick()`, whereas the shed gate runs before the body is even decoded. 
+The classifier itself is implemented in `PolicyProfile::resolve_class_index`. The complication is its argument: it takes *uncached* tokens, which cannot be derived from the request alone. Overlap is a property of the prompt's block hashes walked against the KV index, not a property of worker state, so no amount of background monitoring produces it — the index has to be queried for this specific prompt. Today that query happens inside the routing call, whereas Gate A runs before the body is even decoded. 
 
 ```bash
 pub fn resolve_class_index(&self, requested: Option<&str>, uncached_tokens: usize) -> usize {
@@ -177,15 +175,48 @@ pub fn resolve_class_index(&self, requested: Option<&str>, uncached_tokens: usiz
 ```
 We can run this alg before we select the worker and feed the tokens from the prompt into uncached_tokens BUT this would result in making the shedding worse. Raw ISL would systematically over-estimate cost on that traffic, so a mostly-cached large request would land in the "oversized" bucket and get shed — the precise issue we want to prevent.
 
-This complication forces use to move the class-aware shedding logic after the workers are picked. This incurs additional overhead for a request we can potentially drop but this preserves our routing semantics. 
-The route_decode() function returns the returns overlap_blocks we need for the `resolve_class_index`. The signature is `Result<(WorkerWithDpRank, overlap_blocks)>`. We can then run
-```bash
-let (decode_worker, overlap_blocks) = self.route_decode(/* ... */).await?;
+The way out is that the router already exposes a routing query that books nothing.
+`KvRouter::find_best_match_details_without_admission` runs the normal route in
+`ScheduleMode::QueryOnly` and returns the facts a cost model needs — `cached_tokens` among
+them — without reserving anything:
 
-let cached_tokens =
-    overlap_blocks as usize * self.decode_router.block_size() as usize;
-let uncached_tokens = tokens.len().saturating_sub(cached_tokens);
+```rust
+pub enum FindBestMatchAdvisoryOutcome {
+    Routed {
+        worker: WorkerWithDpRank,
+        overlap_blocks: u32,
+        effective_overlap_blocks: f64,
+        cached_tokens: usize,
+        potential_decode_blocks: u64,
+        selected_worker_load: scheduling::AdvisoryWorkerLoad,
+        routing_hashes: Option<RoutingDecisionHashes>,
+    },
+    QueueRejected { rejection: scheduling::QueueRejection },
+}
 ```
+
+Because `cached_tokens` comes back directly, deriving the class index needs no block-size
+arithmetic:
+
+```rust
+let uncached_tokens = tokens.len().saturating_sub(cached_tokens);
+let class_index = profile.resolve_class_index(policy_class.as_deref(), uncached_tokens);
+```
+
+Conditional disaggregation already uses this path in exactly this shape: it calls the
+advisory query, reads `cached_tokens` and `selected_worker_load`, then calls
+`selected_worker_load.prefill_load_exceeds(threshold)` to decide whether to bypass prefill
+(`lib/llm/src/kv_router/prefill_router/conditional_bypass.rs`). A class-aware shed is the
+same decision shape, so this is an existing mechanism rather than a new one.
+
+**Performing the advisory query is the plugin's responsibility, not the pipeline's.** The
+Admitter therefore stays where llm-d puts it — after data preparation, before the
+scheduler — and a policy that needs overlap-derived facts issues the advisory query
+itself. That makes the cost opt-in. A deployment running no Admitter, or one whose policy
+keys only on worker state and request headers, routes exactly once and pays nothing extra.
+Only a policy that actually wants uncached ISL pays for a second query, and it pays
+knowingly. Moving the gate after the scheduler instead would impose the reordering on
+every deployment, whether or not it used a class-aware policy.
 
 The following flow is proposed. `Router::pick()` is the `EndpointPicker` trait method in
 `epp.rs`; everything below it runs inside that call.
@@ -194,12 +225,14 @@ The following flow is proposed. `Router::pick()` is the `EndpointPicker` trait m
 Router::pick()                             epp.rs
  ├─ GATE A request-blind shedding          epp.rs      (1)
  ├─ tokenize                               epp.rs
+ ├─ GATE B request-aware shedding          epp.rs      (2)  ← new, pluggable
+ │    └─ advisory query — only if the policy needs uncached ISL
+ │         └─ KvRouter::find_best_match_details_without_admission()
+ │                                         kv-router    existing, books nothing
  ├─ Router::route_prefill()                epp.rs       thin wrapper
  │    └─ PrefillRouter::…                  kv-router    unchanged
  ├─ Router::route_decode()                 epp.rs       thin wrapper
  │    └─ KvRouter::find_best_match()       kv-router    unchanged
- │         → (worker, overlap_blocks)
- ├─ GATE B request-aware shedding          epp.rs      (2)  ← new
  ├─ resolve the worker endpoint            epp.rs
  └─ Router::add_request()                  epp.rs       bookkeeping
       └─ KvRouter::add_request()           kv-router    unchanged
@@ -208,9 +241,12 @@ Router::pick()                             epp.rs
 1. **GATE A** — basic, request-blind shedding, already implemented in
    [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865). Not a plugin. It runs
    before tokenization, so it costs nothing to refuse a fully saturated pool. Every worker is continuously marked overloaded-or-not based on how full its KV cache and prefill queue are versus a fixed threshold, and Gate A rejects the incoming request with 429 only when every worker eligible to serve it is currently marked overloaded. Dynamo's frontend already sheds load (HTTP 529); the GAIE path needs the same, made extensible. The frontend's shed is a routing failure surfaced as an error, discovered after the request has already been parsed and tokenized. But customers pressing on explicit rejection versus implicit shed. The frontend returns 529 (configurable via DYN_HTTP_OVERLOAD_STATUS_CODE) with no retry hint. The EPP will return 429 with Retry-After. Both choices are intentional: 429 is what a gateway and its failover logic already understand, and the retry hint is new capability rather than parity. The beginning of its implementation is in [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865), which reuses the frontend's `KvWorkerMonitor` and adds a `PickError::Saturated { retry_after_secs }` variant surfaced as HTTP 429 with `Retry-After`. What remains is the wiring for the plugin. Caveat: One frontend capability also does not carry over: `POST`/`GET /busy_threshold` returns thresholds per model on a live fleet, whereas the EPP reads env vars once at startup. Closing that is out of scope here.
-2. **GATE B** — the new class-aware shedding, exposed as a plugin. It sits after
-   selection so it can derive uncached ISL from `overlap_blocks`, and before
-   `add_request`, so nothing is booked yet and a rejection needs no rollback.
+2. **GATE B** — the new class-aware shedding, exposed as a plugin, occupying the Admitter
+   position: after tokenization, before the scheduler. It rejects before anything is
+   booked, so a rejection has nothing to roll back — the advisory query reserves no
+   capacity even when a policy chooses to issue one. A policy that needs uncached
+   ISL obtains it from the advisory query; a policy keying only on worker state and
+   headers skips that call entirely.
 
 Everything marked `unchanged` is `dynamo-kv-router` code this proposal does not touch:
 scoring, selection, and the router's own bookkeeping all stay as they are.
@@ -226,17 +262,16 @@ This DEP does not pick one yet; the choice should be made before implementation 
 
 ## Overview
 
-Keep the existing request flow and insert two plugin points around the existing
-scheduler — data preparation in front of it, admission behind it — both reading one
-shared worker-state view:
+Keep the existing request flow and insert two plugin points in front of the existing
+scheduler, both reading one shared worker-state view:
 
 ```text
 ext_proc request
   → parse body / build request            built in
   → GATE A: global saturation shed        built in    request-blind, dynamo#11865
   → DataProducer plugin                   pluggable   tokenization lives here    [view]
-  → Scheduler: pick worker                built in    existing KV router, unchanged
   → GATE B: Admitter (load shedding)      pluggable   reject under overload      [view]
+  → Scheduler: pick worker                built in    existing KV router, unchanged
   → book the request + attach headers     built in
   → return decision to Envoy
   → response callbacks                    built in    prefill complete, usage
@@ -244,9 +279,9 @@ ext_proc request
 [view] = reads the shared read-only worker-state view
 ```
 
-This takes the useful part of the llm-d / GAIE flow — a data-preparation stage and a
-separate stage that may reject — without the surrounding machinery. For reference,
-llm-d's own ordering is:
+This matches the useful part of the llm-d / GAIE flow — a data-preparation stage, then a
+stage that may reject, then scheduling — without the surrounding machinery. llm-d's own
+ordering is:
 
 ```text
 Parse body → Build LLMRequest → Flow control   ← builtin, not pluggable
@@ -271,29 +306,18 @@ llm-d admits in two distinct places:
 * **`Admitter` plugins** run after `DataProducer` and before scheduling, and these
   *can* reject outright. The `latency-slo-admitter`plugin is an example here.
 
-The load-shedding plugin proposed here is that `Admitter`: same ability to reject
-outright, same read-only view of saturation, same ordering relative to data
-preparation. It diverges upstream in one respect — it runs *after* the scheduler rather
-than in front of it.
+The load-shedding plugin proposed here is that `Admitter`: same pipeline position, same
+ordering relative to data preparation, same ability to reject. That correspondence is the
+reason the seam sits where it does.
 
-### Why the Admitter runs after the scheduler
-
-Dynamo's cost proxy for a request is uncached ISL: the prompt tokens that actually need
-prefilling. That number is derived from `overlap_blocks`, which does not exist until
-`KvRouter::find_best_match()` has consulted the prefix index. Admitting in front of the
-scheduler would see raw prompt length only, and raw length mis-prices exactly the
-requests a class-aware policy cares about — a 100k-token prompt that is 95% cached is
-cheap, while an 8k-token prompt that is entirely uncached is not. Getting overlap earlier
-would mean either a second prefix-index query or reordering the router, and leaving
-`dynamo-kv-router` untouched is a constraint of this proposal. The gate therefore sits
-after selection and before `Router::add_request()`, where nothing has been booked yet, so
-a rejection needs no rollback.
-
-Deciding late costs something: a rejected request has already paid tokenization and the
-index query. Gate A bounds that cost. When every eligible worker is saturated the
-built-in shed refuses before any of that work happens, so the late gate only pays on
-requests that had a plausible home. llm-d can admit earlier because its
-`latency-slo-admitter` does not consult prefix overlap.
+One difference in the *policies* is worth noting, because it explains why this DEP needs a
+mechanism upstream does not. llm-d's `latency-slo-admitter` keys on facts that arrive with
+the request — SLO class and priority — plus a fleet-level saturation signal, so every
+input is available at ingress. Dynamo's class is derived partly from request *cost*, and
+the honest cost measure is uncached ISL, which requires querying the KV index for that
+specific prompt. Keeping the Admitter at the same pipeline position while still supporting
+a cost-derived class is what the advisory query above buys: the plugin reaches for overlap
+when its policy needs it, rather than the pipeline reordering itself for every deployment.
 
 
 The upstream split between the saturation *signal* and the admit/reject *decision*
@@ -308,15 +332,15 @@ does both. This is TBD.
 | Parse body / build request | No | Stable, shared parsing |
 | Global saturation shed (Gate A) | No | Process self-protection; fixed threshold, already built in |
 | DataProducer (tokenization) | Yes | Users need different tokenizers; enables prefix-cache routing and tokens-in forwarding |
-| Scheduler (worker pick) | No (for now) | The existing KV-aware router stays the default; can be revisited later |
 | Admitter (load shedding, Gate B) | Yes | Users need their own overload policy |
 | Worker-state view | No — read-only input | Not a stage. One shared source of truth for the signals policies need (REQ 1) |
+| Scheduler (worker pick) | No (for now) | The existing KV-aware router stays the default; can be revisited later |
 | Bookkeeping / headers | No | Internal correctness |
 
 The Rust EPP is currently `ext_proc` + scheduler; this proposal adds exactly two
-pluggable stages around the scheduler — data preparation in front of it, admission
-behind it — plus one read-only input feeding both, and leaves the scheduler itself built
-in. We are not making parsing, scoring, or picking pluggable at this time.
+pluggable stages in front of the scheduler, one read-only input feeding them, and leaves
+the scheduler built in. We are not making parsing, scoring, or picking pluggable at this
+time.
 
 ## How the plugins work (conceptually)
 
@@ -326,13 +350,13 @@ in. We are not making parsing, scoring, or picking pluggable at this time.
   default PrepareData plugin. If token data is already present (e.g. a pre-tokenized
   request), the plugin is skipped. PrepareData is fail-open: if a plugin errors, the
   request still proceeds and scheduling falls back to prompt-based behavior.
-* The scheduler then runs unchanged, consuming the token data that DataProducer produced
-  and yielding a selected worker together with its `overlap_blocks`.
-* **Admitter (Load-shedding)** plugins run last and default to allow: each plugin may reject
+* **Admitter (Load-shedding)** plugins run next and default to allow: each plugin may reject
   (mapped to HTTP 429 / 503, with 529 available for Dynamo clients); if none
   reject, the request proceeds. Multiple plugins can be chained and any rejection
-  stops the request. Because the gate precedes `Router::add_request()`, a rejection
-  leaves no booking to undo.
+  stops the request. A plugin whose policy needs request cost issues the advisory routing
+  query itself; that cost falls on the policies that want it rather than on every request.
+* The scheduler then runs unchanged, consuming the token data that DataProducer
+  produced.
 * We should also reconsider how to do priority scheduling to decide if we want to align with GAIE. See related [proposal](https://github.com/ai-dynamo/enhancements/pull/90)
 
 ## Worker state as a first-class input
@@ -502,11 +526,11 @@ lands second will need a small merge resolution in `picker.rs` and `epp.rs`.
 * Over-engineered for current needs. The two plugins plus the shared state view cover
   the real use cases (custom tokenizer, custom overload policy). Additional
   extension points can be proposed later if a concrete need appears.
-* The gap is also narrower than it looks. `DataProducer` and `Admitter` are the only two
-  plugin points llm-d exposes anywhere around scheduling, and this proposal adopts both —
-  differing only in where the `Admitter` sits relative to the scheduler, for the reason
-  given above. What Alt 1 adds beyond that is the flow-control machinery and pluggable
-  scoring — both already Non Goals, and the former not pluggable upstream either.
+* The gap is also narrower than it looks. `DataProducer` and `Admitter` are the only
+  two plugin points llm-d places between request parsing and scheduling, so this
+  proposal already matches upstream over that span. What Alt 1 adds beyond it is the
+  flow-control machinery and pluggable scoring — both already Non Goals, and the
+  former not pluggable upstream either.
 
 ## Alt 2 Keep load shedding / tokenization out of the EPP (gateway-level only)
 
