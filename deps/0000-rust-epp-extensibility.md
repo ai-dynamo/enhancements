@@ -499,78 +499,7 @@ lands second will need a small merge resolution in `picker.rs` and `epp.rs`.
 
 # Alternate Solutions
 
-## Alt 1 Reproduce the full llm-d / GAIE plugin pipeline in Rust
-
-**Pros:**
-
-* Maximum flexibility (pluggable scorers, pickers, profile handlers, fairness,
-  flow control).
-* Closer 1:1 mapping to the Go EPP and upstream GAIE.
-
-**Cons:**
-
-* Large surface area and ongoing maintenance for extension points nobody is
-  asking for yet.
-* Slower to deliver the two capabilities actually needed.
-
-**Reason Rejected:**
-
-* Over-engineered for current needs. The two plugins plus the shared state view cover
-  the real use cases (custom tokenizer, custom overload policy). Additional
-  extension points can be proposed later if a concrete need appears.
-* The gap is also narrower than it looks. `DataProducer` and `Admitter` are the only
-  two plugin points llm-d places between request parsing and scheduling, so this
-  proposal already matches upstream over that span. What Alt 1 adds beyond it is the
-  flow-control machinery and pluggable scoring — both already Non Goals, and the
-  former not pluggable upstream either.
-
-## Alt 2 Keep load shedding / tokenization out of the EPP (gateway-level only)
-
-**Pros:**
-
-* No EPP changes.
-
-**Cons:**
-
-* Generic gateway RPS limits are a poor proxy for KV-cache / queue saturation.
-* Tokenization for prefix-cache routing has to happen where routing decisions are
-  made.
-
-**Reason Rejected:**
-
-* Both capabilities are inherently LLM-aware and belong in the EPP, consistent
-  with llm-d and Dynamo's own frontend admission behavior.
-
-## Alt 3 Ship the plugins without exposing worker state
-
-Leave the state feed private and let each out-of-tree policy build its own — the
-`EndpointPicker` trait is already wrappable, so an integrator can decorate the stock
-router and subscribe to worker events independently.
-
-**Pros:**
-
-* Smallest possible boundary; no new types to maintain or version.
-* Nothing to get wrong in the state view's shape before we have several policies to
-  generalize from.
-
-**Cons:**
-
-* Two sources of truth for overload. A policy's private feed and the built-in
-  shedder's `KvWorkerMonitor` can disagree, and the resulting behavior — shed by one,
-  admitted by the other — is very hard to debug from outside.
-* Duplicate plumbing in every deployment that wants a custom policy, which is the
-  specific cost REQ 1 was raised to avoid.
-* The plugin seam would be mostly decorative: a shedding plugin that cannot see
-  saturation can only apply request-shaped heuristics, so the interesting policies
-  would still live in forks.
-
-**Reason Rejected:**
-
-* This is effectively the status quo with extra ceremony. If the seam ships without
-  the input the policy needs, integrators keep forking and we still own the
-  compatibility burden of a published trait.
-
-## Alt 4 Implement class-aware shedding in the KV router; make the EPP a thin wrapper
+## Alt 1 Implement class-aware shedding in the KV router; make the EPP a thin wrapper
 
 Put the shed decision where classification already happens — inside `dynamo-kv-router`'s
 scheduling path — instead of adding an Admitter plugin at the gateway. The EPP then
@@ -642,3 +571,76 @@ designed and unbuilt, and its decision set is `Bypass` / `Ready` / `Defer` with 
 `Reject`. Alt 4 amounts to adding `Reject` to that contract, so it likely belongs folded
 into whichever proposal owns it rather than pursued from the EPP side. Identify that
 owner before choosing between Alt 4 and the main proposal.
+
+
+## Alt 2 Reproduce the full llm-d / GAIE plugin pipeline in Rust
+
+**Pros:**
+
+* Maximum flexibility (pluggable scorers, pickers, profile handlers, fairness,
+  flow control).
+* Closer 1:1 mapping to the Go EPP and upstream GAIE.
+
+**Cons:**
+
+* Large surface area and ongoing maintenance for extension points nobody is
+  asking for yet.
+* Slower to deliver the two capabilities actually needed.
+
+**Reason Rejected:**
+
+* Over-engineered for current needs. The two plugins plus the shared state view cover
+  the real use cases (custom tokenizer, custom overload policy). Additional
+  extension points can be proposed later if a concrete need appears.
+* The gap is also narrower than it looks. `DataProducer` and `Admitter` are the only
+  two plugin points llm-d places between request parsing and scheduling, so this
+  proposal already matches upstream over that span. What Alt 1 adds beyond it is the
+  flow-control machinery and pluggable scoring — both already Non Goals, and the
+  former not pluggable upstream either.
+
+## Alt 3 Keep load shedding / tokenization out of the EPP (gateway-level only)
+
+**Pros:**
+
+* No EPP changes.
+
+**Cons:**
+
+* Generic gateway RPS limits are a poor proxy for KV-cache / queue saturation.
+* Tokenization for prefix-cache routing has to happen where routing decisions are
+  made.
+
+**Reason Rejected:**
+
+* Both capabilities are inherently LLM-aware and belong in the EPP, consistent
+  with llm-d and Dynamo's own frontend admission behavior.
+
+## Alt 4 Ship the plugins without exposing worker state
+
+Leave the state feed private and let each out-of-tree policy build its own — the
+`EndpointPicker` trait is already wrappable, so an integrator can decorate the stock
+router and subscribe to worker events independently.
+
+**Pros:**
+
+* Smallest possible boundary; no new types to maintain or version.
+* Nothing to get wrong in the state view's shape before we have several policies to
+  generalize from.
+
+**Cons:**
+
+* Two sources of truth for overload. A policy's private feed and the built-in
+  shedder's `KvWorkerMonitor` can disagree, and the resulting behavior — shed by one,
+  admitted by the other — is very hard to debug from outside.
+* Duplicate plumbing in every deployment that wants a custom policy, which is the
+  specific cost REQ 1 was raised to avoid.
+* The plugin seam would be mostly decorative: a shedding plugin that cannot see
+  saturation can only apply request-shaped heuristics, so the interesting policies
+  would still live in forks.
+
+**Reason Rejected:**
+
+* This is effectively the status quo with extra ceremony. If the seam ships without
+  the input the policy needs, integrators keep forking and we still own the
+  compatibility burden of a published trait.
+
