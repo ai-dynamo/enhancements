@@ -210,7 +210,7 @@ advisory query, reads `cached_tokens` and `selected_worker_load`, then calls
 same decision shape, so this is an existing mechanism rather than a new one.
 
 **Performing the advisory query is the plugin's responsibility, not the pipeline's.** The
-Admitter therefore stays where llm-d puts it — after data preparation, before the
+Admitter therefore stays similar to where llm-d puts it — after data preparation, before the
 scheduler — and a policy that needs overlap-derived facts issues the advisory query
 itself. That makes the cost opt-in. A deployment running no Admitter, or one whose policy
 keys only on worker state and request headers, routes exactly once and pays nothing extra.
