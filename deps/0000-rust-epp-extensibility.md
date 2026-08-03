@@ -218,6 +218,12 @@ Only a policy that actually wants uncached ISL pays for a second query, and it p
 knowingly. Moving the gate after the scheduler instead would impose the reordering on
 every deployment, whether or not it used a class-aware policy.
 
+Alt 4 proposes the opposite arrangement — placing the class-aware shed inside the router,
+where classification already sees accurate uncached ISL — which would remove the need for
+the advisory query and for a gateway-side Admitter altogether. It is open rather than
+rejected, and the choice between it and the arrangement below should be made before
+implementation starts.
+
 The following flow is proposed. `Router::pick()` is the `EndpointPicker` trait method in
 `epp.rs`; everything below it runs inside that call.
 
@@ -404,20 +410,6 @@ REQ 2: only the second case should become 429 with `Retry-After`. The first is a
 permanent failure, and attaching a retry hint to it actively misleads the gateway's
 failover logic. A policy that cannot see both sets cannot tell the two apart.
 
-### What keeps this from becoming a scoring API which we do not want to change
-
-Exposing state is not the same as making selection pluggable, which stays a Non Goal.
-Three properties hold that line:
-
-* **Read-only.** A plugin observes. It cannot mark a worker overloaded, retune a
-  threshold, or touch the KV index, so it has no way to steer selection through the
-  state view.
-* **A snapshot, not a live handle.** One frozen picture per decision, so two reads
-  within a single decision agree and there is nothing to poll in a loop. It is also
-  cheap to pass: a refcount bump rather than a map traversal.
-* **Typed and narrow.** Named accessors for signals we already maintain, not a
-  `HashMap<String, Value>`. Adding a fact becomes a reviewable code change instead of
-  a plugin quietly depending on a key nobody knew existed.
 
 ## Relationship to the router's policy-class admission API
 
@@ -577,3 +569,76 @@ router and subscribe to worker events independently.
 * This is effectively the status quo with extra ceremony. If the seam ships without
   the input the policy needs, integrators keep forking and we still own the
   compatibility burden of a published trait.
+
+## Alt 4 Implement class-aware shedding in the KV router; make the EPP a thin wrapper
+
+Put the shed decision where classification already happens — inside `dynamo-kv-router`'s
+scheduling path — instead of adding an Admitter plugin at the gateway. The EPP then
+contributes only the parts that are genuinely HTTP-shaped: an overload signal, a mapping
+from request headers to `policy_class`, and the translation of a rejection into 429 with
+`Retry-After`. 
+
+Most of the machinery for this already exists:
+
+| Piece | State |
+|-------|-------|
+| Class = family × uncached-ISL bucket | Exists (`FamilyBucketClassifier`) |
+| Per-class configuration envelope | Exists (`PolicyClassConfig`) |
+| Per-class rejection with a typed reason | Exists (`QueueRejection` → `KvSchedulerError::QueueRejected`) |
+| Reject when all eligible workers are overloaded | Exists (`KvSchedulerError::AllEligibleWorkersOverloaded`) |
+| Host-supplied overload signal | Exists (`OverloadedWorkerProvider`) |
+| Overload signal keyed *by class* | Missing |
+| EPP supplying any overload signal | Missing |
+
+The router will get a shedding policy plugin:
+
+```bash
+if let Some(policy) = &self.shed_policy {
+    match policy.evaluate(&ShedContext { class, uncached_tokens, eligibility, load }) {
+        ShedDecision::Reject { retry_after } => {
+            request.respond(Err(KvSchedulerError::Shed { policy_class: class.name.clone(), retry_after }));
+            return (false, false);
+        }
+        ShedDecision::Continue => {}
+    }
+}
+```
+
+The router therefore already rejects, and already rejects per class — the gap is narrower
+than "it queues instead of rejecting." `OverloadedWorkerProvider` is
+`Arc<dyn Fn() -> Option<HashSet<WorkerId>>>`; a closure taking no arguments can answer
+"who is overloaded" but never "who is overloaded *for this class*." Passing the class and
+its uncached token count is the core change.
+
+**Pros:**
+
+* Classification runs where `uncached_tokens` is already correct, after overlap is known.
+  This removes the need for the advisory query, the class-index derivation in the EPP, and
+  any question about where the gate sits relative to the scheduler — REQ 3's whole
+  complication disappears.
+* The frontend inherits the same capability from the same code, so 529-vs-429 becomes a
+  presentation choice for EPP vs the FrontEnd rather than two implementations of one policy.
+* Per-class thresholds live beside the per-class definitions in the router policy YAML,
+  which is where this DEP already argues they belong.
+* Queue-versus-reject behavior switch needed. We need two levels of configuration.
+ 1. Per class, in the policy YAML. A field on PolicyClassConfig next to the thresholds it already holds — on_saturation: Queue | Reject, defaulting to Queue so no Frontend deployment changes.The client wants the oversized-retry class rejects while the small-first-attempt class keeps queueing.
+ 2. We need a way to say reject-instead-of-queue in a form of a policy config. The EPP cannot defer requests because it runs inside an ext_proc callout with a timeout budget, where parking a request burns that budget and then likely times out anyway. The Frontend leaves it off because it owns the stream and can legitimately hold. Today you cannot ask for a class-aware shed threshold without also asking for deferral. 
+
+**Cons:**
+
+* Shedding stops being a gateway-level plugin. A user-supplied policy becomes a router
+  admission policy registered at a composition root, which is a different authoring
+  model from the one the rest of this DEP describes.
+* The shed necessarily happens after tokenization and the index query, so a rejected
+  request has already paid for both. Gate A still bounds that cost for the fully
+  saturated case.
+
+**Open — not yet rejected.** 
+
+There is also a coordination risk. `lib/kv-router/src/scheduling/queue_admission/` is
+described as the established boundary for policy-class admission algorithms, but the
+module currently contains only `RequestProgress` and `WorkerPlacement` — the contract is
+designed and unbuilt, and its decision set is `Bypass` / `Ready` / `Defer` with no
+`Reject`. Alt 4 amounts to adding `Reject` to that contract, so it likely belongs folded
+into whichever proposal owns it rather than pursued from the EPP side. Identify that
+owner before choosing between Alt 4 and the main proposal.
