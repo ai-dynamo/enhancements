@@ -64,13 +64,7 @@ policy must fork it. Three concrete needs drive this proposal:
   and future tokens-in forwarding to model servers.
 - **Load shedding must be pluggable and LLM-aware.** Overload protection for LLM
   serving must look at KV-cache and queue saturation, not generic request rate.
-  It belongs inside the EPP and users want to supply their own policy. Dynamo's
-  frontend already sheds load (HTTP 529); the GAIE path needs the same, made
-  extensible. The frontend's shed is a routing failure surfaced as an error, discovered after the request has already been parsed and tokenized. But customers pressing on explicit rejection versus implicit shed. The frontend returns 529 (configurable via DYN_HTTP_OVERLOAD_STATUS_CODE) with no retry hint. The EPP will return 429 with Retry-After. Both choices are intentional: 429 is what a gateway and its failover logic already understand, and the retry hint is new capability rather than parity.
-  The beginning of its implementation is in [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865), which reuses the frontend's `KvWorkerMonitor` and adds a `PickError::Saturated
-  { retry_after_secs }` variant surfaced as HTTP 429 with `Retry-After`. What remains is the wiring for the plugin. Caveat: One frontend capability also does not carry
-  over: `POST`/`GET /busy_threshold` returns thresholds per model on a live fleet,
-  whereas the EPP reads env vars once at startup. Closing that is out of scope here but needs to be done.
+  Users want to supply their own policy. The shedding must happen at the EPP level. 
 - **Policy state** must be shared, not rebuilt. Any policy reasoning about saturation needs the signals the built-in thresholds are already expressed in: active_decode_blocks and kv_used_blocks against kv_total_blocks, and active_prefill_tokens against max_num_batched_tokens. These span two feeds — numerators from the ActiveLoad stream, denominators from the runtime-config watch — and WorkerLoadState already joins them. It lives in dynamo-llm, which the EPP links today, so the EPP should construct a KvWorkerMonitor and reuse it rather than grow a parallel implementation. Tracking is only half the gap: the state is a private field and EndpointPicker::pick has no parameter. We need to expose it to enable plugins:
 
 ```bash
@@ -198,14 +192,14 @@ The following flow is proposed. `Router::pick()` is the `EndpointPicker` trait m
 
 ```text
 Router::pick()                             epp.rs
- ├─ GATE A                                 epp.rs      (1)
+ ├─ GATE A request-blind shedding          epp.rs      (1)
  ├─ tokenize                               epp.rs
  ├─ Router::route_prefill()                epp.rs       thin wrapper
  │    └─ PrefillRouter::…                  kv-router    unchanged
  ├─ Router::route_decode()                 epp.rs       thin wrapper
  │    └─ KvRouter::find_best_match()       kv-router    unchanged
  │         → (worker, overlap_blocks)
- ├─ GATE B                                 epp.rs      (2)  ← new
+ ├─ GATE B request-aware shedding          epp.rs      (2)  ← new
  ├─ resolve the worker endpoint            epp.rs
  └─ Router::add_request()                  epp.rs       bookkeeping
       └─ KvRouter::add_request()           kv-router    unchanged
@@ -213,7 +207,7 @@ Router::pick()                             epp.rs
 
 1. **GATE A** — basic, request-blind shedding, already implemented in
    [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865). Not a plugin. It runs
-   before tokenization, so it costs nothing to refuse a fully saturated pool.
+   before tokenization, so it costs nothing to refuse a fully saturated pool. Every worker is continuously marked overloaded-or-not based on how full its KV cache and prefill queue are versus a fixed threshold, and Gate A rejects the incoming request with 429 only when every worker eligible to serve it is currently marked overloaded. Dynamo's frontend already sheds load (HTTP 529); the GAIE path needs the same, made extensible. The frontend's shed is a routing failure surfaced as an error, discovered after the request has already been parsed and tokenized. But customers pressing on explicit rejection versus implicit shed. The frontend returns 529 (configurable via DYN_HTTP_OVERLOAD_STATUS_CODE) with no retry hint. The EPP will return 429 with Retry-After. Both choices are intentional: 429 is what a gateway and its failover logic already understand, and the retry hint is new capability rather than parity. The beginning of its implementation is in [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865), which reuses the frontend's `KvWorkerMonitor` and adds a `PickError::Saturated { retry_after_secs }` variant surfaced as HTTP 429 with `Retry-After`. What remains is the wiring for the plugin. Caveat: One frontend capability also does not carry over: `POST`/`GET /busy_threshold` returns thresholds per model on a live fleet, whereas the EPP reads env vars once at startup. Closing that is out of scope here.
 2. **GATE B** — the new class-aware shedding, exposed as a plugin. It sits after
    selection so it can derive uncached ISL from `overlap_blocks`, and before
    `add_request`, so nothing is booked yet and a rejection needs no rollback.
