@@ -485,7 +485,7 @@ Put the shed decision where classification already happens — inside `dynamo-kv
 scheduling path — instead of adding an Admitter plugin at the gateway. The EPP then
 contributes only the parts that are genuinely HTTP-shaped: an overload signal, a mapping
 from request headers to `policy_class`, and the translation of a rejection into 429 with
-`Retry-After`. 
+`Retry-After`. See this [WIP PR](https://github.com/ai-dynamo/dynamo/pull/12663)
 
 Most of the machinery for this already exists:
 
