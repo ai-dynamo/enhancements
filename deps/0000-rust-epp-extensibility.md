@@ -160,7 +160,7 @@ Today the shed decision is funtion_of(worker_state). The client wants function_o
 
 The router side already has some of the machinery. The KV router already assigns a request to a class either by explicit name or by an uncached ISL bucket, bucketing on the tokens that actually need prefilling, which is a better cost proxy than raw prompt length.
 But it drives queueing, and the shed path never calls it. They're also in different crates: classification in dynamo-kv-router, shed threshold in dynamo-llm's monitor. We need to use the classifier from the kv router. 
-The classifier itself is implemented in `PolicyProfile::resolve_class_index`. The complication is its argument: it takes *uncached* tokens, which cannot be derived from the request alone. Overlap is a property of the prompt's block hashes walked against the KV index, not a property of worker state, so no amount of background monitoring produces it — the index has to be queried for this specific prompt. Today that query happens inside the routing call, whereas Gate A runs before the body is even decoded. 
+The classifier itself is implemented in `PolicyProfile::resolve_class_index`. The complication is its argument: it takes *uncached* tokens, which cannot be derived from the request alone. Overlap is a property of the prompt's block hashes walked against the KV index, not a property of worker state, so no amount of background monitoring produces it — the index has to be queried for this specific prompt. Today that query happens inside the routing call, whereas shedding needs to run before the routing ideally.
 
 ```bash
 pub fn resolve_class_index(&self, requested: Option<&str>, uncached_tokens: usize) -> usize {
@@ -218,7 +218,7 @@ Only a policy that actually wants uncached ISL pays for a second query, and it p
 knowingly. Moving the gate after the scheduler instead would impose the reordering on
 every deployment, whether or not it used a class-aware policy.
 
-Alt 4 proposes the opposite arrangement — placing the class-aware shed inside the router,
+Alt 1 proposes the opposite arrangement — placing the class-aware shed inside the router,
 where classification already sees accurate uncached ISL — which would remove the need for
 the advisory query and for a gateway-side Admitter altogether. It is open rather than
 rejected, and the choice between it and the arrangement below should be made before
@@ -244,9 +244,9 @@ Router::pick()                             epp.rs
       └─ KvRouter::add_request()           kv-router    unchanged
 ```
 
-1. **GATE A** — basic, request-blind shedding, already implemented in
+1. **GATE A** - basic, request-blind shedding, already implemented in
    [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865). Not a plugin. It runs
-   before tokenization, so it costs nothing to refuse a fully saturated pool. Every worker is continuously marked overloaded-or-not based on how full its KV cache and prefill queue are versus a fixed threshold, and Gate A rejects the incoming request with 429 only when every worker eligible to serve it is currently marked overloaded. Dynamo's frontend already sheds load (HTTP 529); the GAIE path needs the same, made extensible. The frontend's shed is a routing failure surfaced as an error, discovered after the request has already been parsed and tokenized. But customers pressing on explicit rejection versus implicit shed. The frontend returns 529 (configurable via DYN_HTTP_OVERLOAD_STATUS_CODE) with no retry hint. The EPP will return 429 with Retry-After. Both choices are intentional: 429 is what a gateway and its failover logic already understand, and the retry hint is new capability rather than parity. The beginning of its implementation is in [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865), which reuses the frontend's `KvWorkerMonitor` and adds a `PickError::Saturated { retry_after_secs }` variant surfaced as HTTP 429 with `Retry-After`. What remains is the wiring for the plugin. Caveat: One frontend capability also does not carry over: `POST`/`GET /busy_threshold` returns thresholds per model on a live fleet, whereas the EPP reads env vars once at startup. Closing that is out of scope here.
+   before tokenization, so it costs nothing to refuse a fully saturated pool. Every worker is continuously marked overloaded-or-not based on how full its KV cache and prefill queue are versus a fixed threshold, and Gate A rejects the incoming request with 429 only when every worker eligible to serve it is currently marked overloaded. Dynamo's frontend already sheds load (HTTP 529); the GAIE path needs the same, made extensible. The frontend's shed is a routing failure surfaced as an error, discovered after the request has already been parsed and tokenized. But customers want on explicit rejection versus implicit shed. The frontend returns 529 (configurable via DYN_HTTP_OVERLOAD_STATUS_CODE) with no retry hint. The EPP will return 429 with Retry-After. Both choices are intentional: 429 is what a gateway and its failover logic already understand, and the retry hint is new capability rather than parity. The beginning of its implementation is in [dynamo#11865](https://github.com/ai-dynamo/dynamo/pull/11865), which reuses the frontend's `KvWorkerMonitor` and adds a `PickError::Saturated { retry_after_secs }` variant surfaced as HTTP 429 with `Retry-After`. What remains is the wiring for the plugin. Caveat: One frontend capability also does not carry over: `POST`/`GET /busy_threshold` returns thresholds per model on a live fleet, whereas the EPP reads env vars once at startup. Closing that is out of scope here.
 2. **GATE B** — the new class-aware shedding, exposed as a plugin, occupying the Admitter
    position: after tokenization, before the scheduler. It rejects before anything is
    booked, so a rejection has nothing to roll back — the advisory query reserves no
@@ -310,25 +310,11 @@ llm-d admits in two distinct places:
   *curve* (`UsageLimitPolicy`), and the *order* (`FairnessPolicy`,
   `OrderingPolicy`) are plugins.
 * **`Admitter` plugins** run after `DataProducer` and before scheduling, and these
-  *can* reject outright. The `latency-slo-admitter`plugin is an example here.
+  *can* reject. The `latency-slo-admitter`plugin is an example here.
 
 The load-shedding plugin proposed here is that `Admitter`: same pipeline position, same
 ordering relative to data preparation, same ability to reject. That correspondence is the
 reason the seam sits where it does.
-
-One difference in the *policies* is worth noting, because it explains why this DEP needs a
-mechanism upstream does not. llm-d's `latency-slo-admitter` keys on facts that arrive with
-the request — SLO class and priority — plus a fleet-level saturation signal, so every
-input is available at ingress. Dynamo's class is derived partly from request *cost*, and
-the honest cost measure is uncached ISL, which requires querying the KV index for that
-specific prompt. Keeping the Admitter at the same pipeline position while still supporting
-a cost-derived class is what the advisory query above buys: the plugin reaches for overlap
-when its policy needs it, rather than the pipeline reordering itself for every deployment.
-
-
-The upstream split between the saturation *signal* and the admit/reject *decision*
-is a refinement this DEP does not currently make — it proposes one plugin that
-does both. This is TBD.
 
 ## What becomes pluggable, and what does not
 
@@ -430,8 +416,7 @@ The two boundaries answer different questions and should stay that way:
 
 Shedding at the edge and queueing in the scheduler are complements: the edge is where
 you cheaply refuse work you should never start, and the scheduler is where you hold
-work that is worth waiting for. Building a third mechanism to span them would be a
-mistake.
+work that is worth waiting for. 
 
 
 ## Configuration
@@ -491,11 +476,6 @@ loading in this first cut.
   response path — but it is adjacent in-flight work in the same crate, and it supplies
   the observed cache hit that integrators want for comparing predicted overlap against
   actual, which this DEP treats as router work rather than an extension point.
-
-The two are complements, not overlaps: #11865 reads worker capacity on the request
-path to decide whether to admit, and #11868 reads request outcome on the response
-path after the decision is already made. They do touch the same files, so whichever
-lands second will need a small merge resolution in `picker.rs` and `epp.rs`.
 
 # Alternate Solutions
 
@@ -563,15 +543,6 @@ its uncached token count is the core change.
   saturated case.
 
 **Open — not yet rejected.** 
-
-There is also a coordination risk. `lib/kv-router/src/scheduling/queue_admission/` is
-described as the established boundary for policy-class admission algorithms, but the
-module currently contains only `RequestProgress` and `WorkerPlacement` — the contract is
-designed and unbuilt, and its decision set is `Bypass` / `Ready` / `Defer` with no
-`Reject`. Alt 4 amounts to adding `Reject` to that contract, so it likely belongs folded
-into whichever proposal owns it rather than pursued from the EPP side. Identify that
-owner before choosing between Alt 4 and the main proposal.
-
 
 ## Alt 2 Reproduce the full llm-d / GAIE plugin pipeline in Rust
 
