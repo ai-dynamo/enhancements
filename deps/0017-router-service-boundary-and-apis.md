@@ -51,38 +51,6 @@ Item 3 is not one thing: it is a dozen inter-related concerns whose ownership ha
 never been written down. 
 
 
-## Evidence that the line is missing
-
-**The same fleet condition produces a different client contract per host.** A
-policy-class queue rejection surfaces from the Frontend as a structured HTTP 529
-with sanitized text and `details{policy_class, limit_kind, current, limit}`. The
-same `QueueRejection` reaching the EPP becomes `PickError::RoutingFailed` → 503
-with the raw rejection string passed through, and the in-flight shedding PRs add
-a third answer, 429 with `Retry-After`. Nothing in the router decided any of
-this; three hosts each invented a mapping.
-
-**There are two independent implementations of "worker is busy."**
-`LoadThresholdConfig` (decode blocks, prefill tokens, prefill fraction; from
-environment, via `KvWorkerMonitor`) and the policy-class
-`prefill_busy_threshold` / `_frac` (from YAML, via `policy_config`). This is why
-`PickError::AllWorkersOverloaded` and `PickError::Saturated` read as two
-features rather than one concept with two entry points.
-
-**Capabilities go missing in whichever host did not implement them.** The EPP
-declares `PickResult.fallbacks` and hardcodes it empty — and `server.rs` never
-reads the field, so the ext-proc response could not carry alternates even if the
-router produced them. `TODO(epp-disconnect-semantics)` leaves unresolved whether
-a client disconnect should free a booking or hold it for an Envoy retry. The EPP
-holds the authoritative served-model name and does not check the request's
-`model` field against it. And the EPP exports exactly one Prometheus series
-(`dynamo_epp_cached_tokens`), so neither in-flight shedding PR can answer "how
-often is each class shedding" — the signal needed to tune the thresholds those
-PRs introduce.
-
-None of these are bugs in a host. They are all the same missing artifact: a
-router API that says what the router decides and what the caller is responsible
-for.
-
 ## Goals
 
 * State an ownership rule for Frontend responsibility 3 that a reviewer can
