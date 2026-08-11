@@ -1,4 +1,4 @@
-# Multi-tenancy support for DynamoGraphDeployment
+# Frontend Isolation in  DynamoGraphDeployment
 
 ## Problem
 Currently we dont have strong isolation between dynamo graph deployments.
