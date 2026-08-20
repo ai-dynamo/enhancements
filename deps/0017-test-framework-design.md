@@ -16,7 +16,7 @@
 
 **Review Date**: TBD
 
-**Pull Request**: (this PR)
+**Pull Request**: [ai-dynamo/enhancements#100](https://github.com/ai-dynamo/enhancements/pull/100)
 
 **Implementation PR / Tracking Issue**: [ai-dynamo/dynamo#12690](https://github.com/ai-dynamo/dynamo/pull/12690)
 
