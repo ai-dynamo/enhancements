@@ -85,6 +85,50 @@ predicate, and the conventions are documented in `tests/README.md` and
 no `Dynamo` to hand a test, so each test re-derives how to reach a component,
 how long to wait, how to reconfigure it, and what the deployment can be asked.
 
+## Measured: the suite assumes it is talking to localhost
+
+Counted on `main` (`4c3e61f107`) across the 219 Python files under `tests/`:
+
+| | files | share |
+|---|---|---|
+| build an HTTP URL at all | 109 | — |
+| …of those, assume `localhost` / `127.0.0.1` / `0.0.0.0` | **75** | **68%** |
+| …of those, take the host from a variable | 4 | 3% |
+
+Broken down by how fixed the address is:
+
+| form | occurrences | files |
+|---|---|---|
+| host **and** port literal — `"http://localhost:8000/v1/completions"` | 19 | 12 |
+| host literal, port interpolated — `f"http://localhost:{port}"` | 227 | 70 |
+| host interpolated — `f"http://{host}:{port}"` | 14 | 6 |
+
+The middle row is the one that matters, and it is easy to miss. Those call
+sites *look* parameterised, and the dynamic port is doing real work — it is
+what lets tests run in parallel locally. But the host is fixed. A sibling
+container, a Compose service and a Kubernetes Service each need a different
+host, and a dynamic port buys nothing there. Four files in the entire suite
+can be pointed at a frontend they did not start themselves.
+
+That is what "authored per cell of the matrix" costs in practice: not a handful
+of stubborn URLs, but two thirds of everything under `tests/` that speaks HTTP.
+It is also the mechanical reason `tests/deploy/` exists as a separate suite
+rather than reusing `tests/serve/` — the assertions are close cousins, but the
+address handling made them un-shareable.
+
+Worst concentrations: `tests/router/common.py` (21),
+`tests/fault_tolerance/etcd_ha/utils.py` (10), `tests/conftest.py` (8),
+`tests/fault_tolerance/cancellation/test_vllm.py` (8).
+
+Not every occurrence is a defect. Of the 19 fully-literal URLs, roughly half
+are legitimate: five are `ETCD_ENDPOINTS=http://localhost:2379` for etcd the
+test itself launches, one is a deliberately-dead OTLP collector at
+`127.0.0.1:1`, and four are `e.g.` docstrings. The remaining nine are real, and
+one pair — a `:9345/health` worker system port beside `:8000/v1/completions` —
+is copy-pasted across three files, so it is topology-coupled as well as
+hardcoded. The 68% figure above counts files, not defects, and is the number
+that bears on portability.
+
 ## Three classes of test, and what each needs
 
 **1. Functional (deployment-agnostic).** The majority. Sends inference requests
