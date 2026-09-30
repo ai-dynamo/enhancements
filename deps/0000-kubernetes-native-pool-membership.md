@@ -118,6 +118,12 @@ Global Router replicas read from it.
 ## Components to write
 1. Kubernetes Reconciler = Export Agent. Sees a pool, write its record and Lease to the hub. Deletes the record when a pool goes away. 
 The agent watches DGDs. If GAIE is installed, it can also watch InferencePools.
+   * The agent needs **two** Kubernetes clients: one for its own cluster
+     and one for the hub. Today the operator talks to one cluster only.
+     controller-runtime supports a second cluster client.
+   * Only **one** operator replica may write the record and renew the
+     Lease. The operator already uses leader election, so the agent runs
+     only on the leader.
 2. The agent will write a new CRD "DynamoPoolExport" installed in the Hub Cluster. It will use the existing K8 Lease (coordination.k8s.io/v1)
 We can avoid the CRD in favor of ConfigMap but the CRD is preferable.     
 3. The global Router needs a watcher for leases (watch, lease K8 APIs). It needs to build the Pool Catalog. 
@@ -215,6 +221,20 @@ A pool is routable only when all of these are true:
 
 The Lease is the slow check, about a minute. The state stream is the fast
 check: when it drops, the pool stops getting traffic right away.
+
+### Leases Do Not Expire on Their Own
+
+Kubernetes never deletes an old Lease. The Global Router must decide
+when a Lease is too old.
+
+* The Global Router starts the timer when **it sees** a Lease update.
+  It does not use `renewTime`. `renewTime` comes from the clock in the
+  workload cluster, and that clock can differ from the hub's clock.
+  Kubernetes checks node Leases the same way.
+* If a workload cluster disappears for good, its record and Lease stay
+  on the hub. The Global Router ignores stale records and reports them.
+  Something on the hub should also clean them up, for example a small
+  cleanup job or a hub-side controller.
 
 ## How This Answers HLD Open Question 9
 
