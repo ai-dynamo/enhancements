@@ -28,7 +28,7 @@ It does not cover how KV and load state flows, or how requests reach a pool.
 The DEP proposes an abstract interface covering 3 implementations.
 The deployer can choose: 
 1. The gRPC native approach when each cluster relay calls `/RegisterPool` API and does not use any Kubernetes APIs.
-2. A Hybrid Approach when each cluster relay calls `/RegisterPool` API. The Global Router writes into its own Cluster API.
+2. A Hybrid Approach when each cluster Relay calls `/RegisterPool` API. The Global Router stores the list of pools in its own Cluster's Kubernetes API. 
 3. A full Kubernetes approach aimed at deployments where the worload clusters can safely call into the Hub's Kubernets API server.
 
 This DEP is part of the "K8s Native Global Router Solution" LLD listed in
@@ -58,18 +58,18 @@ Relay. In this DEP's terms, that is the static file source
 (`FileMembership`). The interface below lets the other options replace
 it without changing the router.
 
-The hard part of question 9 is that the HLD wants **every** Global Router
-replica to see **every** pool, with no replica-to-replica syncing of pool
+The hard part of question 9 is that the HLD wants every Global Router
+replica to see every pool, with no replica-to-replica syncing of pool
 state. Say there are 3 router replicas behind one load balancer:
 
 * A PoolRelay calls `RegisterPool` on the load balancer. The call lands
-  on **one** replica. The other two never hear about the pool.
+  on one replica. The other two never hear about the pool.
 * To reach all three, the PoolRelay needs each replica's own address.
 * When the router scales to 4 replicas, every PoolRelay in every cluster
   must notice replica 4 and register with it too.
 * Replica 4 starts empty. It cannot tell when it is ready, because it
-  does not know how many pools exist. Has it heard from 8 of 8 pools, or
-  8 of 20?
+  does not know how many pools exist. Has it heard from 4 of 4 pools, or
+  4 of 20?
 
 ## Goals
 
@@ -83,7 +83,7 @@ The options are compared against these properties:
 * Every Global Router replica sees every pool.
 * A new replica knows the full list of pools, so it knows when it is
   ready.
-* A pool can only register or change **its own** record.
+* A pool can only register or change its own record.
 * Align with Kubernetes multi-cluster standards where possible.
 
 Not every option has every property. For example, gRPC Native needs
@@ -123,7 +123,7 @@ The proposal aims to define abstractions for discovery so that a client can deci
 
 ## Which Option When
 
-| Your setup | Pick |
+| Setup | Pick |
 |---|---|
 | No Kubernetes, or the Global Router does not run on Kubernetes | **gRPC Native** |
 | The Global Router runs on Kubernetes, but workload clusters must not reach the hub's Kubernetes API (different owners, several clouds, strict security rules) | **Hybrid** |
@@ -154,86 +154,9 @@ Each option is one combination of the two.
 | Hybrid | PoolRelay calls `RegisterPool` | The receiving replica writes to the hub Kubernetes API | Every replica, by watching |
 | Static file (possible start) | A person edits the file | ConfigMap | Every replica |
 
-### Global Router Side
-
-The Pool Catalog only reads. It depends on one interface:
-
-```rust
-/// Where the Pool Catalog gets the pool list. The catalog does not care
-/// which implementation is behind it.
-trait MembershipSource {
-    /// Full list of pools right now, plus a version to watch from.
-    async fn snapshot(&self) -> Result<Snapshot>;
-
-    /// Changes after that version: Added, Updated, Removed.
-    fn watch(&self, from: Revision) -> BoxStream<'static, MembershipEvent>;
-}
-
-struct Snapshot {
-    pools: Vec<PoolRecord>,
-    revision: Revision,
-    /// true  = this is the full set (a new replica can wait for exactly these)
-    /// false = only pools that happened to call this replica (use a timeout)
-    complete: bool,
-}
-```
-
-The gRPC handler writes through a second interface:
-
-```rust
-/// Where RegisterPool calls are stored. Only used by the gRPC options.
-trait MembershipSink {
-    async fn register(&self, rec: PoolRecord, caller: PoolIdentity) -> Result<()>;
-    async fn heartbeat(&self, pool: &PoolId, caller: PoolIdentity) -> Result<()>;
-    async fn deregister(&self, pool: &PoolId, caller: PoolIdentity) -> Result<()>;
-}
-```
-
-Implementations:
-
-| Implementation | Source | Sink | `complete` |
-|---|---|---|---|
-| `InMemoryMembership` | Yes | Yes | `false` |
-| `KubernetesMembership` (read and write) | Yes | Yes | `true` |
-| `KubernetesMembership` (read only) | Yes | No (the export agents write) | `true` |
-| `FileMembership` | Yes | No | `true` |
-
-Wiring:
-
-* **gRPC Native:** gRPC server + `InMemoryMembership`.
-* **Full Kubernetes:** no gRPC server + `KubernetesMembership` (read only).
-* **Hybrid:** gRPC server + `KubernetesMembership` (read and write).
-
-One setting picks the combination, for example
-`--membership=grpc|kubernetes|hybrid|file`.
-
-### Pool Side
-
-* `GrpcAnnouncer`: calls `RegisterPool` on the regional address and sends
-  heartbeats. Used by gRPC Native and Hybrid.
-* `KubernetesExportAgent`: the reconciler in the Dynamo operator that
-  writes the record and Lease to the hub. Used by full Kubernetes.
-
-### Rules Shared by Every Option
-
-These live in the Pool Catalog, not in the implementations, so behavior
-is the same whichever option is chosen:
-
-* **One record format.** `PoolRecord` has the same fields as the
-  `DynamoPoolExport` spec. The gRPC `RegisterPool` message carries the
-  same fields.
-* **Expiry in one place.** The catalog removes a pool when it has not
-  seen an update for the Lease or heartbeat duration, using its own clock.
-* **Readiness from `complete`.** If `true`, wait for first state from
-  every listed pool, with a timeout. If `false`, become ready after a
-  fixed wait (soft readiness).
-* **Same routable rule** as in
-  [When Is a Pool Routable](#when-is-a-pool-routable).
-* **Identity is checked where the write happens.** In the gRPC options,
-  the gRPC handler checks the caller's mTLS identity and that the caller
-  matches `pool_id` before calling the sink. In full Kubernetes, RBAC
-  and a CEL validation policy on the hub do it.
-
+The interface itself is described in
+[Implementing the Interface](#implementing-the-interface), after the
+three approaches.
 
 ## Hybrid Approach (gRPC + Kubernetes)
 
@@ -517,7 +440,87 @@ that rule. We think this is acceptable because:
   joins, leaves, or scales. All KV and load state stays in router memory
   and is rebuilt from the PoolRelays, as the HLD requires.
 
+## Implementing the Interface
 
+### Global Router Side
+
+The Pool Catalog only reads. It depends on one interface:
+
+```rust
+/// Where the Pool Catalog gets the pool list. The catalog does not care
+/// which implementation is behind it.
+trait MembershipSource {
+    /// Full list of pools right now, plus a version to watch from.
+    async fn snapshot(&self) -> Result<Snapshot>;
+
+    /// Changes after that version: Added, Updated, Removed.
+    fn watch(&self, from: Revision) -> BoxStream<'static, MembershipEvent>;
+}
+
+struct Snapshot {
+    pools: Vec<PoolRecord>,
+    revision: Revision,
+    /// true  = this is the full set (a new replica can wait for exactly these)
+    /// false = only pools that happened to call this replica (use a timeout)
+    complete: bool,
+}
+```
+
+The gRPC handler writes through a second interface:
+
+```rust
+/// Where RegisterPool calls are stored. Only used by the gRPC options.
+trait MembershipSink {
+    async fn register(&self, rec: PoolRecord, caller: PoolIdentity) -> Result<()>;
+    async fn heartbeat(&self, pool: &PoolId, caller: PoolIdentity) -> Result<()>;
+    async fn deregister(&self, pool: &PoolId, caller: PoolIdentity) -> Result<()>;
+}
+```
+
+Implementations:
+
+| Implementation | Source | Sink | `complete` |
+|---|---|---|---|
+| `InMemoryMembership` | Yes | Yes | `false` |
+| `KubernetesMembership` (read and write) | Yes | Yes | `true` |
+| `KubernetesMembership` (read only) | Yes | No (the export agents write) | `true` |
+| `FileMembership` | Yes | No | `true` |
+
+Wiring:
+
+* **gRPC Native:** gRPC server + `InMemoryMembership`.
+* **Full Kubernetes:** no gRPC server + `KubernetesMembership` (read only).
+* **Hybrid:** gRPC server + `KubernetesMembership` (read and write).
+
+One setting picks the combination, for example
+`--membership=grpc|kubernetes|hybrid|file`.
+
+### Pool Side
+
+* `GrpcAnnouncer`: calls `RegisterPool` on the regional address and sends
+  heartbeats. Used by gRPC Native and Hybrid.
+* `KubernetesExportAgent`: the reconciler in the Dynamo operator that
+  writes the record and Lease to the hub. Used by full Kubernetes.
+
+### Rules Shared by Every Option
+
+These live in the Pool Catalog, not in the implementations, so behavior
+is the same whichever option is chosen:
+
+* **One record format.** `PoolRecord` has the same fields as the
+  `DynamoPoolExport` spec. The gRPC `RegisterPool` message carries the
+  same fields.
+* **Expiry in one place.** The catalog removes a pool when it has not
+  seen an update for the Lease or heartbeat duration, using its own clock.
+* **Readiness from `complete`.** If `true`, wait for first state from
+  every listed pool, with a timeout. If `false`, become ready after a
+  fixed wait (soft readiness).
+* **Same routable rule** as in
+  [When Is a Pool Routable](#when-is-a-pool-routable).
+* **Identity is checked where the write happens.** In the gRPC options,
+  the gRPC handler checks the caller's mTLS identity and that the caller
+  matches `pool_id` before calling the sink. In full Kubernetes, RBAC
+  and a CEL validation policy on the hub do it.
 
 # Alternate Solutions
 
