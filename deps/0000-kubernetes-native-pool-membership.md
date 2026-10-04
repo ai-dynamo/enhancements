@@ -254,97 +254,22 @@ Global Router replicas read from it.
                                  +------------------------------+
 ```
 
-The biggest con of this approach is security. The workload clusters can reach the Hub's cluster Kubernetes API server.
-The biggest pro is relying on existing APIs, and reliable way to report the Global Router Replica's readiness as well as robust discovery which we do not need to implement ourselves. 
-
-#### How This Answers HLD Open Question 9
-
-* The export agent needs **one** address: the hub's API server. It does
-  not know or care how many router replicas exist.
-* The pool writes its record **once**. Every replica sees it by watching.
-* When the router scales from 3 to 4 replicas, nothing changes for the
-  pools.
-* A new replica lists the records at startup and knows the full set, for
-  example N pools. It becomes ready when it has state for all N.
-  Readiness is well defined.
-
-If the state stream also dials out (pool to router), the pools need the
-router replica addresses. The same directory works in that direction too:
-each replica writes its address to the hub, and pools watch that list.
-The design of the state stream is out of scope here.
-
-#### Kubernetes Native Approach makes the items below easy
-
-1. **Every replica sees every pool, for free.** A watch gives every
-   replica the same list. There is no replica list to hand out and no
-   replica-to-replica sync.
-2. **A new replica knows what to wait for.** It lists the records at
-   startup, so "ready" has a clear meaning.
-3. **Security comes built in.** Kubernetes already has identity, RBAC,
-   namespaces, certificate signing, and an audit log. With `RegisterPool`
-   we would build and maintain all of that.
-4. **It follows a known pattern.** GAIE 1374 ("Push/Pull"), Open Cluster
-   Management, and Karmada pull mode all have members dial out and write
-   their own record to a hub. GAIE 1374 describes it as "Typical when you
-   want no hub-stored member credentials."
-5. **It is easy to operate.** Admins use `kubectl` to see, debug, and
-   remove pools.
-
-
-
-#### Components to write
-1. Kubernetes Reconciler = Export Agent. Sees a pool, write its record and Lease to the hub. Deletes the record when a pool goes away. 
-The agent watches DGDs. If GAIE is installed, it can also watch InferencePools.
-   * The agent needs **two** Kubernetes clients: one for its own cluster
-     and one for the hub. Today the operator talks to one cluster only.
-     controller-runtime supports a second cluster client.
-   * Only **one** operator replica may write the record and renew the
-     Lease. The operator already uses leader election, so the agent runs
-     only on the leader.
-2. The agent will write a new CRD "DynamoPoolExport" installed in the Hub Cluster. It will use the existing K8 Lease (coordination.k8s.io/v1)
-We can avoid the CRD in favor of ConfigMap but the CRD is preferable.     
-3. The global Router needs a watcher for leases (watch, lease K8 APIs). It needs to build the Pool Catalog. 
-4. Helm Chart to create a namespace, ServiceAccount and RBAC per pool.
-5. Optional: if GAIE is installed, the pool can also be exported through its InferencePool.
-6. The agent reads the pool's Frontend Service (built in) to find the pool's address.
-
-#### Kubernetes APIs Used
-
-* Workload cluster, the agent reads: `DynamoGraphDeployment`, `Service`.
-* Hub, the agent writes: `DynamoPoolExport`, `Lease`. In Phase 2 also
-  `CertificateSigningRequest`.
-* Hub, the Global Router reads: `DynamoPoolExport`, `Lease`.
-* GAIE and Gateway API: optional only.
-
-
-#### Steps
-
-1. **The user marks a pool for export.** In the workload cluster, the
-   user marks the **DGD** for export, with a field or annotation on the
-   DGD. If GAIE is installed, the standard GAIE export annotation on the
-   InferencePool (`inference.networking.x-k8s.io/export: "ClusterSet"`,
-   from GAIE's multi-cluster proposal
-   [1374](https://github.com/kubernetes-sigs/gateway-api-inference-extension/tree/main/docs/proposals/1374-multi-cluster-inference))
-   can be a second trigger.
-
+1. **The user marks a pool for export,** with a field or annotation on
+   the DGD in the workload cluster. If GAIE is installed, the GAIE export
+   annotation on the InferencePool
+   ([1374](https://github.com/kubernetes-sigs/gateway-api-inference-extension/tree/main/docs/proposals/1374-multi-cluster-inference))
+   can also trigger it.
 2. **The export agent dials out.** A new reconciler in the Dynamo
-   operator in the workload cluster sees the marked DGD. It connects to
-   the hub's API server and writes a `DynamoPoolExport` record into the
-   pool's own namespace on the hub.
+   operator connects to the hub's Kubernetes API server and writes a
+   `DynamoPoolExport` record into the pool's own namespace on the hub.
+3. **The export agent keeps a heartbeat** by renewing a Kubernetes
+   `Lease` next to the record.
+4. **Every Global Router replica watches** the records and Leases, and
+   builds its Pool Catalog from them.
+5. **The pool leaves.** When export is turned off or the DGD is deleted,
+   the agent deletes the record. If the agent dies, the Lease expires.
 
-3. **The export agent keeps a heartbeat.** It renews a Kubernetes
-   `Lease` in the same namespace. If the Lease expires, the pool leaves
-   the catalog. Similar systems renew about every 40 to 60 seconds.
-
-4. **The Global Router watches.** Every replica watches all
-   `DynamoPoolExport` records and Leases, and builds its Pool Catalog from
-   them. The replicas do not talk to each other about pools.
-
-5. **The pool leaves.** When export is turned off on the DGD, or the DGD
-   is deleted, the export agent deletes the record. If the agent dies, the
-   Lease expires and the pool is removed.
-
-#### The Record
+### The Record
 
 A small, namespaced custom resource on the hub. It holds data that
 changes rarely.
@@ -369,76 +294,44 @@ spec:
   workerCount: 16
 ```
 
-The field list is a starting point for review.
+The field list is a starting point for review. The Lease has the same
+name and namespace as the record. Field details are in the
+[Appendix](#appendix-full-kubernetes-details).
 
-#### Proposed shape for the DynamoPoolExport CRD
+### Who Can Write What
 
-`kind: DynamoPoolExport`, one per pool, in that pool's namespace on the
-hub. Main fields only:
+* **Credentials.** The hub holds no credentials for workload clusters.
+  Each workload cluster holds a credential for the hub. In Phase 1, the
+  hub admin creates a namespace, ServiceAccount, and RBAC per pool and
+  gives the cluster a token. In Phase 2, a short-lived bootstrap token is
+  swapped for a certificate through a Kubernetes CSR, and the hub admin
+  approves the new pool, as Open Cluster Management and Karmada pull mode
+  do.
+* **RBAC.** Each credential can write only its own namespace: its record
+  and its Lease, nothing else.
+* **CEL check.** RBAC cannot check what is inside a record. A
+  `ValidatingAdmissionPolicy` (CEL) on the hub checks that `poolId` and
+  `relayIdentity` match the namespace, so a pool cannot claim another
+  pool's identity.
 
-| Field | Required | Example | Where the agent gets it | Why the Global Router needs it |
-|---|---|---|---|---|
-| `spec.poolId` | Yes | `pool-a` | DGD name (or a DGD field) | Names the pool. Matches the pool to its Lease and its state stream |
-| `spec.frontendAddress` | Yes | `https://pool-a.us-east-1.example.com:443` | A manual override on the DGD first. Otherwise the Frontend Service's `status.loadBalancer.ingress`. Otherwise, if GAIE is installed, the Gateway's `status.addresses` | The pool's entry point. Where to send requests |
-| `spec.relayIdentity` | Yes | `spiffe://example.com/relay/pool-a` | Relay configuration | Checks that a state stream really comes from this pool |
-| `spec.location.region` | Yes | `us-east-1` | Agent configuration | Locality in cost functions |
-| `spec.location.cluster` | Yes | `cluster-a` | Agent configuration | Locality, and to group pools by cluster |
-| `spec.location.dc` | No | `dc-1` | Agent configuration | Locality |
-| `spec.models` | Yes | `[Qwen/Qwen3-32B]` | DGD | Which pools can serve a request |
-| `spec.hardware` | No | `B200-IB` | DGD or node labels | Answers "all InfiniBand pools" (HLD) |
-| `spec.workerCount` | No | `16` | DGD | Rough pool size |
+**Pros:**
 
-No `status` is needed. The Global Router only reads these records.
+* Every replica sees every pool, and a new replica knows when it is
+  ready, using built-in Kubernetes watches.
+* Identity, per-pool isolation, and an audit log come from Kubernetes.
+* Same pattern as GAIE 1374 Push/Pull, Open Cluster Management, and
+  Karmada pull mode.
+* Easy to operate: `kubectl get dynamopoolexports -A`.
 
-**The Lease.** The agent writes a standard `Lease`
-(`coordination.k8s.io/v1`) with the **same name and namespace** as the
-record. It sets `spec.holderIdentity` to the agent's ID and
-`spec.leaseDurationSeconds` (for example `60`), and updates
-`spec.renewTime` on each heartbeat. The Lease has an `ownerReference`
-to its `DynamoPoolExport`, so deleting the record also deletes the
-Lease.
+**Cons:**
 
-#### When Is a Pool Routable
-
-A pool is routable only when all of these are true:
-
-* its `DynamoPoolExport` record exists,
-* its Lease is fresh,
-* its state stream has delivered first state,
-* and its readiness does not say "down"
-  ([DEP #11225](https://github.com/ai-dynamo/dynamo/issues/11225)
-  readiness gate).
-
-The Lease is the slow check, about a minute. The state stream is the fast
-check: when it drops, the pool stops getting traffic right away.
-
-#### Leases Do Not Expire on Their Own
-
-Kubernetes never deletes an old Lease. The Global Router must decide
-when a Lease is too old.
-
-* The Global Router starts the timer when **it sees** a Lease update.
-  It does not use `renewTime`. `renewTime` comes from the clock in the
-  workload cluster, and that clock can differ from the hub's clock.
-  Kubernetes checks node Leases the same way.
-* If a workload cluster disappears for good, its record and Lease stay
-  on the hub. The Global Router ignores stale records and reports them.
-  Something on the hub should also clean them up, for example a small
-  cleanup job or a hub-side controller.
-
-
-#### The "No External Store" Rule
-
-The HLD says "No etcd, database or shared cache is required for the
-Global View". The hub API server is backed by etcd, so this DEP bends
-that rule. We think this is acceptable because:
-
-* **It adds no new dependency.** Dynamo on Kubernetes already uses the
-  Kubernetes API for discovery (the `DynamoWorkerMetadata` CRD). This DEP
-  does the same one level up: pools instead of workers.
-* **Only small, slow data goes there.** Pool records change when a pool
-  joins, leaves, or scales. All KV and load state stays in router memory
-  and is rebuilt from the PoolRelays, as the HLD requires.
+* Workload clusters must reach the hub's Kubernetes API server, the
+  hub's control plane. Some security teams will not allow this.
+* Every workload cluster holds a credential for the hub.
+* More parts: a CRD, an export agent in the operator, per-pool
+  credentials, and Leases.
+* Records are stored in etcd, so it bends the HLD's "no external store"
+  rule, like Hybrid.
 
 ## Implementing the Interface
 
@@ -522,6 +415,46 @@ is the same whichever option is chosen:
   matches `pool_id` before calling the sink. In full Kubernetes, RBAC
   and a CEL validation policy on the hub do it.
 
+### When Is a Pool Routable
+
+A pool is routable only when all of these are true:
+
+* its record exists,
+* its Lease or heartbeat is fresh,
+* its state stream has delivered first state,
+* and its readiness does not say "down"
+  ([DEP #11225](https://github.com/ai-dynamo/dynamo/issues/11225)
+  readiness gate).
+
+The Lease or heartbeat is the slow check. The state stream is the fast
+check: when it drops, the pool stops getting traffic right away.
+
+### Leases Do Not Expire on Their Own
+
+This applies to Hybrid and Full Kubernetes. Kubernetes never deletes an
+old Lease, so the Global Router must decide when a Lease is too old.
+
+* The Global Router starts the timer when **it sees** a Lease update.
+  It does not use `renewTime`, because that clock can differ from the
+  hub's clock. Kubernetes checks node Leases the same way.
+* If a pool disappears for good, its record and Lease stay on the hub.
+  The Global Router ignores stale records and reports them. Something on
+  the hub should also clean them up, for example a small cleanup job.
+
+### The "No External Store" Rule
+
+The HLD says "No etcd, database or shared cache is required for the
+Global View". Hybrid and Full Kubernetes store pool records in the hub's
+Kubernetes API, which is backed by etcd, so they bend that rule. We
+think this is acceptable because:
+
+* **Dynamo already does this inside one cluster.** It uses the
+  Kubernetes API for worker discovery (the `DynamoWorkerMetadata` CRD).
+  These options do the same one level up: pools instead of workers.
+* **Only small, slow data goes there.** Pool records change when a pool
+  joins, leaves, or scales. All KV and load state stays in router memory
+  and is rebuilt from the PoolRelays, as the HLD requires.
+
 # Alternate Solutions
 
 ## Alt 1 The Hub Reaches Into Each Cluster (Hub/Spoke)
@@ -604,5 +537,63 @@ reads it once at startup.
 * [Submariner broker](https://submariner.io/getting-started/architecture/broker/).
 * [llm-d file discovery](https://github.com/llm-d/llm-d-router/blob/main/pkg/epp/framework/plugins/datalayer/discovery/file/README.md).
 * [GKE multi-cluster Inference Gateway](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/about-multi-cluster-inference-gateway).
+
+# Appendix: Full Kubernetes Details
+
+## DynamoPoolExport Fields
+
+| Field | Required | Example | Where the agent gets it | Why the Global Router needs it |
+|---|---|---|---|---|
+| `spec.poolId` | Yes | `pool-a` | DGD name (or a DGD field) | Names the pool. Matches the pool to its Lease and its state stream |
+| `spec.frontendAddress` | Yes | `https://pool-a.us-east-1.example.com:443` | A manual override on the DGD first. Otherwise the Frontend Service's `status.loadBalancer.ingress`. Otherwise, if GAIE is installed, the Gateway's `status.addresses` | The pool's entry point. Where to send requests |
+| `spec.relayIdentity` | Yes | `spiffe://example.com/relay/pool-a` | Relay configuration | Checks that a state stream really comes from this pool |
+| `spec.location.region` | Yes | `us-east-1` | Agent configuration | Locality in cost functions |
+| `spec.location.cluster` | Yes | `cluster-a` | Agent configuration | Locality, and to group pools by cluster |
+| `spec.location.dc` | No | `dc-1` | Agent configuration | Locality |
+| `spec.models` | Yes | `[Qwen/Qwen3-32B]` | DGD | Which pools can serve a request |
+| `spec.hardware` | No | `B200-IB` | DGD or node labels | Answers "all InfiniBand pools" (HLD) |
+| `spec.workerCount` | No | `16` | DGD | Rough pool size |
+
+No `status` is needed. The Global Router only reads these records.
+
+**The Lease.** A standard `Lease` (`coordination.k8s.io/v1`) with the
+same name and namespace as the record. The agent sets
+`spec.holderIdentity` and `spec.leaseDurationSeconds` (for example `60`),
+and updates `spec.renewTime` on each heartbeat. The Lease has an
+`ownerReference` to its `DynamoPoolExport`, so deleting the record also
+deletes the Lease.
+
+## Components to Write
+
+1. **Export agent:** a reconciler in the Dynamo operator. It watches
+   DGDs (and InferencePools if GAIE is installed), writes the record and
+   Lease to the hub, and deletes the record when the pool goes away.
+   * It needs two Kubernetes clients: one for its own cluster and one for
+     the hub. controller-runtime supports a second cluster client.
+   * Only the operator's leader replica runs it, so only one replica
+     writes the record and renews the Lease.
+2. **The `DynamoPoolExport` CRD**, installed on the hub. A ConfigMap
+   could replace it, but a CRD is preferable.
+3. **A watcher in the Global Router** for records and Leases, which
+   builds the Pool Catalog.
+4. **A Helm chart** that creates a namespace, ServiceAccount, and RBAC
+   per pool on the hub.
+5. **The address lookup:** the agent reads the pool's Frontend Service
+   to find the pool's address.
+
+## Kubernetes APIs Used
+
+* Workload cluster, the agent reads: `DynamoGraphDeployment`, `Service`.
+* Hub, the agent writes: `DynamoPoolExport`, `Lease`. In Phase 2 also
+  `CertificateSigningRequest`.
+* Hub, the Global Router reads: `DynamoPoolExport`, `Lease`.
+* GAIE and Gateway API: optional only.
+
+## State Stream Direction
+
+If the state stream also dials out (pool to router), the pools need the
+router replica addresses. The same directory works in that direction
+too: each replica writes its address to the hub, and pools watch that
+list. The design of the state stream is out of scope here.
 
 
