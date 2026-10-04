@@ -1,4 +1,4 @@
-# Kubernetes Native Pool Membership for the Global Router
+# Pluggable Pool Discovery for the Global Router
 
 **Status**: Draft
 
@@ -12,7 +12,7 @@
 
 **Sponsor**:
 
-**Required Reviewers**:
+**Required Reviewers**: Sachal Malick, Neelay Shah
 
 **Review Date**:
 
@@ -23,21 +23,18 @@
 # Summary
 
 The Global Router needs to know which pools exist and how to reach them.
-This DEP proposes a Kubernetes native way to do that. Each pool writes a
-small record into the Kubernetes API of the hub cluster where the Global Router resides. Every Global
-Router replica watches those records.
-
-This covers **membership only**: which pools exist, and their addresses.
-It does not cover how KV and load state flows, or how requests reach a
-pool.
+This DEP proposes ways to do that. This covers **membership only**: which pools exist, and their addresses.
+It does not cover how KV and load state flows, or how requests reach a pool.
+The DEP proposes an abstract interface covering 3 implementations.
+The deployer can choose: 
+1. The gRPC native approach when each cluster relay calls `/RegisterPool` API and does not use any Kubernetes APIs.
+2. A Hybrid Approach when each cluster relay calls `/RegisterPool` API. The Global Router writes into its own Cluster API.
+3. A full Kubernetes approach aimed at deployments where the worload clusters can safely call into the Hub's Kubernets API server.
 
 This DEP is part of the "K8s Native Global Router Solution" LLD listed in
 the
 [Global Router HLD](https://docs.google.com/document/d/1FYKvlsEnc6aMXgU_61RwtUJP3LWY7sQIEhOXjCFM2sk/edit?tab=t.bjkujx8pnylf).
 
-This DEP is the general membership layer. The GAIE-based multi-cluster
-DEP ([0000-multi-cluster-inference-gateway.md](0000-multi-cluster-inference-gateway.md))
-is one consumer: its hub EPP can read the same `DynamoPoolExport` records.
 
 # Motivation
 
@@ -50,10 +47,16 @@ registration.
 The HLD leaves these questions open:
 
 * Open question 1: push, pull, or discovery for registration?
-* Open question 9: how does a PoolRelay learn the Global Router
-  addresses?
+* Open question 9: how does a PoolRelay learn the Global Router replica addresses?
 
 It also does not say how any of this maps to Kubernetes.
+
+Today's Global Router POC
+([#15338](https://github.com/ai-dynamo/dynamo/pull/15338)) reads a
+static JSON list of pools at startup, and the router connects to each
+Relay. In this DEP's terms, that is the static file source
+(`FileMembership`). The interface below lets the other options replace
+it without changing the router.
 
 The hard part of question 9 is that the HLD wants **every** Global Router
 replica to see **every** pool, with no replica-to-replica syncing of pool
@@ -68,24 +71,30 @@ state. Say there are 3 router replicas behind one load balancer:
   does not know how many pools exist. Has it heard from 8 of 8 pools, or
   8 of 20?
 
-What is missing is a **directory** that both sides can find.
-
 ## Goals
 
+* The same Global Router code works with every discovery option.
+* The deployer picks the option that fits their setup.
+
+The options are compared against these properties:
+
 * A pool can join and leave without restarting the Global Router.
-* Pools dial out. The hub never needs credentials for workload clusters.
+* Pools dial out.
 * Every Global Router replica sees every pool.
-* A new replica knows the full list of pools when it starts.
+* A new replica knows the full list of pools, so it knows when it is
+  ready.
 * A pool can only register or change **its own** record.
-* Align with Kubernetes multi-cluster standards where we can.
+* Align with Kubernetes multi-cluster standards where possible.
+
+Not every option has every property. For example, gRPC Native needs
+extra work so that every replica sees every pool, and a new replica can
+only estimate when it is ready. See
+[Comparing the Three Options](#comparing-the-three-options).
 
 ### Non Goals
 
 * How KV and load state flows from a pool to the Global Router.
 * How requests reach a pool (network reachability, tunnels).
-* Deployments without Kubernetes. The HLD's `RegisterPool` gRPC path
-  stays the way to cover them (see
-  [Pluggable Membership Sources](#pluggable-membership-sources)).
 * Requiring GAIE or a Gateway with the Inference Extension. This DEP
   uses only Dynamo CRDs and built-in Kubernetes APIs. When GAIE is
   installed, it can be used as an extra input.
@@ -93,8 +102,215 @@ What is missing is a **directory** that both sides can find.
 # Proposal
 
 ## Overview
+The proposal aims to define abstractions for discovery so that a client can decide. 
 
-The hub cluster's Kubernetes API is the directory. Pools write to it.
+## Comparing the Three Options
+
+| | gRPC Native | Hybrid | Full Kubernetes |
+|---|---|---|---|
+| Works outside Kubernetes | **Yes** | Pools: yes. The Global Router must run on Kubernetes | No |
+| Matches the HLD wording | **Yes** | Partly. Same `RegisterPool`, but records are stored in etcd | Bends the "no external store" rule (see below) |
+| Pool reaches every router replica (open question 9) | Needs extra work. The reply to `RegisterPool` returns the replica list, and pools connect to each replica | **Yes.** One regional address. Every replica watches | **Yes.** Write once. Every replica watches |
+| New replica knows which pools to wait for | No exact answer. Ask a peer replica, or wait for a timeout | **Yes.** It lists the records | **Yes.** It lists the records |
+| Identity, and one pool cannot touch another | We build it: mTLS, pool binding, revocation | We build it: mTLS in the Global Router | **Built in:** RBAC, one namespace per pool, CSR, audit log. |
+| See which pools exist | We build `GET /pools` | `kubectl get dynamopoolexports -A` | `kubectl get dynamopoolexports -A` |
+| Standards | None | Kubernetes store, custom registration | **Same pattern** as GAIE 1374 Push/Pull, Open Cluster Management, and Karmada pull mode |
+| What workload clusters must reach | Every router replica's gRPC address | The regional gRPC address | **The hub's Kubernetes API server.** Some teams will not allow this |
+| Extra infrastructure | An address per replica (a load balancer per replica, or a router like `stargate-k8s-router`), and a certificate authority for mTLS | A certificate authority for mTLS | Hub API server reachable from workload clusters, and credentials per pool |
+| Parts to build | RPCs, heartbeat, replica list, pool-side connection to every replica, mTLS | RPCs, heartbeat, mTLS, the router writes records and Leases, watch | CRD, export agent in the operator, credentials, Leases, watch |
+| Time to notice a dead pool | Fast. Missed heartbeats | Set by the Lease length. The state stream covers this | Slow, about a minute. The state stream covers this |
+| Hub API server is down | Not affected | Known pools keep working from the watch cache. New pools cannot join | Known pools keep working from the watch cache. New pools cannot join |
+
+## Which Option When
+
+| Your setup | Pick |
+|---|---|
+| No Kubernetes, or the Global Router does not run on Kubernetes | **gRPC Native** |
+| The Global Router runs on Kubernetes, but workload clusters must not reach the hub's Kubernetes API (different owners, several clouds, strict security rules) | **Hybrid** |
+| One owner and a private network between clusters, or a cluster manager (OCM, Karmada, a cloud fleet service) already connects clusters to a hub | **Full Kubernetes** |
+| First tests, or a few pools that rarely change | **Static file** as a start |
+
+## Membership Interface
+
+We will abstract pool membership behind an interface, so that all three
+options work with the same Global Router code:
+
+* gRPC Native: gRPC `RegisterPool`, as in the HLD
+* Full Kubernetes
+* Hybrid: gRPC registration, stored in the hub's Kubernetes API
+
+Membership is split into two questions:
+
+1. **How does a pool announce itself?** (the write side)
+2. **Where does the pool list live, and how does every replica read
+   it?** (the store and read side)
+
+Each option is one combination of the two.
+
+| Option | How pools announce | Where the list lives | Who sees it |
+|---|---|---|---|
+| gRPC Native | PoolRelay calls `RegisterPool` | In memory, per replica | Only the replica that got the call |
+| Full Kubernetes | Export agent writes a record and Lease to the hub | Hub Kubernetes API | Every replica, by watching |
+| Hybrid | PoolRelay calls `RegisterPool` | The receiving replica writes to the hub Kubernetes API | Every replica, by watching |
+| Static file (possible start) | A person edits the file | ConfigMap | Every replica |
+
+### Global Router Side
+
+The Pool Catalog only reads. It depends on one interface:
+
+```rust
+/// Where the Pool Catalog gets the pool list. The catalog does not care
+/// which implementation is behind it.
+trait MembershipSource {
+    /// Full list of pools right now, plus a version to watch from.
+    async fn snapshot(&self) -> Result<Snapshot>;
+
+    /// Changes after that version: Added, Updated, Removed.
+    fn watch(&self, from: Revision) -> BoxStream<'static, MembershipEvent>;
+}
+
+struct Snapshot {
+    pools: Vec<PoolRecord>,
+    revision: Revision,
+    /// true  = this is the full set (a new replica can wait for exactly these)
+    /// false = only pools that happened to call this replica (use a timeout)
+    complete: bool,
+}
+```
+
+The gRPC handler writes through a second interface:
+
+```rust
+/// Where RegisterPool calls are stored. Only used by the gRPC options.
+trait MembershipSink {
+    async fn register(&self, rec: PoolRecord, caller: PoolIdentity) -> Result<()>;
+    async fn heartbeat(&self, pool: &PoolId, caller: PoolIdentity) -> Result<()>;
+    async fn deregister(&self, pool: &PoolId, caller: PoolIdentity) -> Result<()>;
+}
+```
+
+Implementations:
+
+| Implementation | Source | Sink | `complete` |
+|---|---|---|---|
+| `InMemoryMembership` | Yes | Yes | `false` |
+| `KubernetesMembership` (read and write) | Yes | Yes | `true` |
+| `KubernetesMembership` (read only) | Yes | No (the export agents write) | `true` |
+| `FileMembership` | Yes | No | `true` |
+
+Wiring:
+
+* **gRPC Native:** gRPC server + `InMemoryMembership`.
+* **Full Kubernetes:** no gRPC server + `KubernetesMembership` (read only).
+* **Hybrid:** gRPC server + `KubernetesMembership` (read and write).
+
+One setting picks the combination, for example
+`--membership=grpc|kubernetes|hybrid|file`.
+
+### Pool Side
+
+* `GrpcAnnouncer`: calls `RegisterPool` on the regional address and sends
+  heartbeats. Used by gRPC Native and Hybrid.
+* `KubernetesExportAgent`: the reconciler in the Dynamo operator that
+  writes the record and Lease to the hub. Used by full Kubernetes.
+
+### Rules Shared by Every Option
+
+These live in the Pool Catalog, not in the implementations, so behavior
+is the same whichever option is chosen:
+
+* **One record format.** `PoolRecord` has the same fields as the
+  `DynamoPoolExport` spec. The gRPC `RegisterPool` message carries the
+  same fields.
+* **Expiry in one place.** The catalog removes a pool when it has not
+  seen an update for the Lease or heartbeat duration, using its own clock.
+* **Readiness from `complete`.** If `true`, wait for first state from
+  every listed pool, with a timeout. If `false`, become ready after a
+  fixed wait (soft readiness).
+* **Same routable rule** as in
+  [When Is a Pool Routable](#when-is-a-pool-routable).
+* **Identity is checked where the write happens.** In the gRPC options,
+  the gRPC handler checks the caller's mTLS identity and that the caller
+  matches `pool_id` before calling the sink. In full Kubernetes, RBAC
+  and a CEL validation policy on the hub do it.
+
+
+## Hybrid Approach (gRPC + Kubernetes)
+
+Pools keep talking gRPC. The Global Router uses Kubernetes behind the
+scenes to share what it hears. The discovery information is stored in the Hub's Kubernetes API.
+
+1. A pool's PoolRelay calls `RegisterPool` on the region's single
+   Global Router address.
+2. The load balancer sends the call to one replica.
+3. That replica writes a small record for the pool into the Hub Cluster's 
+   Kubernetes API Server.
+4. Every replica watches those records, so every replica sees every
+   pool, even though the pool talked to only one of them.
+5. A new replica reads all the records at startup and knows which pools
+   to wait for.
+
+**Pros:**
+
+* Pools need only one address, the regional one.
+* Every replica sees every pool, and a new replica knows when it is
+  ready.
+* Workload clusters never reach the hub's Kubernetes API. Only the
+  Global Router does, inside its own cluster.
+* A small change to the HLD design: the same `RegisterPool` call.
+
+Compared with gRPC Native, the shared list of pools saves us:
+
+1. **Pools do not have to find every replica.** With gRPC Native, a
+   pool's call reaches only one replica, so every pool needs every
+   replica's address and a connection to each one. With Hybrid, a pool
+   calls one regional address, once.
+2. **No extra network setup per replica.** gRPC Native needs a load
+   balancer per replica, or a router like `stargate-k8s-router`. Hybrid
+   needs one normal load balancer.
+3. **A new replica knows when it is ready.** With gRPC Native it can only
+   guess, with a timeout or by asking another replica. With Hybrid it
+   reads the shared list and knows exactly which pools to wait for.
+4. **The pool list survives restarts.** With gRPC Native, the list lives
+   only in router memory and is lost if all replicas restart together.
+   With Hybrid, it stays in the hub's Kubernetes API.
+
+**Cons:**
+
+* Kubernetes RBAC does not protect each pool's record, because the
+  router writes it. The Global Router must check who is calling, for
+  example with mTLS, and needs a certificate authority for the Relays.
+* The Global Router must run on Kubernetes and needs permission to
+  write records and Leases in its own cluster.
+* Records are stored in etcd, so it bends the HLD's "no external store"
+  rule, like Full Kubernetes.
+
+## gRPC Native Approach
+
+1. A pool's PoolRelay calls `RegisterPool` on the region's single
+   Global Router address, as the HLD describes.
+2. The discovery information is kept in the Global Router's memory
+
+**Pros:**
+
+* Can be deployed without Kubernetes
+* On Kubernetes, the workload clusters never reach the hub's Kubernetes API. 
+
+
+**Cons:**
+
+* The biggest issue with the gRPC Native approach is the absence of the shared list of pools. 
+Each router replica only knows the pools that happened to call it. Two problems follow:                                                                       
+  1. Every replica must see every pool. A registration through the load balancer reaches only one replica. To solve this the `/RegisterPool` can return the list of replicas. The PoolRelay would connect to each replica to refresh its list.                                                                  
+  2. A new replica can't know when it's ready, because it doesn't know how many pools exist. A new replica only learns about the pool as the find it and call in. So it does not know how many to expect to mark itself ready. If HLD does not want the replica-to-replica communication to solve this problem then gRPC can't give an exact answer. If the replica requests a snapshot then it works unless all replicas restart at once. 
+  3. Extra infra is required. We need a load balancer per Global Router replica or a router that sends each connection to a named replica like stargate-k8-router. 
+* We need to re-implement some machinery Kubernetes gives us for free. For example, Kubernetes RBAC does not protect each pool's record. The Global Router must check who is calling, for example with mTLS.
+* Teams where security is not an issue may be more comfortable reusing existing solutions. 
+
+
+## Full Kubernetes Approach
+Each pool writes a small record into the Kubernetes API of the hub cluster where the Global Router resides. Every Global
+Router replica watches those records. The hub cluster's Kubernetes API is the directory. Pools write to it.
 Global Router replicas read from it.
 
 ```
@@ -115,7 +331,45 @@ Global Router replicas read from it.
                                  +------------------------------+
 ```
 
-## Components to write
+The biggest con of this approach is security. The workload clusters can reach the Hub's cluster Kubernetes API server.
+The biggest pro is relying on existing APIs, and reliable way to report the Global Router Replica's readiness as well as robust discovery which we do not need to implement ourselves. 
+
+#### How This Answers HLD Open Question 9
+
+* The export agent needs **one** address: the hub's API server. It does
+  not know or care how many router replicas exist.
+* The pool writes its record **once**. Every replica sees it by watching.
+* When the router scales from 3 to 4 replicas, nothing changes for the
+  pools.
+* A new replica lists the records at startup and knows the full set, for
+  example N pools. It becomes ready when it has state for all N.
+  Readiness is well defined.
+
+If the state stream also dials out (pool to router), the pools need the
+router replica addresses. The same directory works in that direction too:
+each replica writes its address to the hub, and pools watch that list.
+The design of the state stream is out of scope here.
+
+#### Kubernetes Native Approach makes the items below easy
+
+1. **Every replica sees every pool, for free.** A watch gives every
+   replica the same list. There is no replica list to hand out and no
+   replica-to-replica sync.
+2. **A new replica knows what to wait for.** It lists the records at
+   startup, so "ready" has a clear meaning.
+3. **Security comes built in.** Kubernetes already has identity, RBAC,
+   namespaces, certificate signing, and an audit log. With `RegisterPool`
+   we would build and maintain all of that.
+4. **It follows a known pattern.** GAIE 1374 ("Push/Pull"), Open Cluster
+   Management, and Karmada pull mode all have members dial out and write
+   their own record to a hub. GAIE 1374 describes it as "Typical when you
+   want no hub-stored member credentials."
+5. **It is easy to operate.** Admins use `kubectl` to see, debug, and
+   remove pools.
+
+
+
+#### Components to write
 1. Kubernetes Reconciler = Export Agent. Sees a pool, write its record and Lease to the hub. Deletes the record when a pool goes away. 
 The agent watches DGDs. If GAIE is installed, it can also watch InferencePools.
    * The agent needs **two** Kubernetes clients: one for its own cluster
@@ -131,7 +385,7 @@ We can avoid the CRD in favor of ConfigMap but the CRD is preferable.
 5. Optional: if GAIE is installed, the pool can also be exported through its InferencePool.
 6. The agent reads the pool's Frontend Service (built in) to find the pool's address.
 
-### Kubernetes APIs Used
+#### Kubernetes APIs Used
 
 * Workload cluster, the agent reads: `DynamoGraphDeployment`, `Service`.
 * Hub, the agent writes: `DynamoPoolExport`, `Lease`. In Phase 2 also
@@ -140,7 +394,7 @@ We can avoid the CRD in favor of ConfigMap but the CRD is preferable.
 * GAIE and Gateway API: optional only.
 
 
-## Steps
+#### Steps
 
 1. **The user marks a pool for export.** In the workload cluster, the
    user marks the **DGD** for export, with a field or annotation on the
@@ -167,7 +421,7 @@ We can avoid the CRD in favor of ConfigMap but the CRD is preferable.
    is deleted, the export agent deletes the record. If the agent dies, the
    Lease expires and the pool is removed.
 
-## The Record
+#### The Record
 
 A small, namespaced custom resource on the hub. It holds data that
 changes rarely.
@@ -194,21 +448,34 @@ spec:
 
 The field list is a starting point for review.
 
-## Who Can Write What
+#### Proposed shape for the DynamoPoolExport CRD
 
-The hub holds **no** credentials for workload clusters. Each workload
-cluster holds a credential for the hub that can write **only its own
-namespace**. So a pool cannot register a fake pool or change another
-pool's record.
+`kind: DynamoPoolExport`, one per pool, in that pool's namespace on the
+hub. Main fields only:
 
-* **Phase 1:** the hub admin creates the namespace, a ServiceAccount, and
-  RBAC for each pool. They give the workload cluster a token for it.
-  Submariner joins clusters to its broker in a similar way.
-* **Phase 2:** a short-lived bootstrap token is swapped for a certificate
-  through a CSR, and the hub admin must accept the new pool. This is how
-  Open Cluster Management and Karmada pull mode register clusters.
+| Field | Required | Example | Where the agent gets it | Why the Global Router needs it |
+|---|---|---|---|---|
+| `spec.poolId` | Yes | `pool-a` | DGD name (or a DGD field) | Names the pool. Matches the pool to its Lease and its state stream |
+| `spec.frontendAddress` | Yes | `https://pool-a.us-east-1.example.com:443` | A manual override on the DGD first. Otherwise the Frontend Service's `status.loadBalancer.ingress`. Otherwise, if GAIE is installed, the Gateway's `status.addresses` | The pool's entry point. Where to send requests |
+| `spec.relayIdentity` | Yes | `spiffe://example.com/relay/pool-a` | Relay configuration | Checks that a state stream really comes from this pool |
+| `spec.location.region` | Yes | `us-east-1` | Agent configuration | Locality in cost functions |
+| `spec.location.cluster` | Yes | `cluster-a` | Agent configuration | Locality, and to group pools by cluster |
+| `spec.location.dc` | No | `dc-1` | Agent configuration | Locality |
+| `spec.models` | Yes | `[Qwen/Qwen3-32B]` | DGD | Which pools can serve a request |
+| `spec.hardware` | No | `B200-IB` | DGD or node labels | Answers "all InfiniBand pools" (HLD) |
+| `spec.workerCount` | No | `16` | DGD | Rough pool size |
 
-## When Is a Pool Routable
+No `status` is needed. The Global Router only reads these records.
+
+**The Lease.** The agent writes a standard `Lease`
+(`coordination.k8s.io/v1`) with the **same name and namespace** as the
+record. It sets `spec.holderIdentity` to the agent's ID and
+`spec.leaseDurationSeconds` (for example `60`), and updates
+`spec.renewTime` on each heartbeat. The Lease has an `ownerReference`
+to its `DynamoPoolExport`, so deleting the record also deletes the
+Lease.
+
+#### When Is a Pool Routable
 
 A pool is routable only when all of these are true:
 
@@ -222,7 +489,7 @@ A pool is routable only when all of these are true:
 The Lease is the slow check, about a minute. The state stream is the fast
 check: when it drops, the pool stops getting traffic right away.
 
-### Leases Do Not Expire on Their Own
+#### Leases Do Not Expire on Their Own
 
 Kubernetes never deletes an old Lease. The Global Router must decide
 when a Lease is too old.
@@ -236,76 +503,8 @@ when a Lease is too old.
   Something on the hub should also clean them up, for example a small
   cleanup job or a hub-side controller.
 
-## How This Answers HLD Open Question 9
 
-* The export agent needs **one** address: the hub's API server. It does
-  not know or care how many router replicas exist.
-* The pool writes its record **once**. Every replica sees it by watching.
-* When the router scales from 3 to 4 replicas, nothing changes for the
-  pools.
-* A new replica lists the records at startup and knows the full set, for
-  example 20 pools. It becomes ready when it has state for all 20.
-  Readiness is well defined.
-
-If the state stream also dials out (pool to router), the pools need the
-router replica addresses. The same directory works in that direction too:
-each replica writes its address to the hub, and pools watch that list.
-The design of the state stream is out of scope here.
-
-## Pluggable Membership Sources
-
-This DEP does not replace the HLD's `RegisterPool` gRPC call. The Global
-Router's Pool Catalog should accept more than one source:
-
-| Source | Use it when |
-|---|---|
-| Static file (ConfigMap) | Testing, and very small fixed setups |
-| `RegisterPool` gRPC (HLD) | Deployments without Kubernetes |
-| Kubernetes watch (this DEP) | Kubernetes deployments |
-
-All sources fill the same Pool Catalog. The routing logic does not
-care where a pool came from. llm-d's router already works this way: its
-discovery is a plugin, and a file-based one exists today.
-
-## Tradeoffs
-
-| | gRPC `RegisterPool` (HLD) | Kubernetes API (this DEP) |
-|---|---|---|
-| Works outside Kubernetes | **Yes** | No |
-| Matches the HLD wording | **Yes** | Bends the "no external store" rule (see below) |
-| Pool reaches every router replica (open question 9) | Needs extra work. For example, the reply to `RegisterPool` returns the replica list | **Yes.** Write once, every replica watches |
-| New replica knows which pools to wait for | No. It must ask its peers or wait for a timeout | **Yes.** It lists the records |
-| Identity, and one pool cannot touch another | We must build it: certificates, pool binding, revocation | **Built in:** RBAC, one namespace per pool, CSR, audit log |
-| See which pools exist | We must build `GET /pools` | **`kubectl get dynamopoolexports -A`** |
-| Standards | None | **Same pattern** as GAIE 1374 Push/Pull, Open Cluster Management, and Karmada pull mode |
-| What workload clusters must reach | **A small gRPC port** | **The hub's API server.** Some teams will not allow this |
-| Parts to build | **Fewer.** One RPC and a heartbeat | CRD, operator reconciler, credentials, Leases |
-| Time to notice a dead pool | **Fast.** The connection drops | Slow, about a minute. The state stream covers this |
-| Sources of truth | **One** connection | Two, Lease and stream. Needs the routable rule above |
-| Hub API server is down | Not affected | Known pools keep working from the watch cache. New pools cannot join |
-
-## Why the Kubernetes Native Approach Is Better for Kubernetes
-
-1. **Every replica sees every pool, for free.** A watch gives every
-   replica the same list. There is no replica list to hand out and no
-   replica-to-replica sync.
-2. **A new replica knows what to wait for.** It lists the records at
-   startup, so "ready" has a clear meaning.
-3. **Security comes built in.** Kubernetes already has identity, RBAC,
-   namespaces, certificate signing, and an audit log. With `RegisterPool`
-   we would build and maintain all of that.
-4. **It follows a known pattern.** GAIE 1374 ("Push/Pull"), Open Cluster
-   Management, and Karmada pull mode all have members dial out and write
-   their own record to a hub. GAIE 1374 describes it as "Typical when you
-   want no hub-stored member credentials."
-5. **It is easy to operate.** Admins use `kubectl` to see, debug, and
-   remove pools.
-
-It is **worse** when there is no Kubernetes, when a site will not expose
-its hub API server, or when the fewest moving parts matter most. That is
-why the membership source should be pluggable.
-
-## The "No External Store" Rule
+#### The "No External Store" Rule
 
 The HLD says "No etcd, database or shared cache is required for the
 Global View". The hub API server is backed by etcd, so this DEP bends
@@ -320,77 +519,42 @@ that rule. We think this is acceptable because:
 
 
 
-# Proposed shape for the DynamoPoolExport CRD
-
-   `kind: DynamoPoolExport`, one per pool, in that pool's namespace on the
-   hub. Main fields only:
-
-   | Field | Required | Example | Where the agent gets it | Why the Global Router needs it |
-   |---|---|---|---|---|
-   | `spec.poolId` | Yes | `pool-a` | DGD name (or a DGD field) | Names the pool. Matches the pool to its Lease and its state stream |
-   | `spec.frontendAddress` | Yes | `https://pool-a.us-east-1.example.com:443` | A manual override on the DGD first. Otherwise the Frontend Service's `status.loadBalancer.ingress`. Otherwise, if GAIE is installed, the Gateway's `status.addresses` | The pool's entry point. Where to send requests |
-   | `spec.relayIdentity` | Yes | `spiffe://example.com/relay/pool-a` | Relay configuration | Checks that a state stream really comes from this pool |
-   | `spec.location.region` | Yes | `us-east-1` | Agent configuration | Locality in cost functions |
-   | `spec.location.cluster` | Yes | `cluster-a` | Agent configuration | Locality, and to group pools by cluster |
-   | `spec.location.dc` | No | `dc-1` | Agent configuration | Locality |
-   | `spec.models` | Yes | `[Qwen/Qwen3-32B]` | DGD | Which pools can serve a request |
-   | `spec.hardware` | No | `B200-IB` | DGD or node labels | Answers "all InfiniBand pools" (HLD) |
-   | `spec.workerCount` | No | `16` | DGD | Rough pool size |
-
-   No `status` is needed. The Global Router only reads these records.
-
-   **The Lease.** The agent writes a standard `Lease`
-   (`coordination.k8s.io/v1`) with the **same name and namespace** as the
-   record. It sets `spec.holderIdentity` to the agent's ID and
-   `spec.leaseDurationSeconds` (for example `60`), and updates
-   `spec.renewTime` on each heartbeat. The Lease has an `ownerReference`
-   to its `DynamoPoolExport`, so deleting the record also deletes the
-   Lease.
-
-
 # Alternate Solutions
 
-## Alt 1 gRPC `RegisterPool` Only
-
-**Pros:**
-
-* Works everywhere, with or without Kubernetes.
-* Fewer parts to build.
-
-**Cons:**
-
-* Every pool must find every router replica.
-* A new replica does not know which pools to wait for.
-* Identity and per-pool isolation must be built from scratch.
-
-**Reason Rejected:**
-
-* Not rejected. It remains a membership source for deployments without
-  Kubernetes.
-
-## Alt 2 The Hub Reaches Into Each Cluster (Hub/Spoke)
+## Alt 1 The Hub Reaches Into Each Cluster (Hub/Spoke)
 
 The hub holds a kubeconfig for every workload cluster and reads pools
 from them. GKE's multi-cluster Inference Gateway works this way, using
-Google IAM.
+Google IAM. SIG Multicluster's ClusterProfile KEP
+([KEP-4322](https://github.com/kubernetes/enhancements/tree/master/keps/sig-multicluster/4322-cluster-inventory))
+recommends this direction, with cloud identity federation instead of
+stored keys.
 
 **Pros:**
 
 * Nothing to install in workload clusters.
+* With identity federation, no long-lived credentials are stored anywhere.
 
 **Cons:**
 
-* The hub holds credentials for every cluster.
+* Without identity federation, the hub holds credentials for every
+  cluster.
+* Identity federation is easiest when all clusters are in one cloud.
 * Every workload cluster needs an inbound path from the hub.
 
 **Reason Rejected:**
 
-* It goes against the HLD's dial-out direction.
+* Not rejected for single-cloud fleets. It goes against the HLD's
+  dial-out direction.
 
-## Alt 3 Static File Only
+## Alt 2 Static File Only
 
-A list of pools in a ConfigMap. llm-d's multi-cluster router does this
-today.
+A list of pools in a file or ConfigMap. llm-d's multi-cluster router does
+this today, and it can reload the file when it changes. Dynamo's Global
+Router POC does it too
+([#15338](https://github.com/ai-dynamo/dynamo/pull/15338)): a JSON file
+lists each pool and its Relay and Frontend addresses, and the router
+reads it once at startup.
 
 **Pros:**
 
@@ -399,10 +563,15 @@ today.
 **Cons:**
 
 * A person must edit the file for every change.
+* If the file is read only at startup, every change also means
+  restarting the routers.
 
 **Reason Rejected:**
 
-* Kept only as a source for tests and small setups (Phase 0).
+* Every change needs a person, so pools cannot join or leave on their
+  own. It can still be a possible start (Phase 0), as in the POC, and a
+  source for tests.
+
 
 # Open Questions
 
@@ -413,6 +582,8 @@ today.
 3. One namespace per pool, or one per workload cluster?
 4. Only when GAIE is installed: should we also sync to GAIE's
    `InferencePoolImport`, or wait for it to leave draft status?
+5. Who issues Relay Certificates?
+6. How is each replica addressed in gRPC native?
 
 # References
 
@@ -430,3 +601,5 @@ today.
 * [Submariner broker](https://submariner.io/getting-started/architecture/broker/).
 * [llm-d file discovery](https://github.com/llm-d/llm-d-router/blob/main/pkg/epp/framework/plugins/datalayer/discovery/file/README.md).
 * [GKE multi-cluster Inference Gateway](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/about-multi-cluster-inference-gateway).
+
+
