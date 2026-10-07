@@ -222,17 +222,19 @@ Compared with gRPC Native, the shared list of pools saves us:
 
 **Cons:**
 
-* The biggest issue with the gRPC Native approach is the absence of the shared list of pools. 
-Each router replica only knows the pools that happened to call it. Two problems follow:                                                                       
+* The biggest issue with the gRPC Native approach is the absence of the shared list of pools.
+  Each router replica only knows the pools that happened to call it. Three problems follow:
+
   1. Every GR replica must see every pool. There is a load balancer in the Gub in front of every GL replica. When a relay calls`/RegisterPool` the load balancer sends this to 1 replica only. To solve this the `/RegisterPool` can return the list of replicas. The PoolRelay would connect to each replica to refresh its list. To make sure each replica knows about another 2 approaches exist:
-    1.1. Use a smart gateway like  stargate-k8s-router.
-    1.2. Put an additional load balancer per replica. For the first call each Relay reaches the main load balancer and then it works with per replica load balancers.                                                               
+     1. Use a smart gateway like  stargate-k8s-router.
+     2. Put an additional load balancer per replica. For the first call each Relay reaches the main load balancer and then it works with per replica load balancers.
   2. A new replica can't know when it's ready, because it doesn't know how many pools exist. A new replica only learns about the pool as the find it and call in. So it does not know how many to expect to mark itself ready. Ways to mitigate:
-    2.1 A new replica asks a peer how many pools exist (snapshot). The issue that the  HLD does not want the replica-to-replica communication. If all replicas restart together then nobody knows.
-    2.2. Just say ready when one pool is found
-    2.3. Wait a fixed time. A relay sends heartbeats and in response the GR sends a list of replicas. When a relay finds a new replica in the list it is calls the `/RegisterPool` on it. The downside that this is eventually consistent. 
-    2.4 Re-implement the solution using a library with a gossip/swim protocol (@stefan Shumaksi)
-  3. Extra infra is required. We need a load balancer per Global Router replica or a router that sends each connection to a named replica like stargate-k8-router. 
+     1. A new replica asks a peer how many pools exist (snapshot). The issue that the  HLD does not want the replica-to-replica communication. If all replicas restart together then nobody knows.
+     2. Just say ready when one pool is found
+     3. Wait a fixed time. A relay sends heartbeats and in response the GR sends a list of replicas. When a relay finds a new replica in the list it is calls the `/RegisterPool` on it. The downside that this is eventually consistent.
+     4. Re-implement the solution using a library with a gossip/swim protocol (@stefan Shumaksi)
+  3. Extra infra is required. We need a load balancer per Global Router replica or a router that sends each connection to a named replica like stargate-k8-router.
+
 * We need to re-implement some machinery Kubernetes gives us for free. For example, Kubernetes RBAC does not protect each pool's record. The Global Router must check who is calling, for example with mTLS.
 * Teams where security is not an issue may be more comfortable reusing existing solutions. 
 
