@@ -29,7 +29,7 @@ The DEP proposes an abstract interface covering 3 implementations.
 The deployer can choose: 
 1. The gRPC native approach when each cluster relay calls `/RegisterPool` API and does not use any Kubernetes APIs.
 2. A Hybrid Approach when each cluster Relay calls `/RegisterPool` API. The Global Router stores the list of pools in its own Cluster's Kubernetes API. 
-3. A full Kubernetes approach aimed at deployments where the workload clusters can safely call into the Hub's Kubernetes API server.
+3. A full Kubernetes approach for clusters on one trusted network that form a SIG Multicluster ClusterSet. It uses the standard Multi-Cluster Services API instead of a Dynamo-specific record.
 
 This DEP is part of the "K8s Native Global Router Solution" LLD listed in
 the
@@ -95,8 +95,9 @@ only estimate when it is ready. See
 
 * How KV and load state flows from a pool to the Global Router.
 * How requests reach a pool (network reachability, tunnels).
-* Requiring GAIE or a Gateway with the Inference Extension. This DEP
-  uses only Dynamo CRDs and built-in Kubernetes APIs. When GAIE is
+* Requiring GAIE or a Gateway with the Inference Extension. The gRPC and
+  Hybrid options use only Dynamo CRDs and built-in Kubernetes APIs. The
+  Full Kubernetes option uses the SIG Multicluster APIs. When GAIE is
   installed, it can be used as an extra input.
 
 # Proposal
@@ -110,15 +111,15 @@ The proposal aims to define abstractions for discovery so that a client can deci
 |---|---|---|---|
 | Works outside Kubernetes | **Yes** | Pools: yes. The Global Router must run on Kubernetes | No |
 | Matches the HLD wording | **Yes** | Partly. Same `RegisterPool`, but records are stored in etcd | Bends the "no external store" rule (see below) |
-| Pool reaches every router replica (open question 9) | Needs extra work. The reply to `RegisterPool` returns the replica list, and pools connect to each replica | **Yes.** One regional address. Every replica watches | **Yes.** Write once. Every replica watches |
-| New replica knows which pools to wait for | No exact answer. Ask a peer replica, or wait for a timeout | **Yes.** It lists the records | **Yes.** It lists the records |
-| Identity, and one pool cannot touch another | We build it: mTLS, pool binding, revocation | We build it: mTLS in the Global Router | **Built in:** RBAC, one namespace per pool, CSR, audit log. |
-| See which pools exist | We build `GET /pools` | `kubectl get dynamopoolexports -A` | `kubectl get dynamopoolexports -A` |
-| Standards | None | Kubernetes store, custom registration | **Same pattern** as GAIE 1374 Push/Pull, Open Cluster Management, and Karmada pull mode |
-| What workload clusters must reach | Every router replica's gRPC address | The regional gRPC address | **The hub's Kubernetes API server.** Some teams will not allow this |
-| Extra infrastructure | An address per replica (a load balancer per replica, or a router like `stargate-k8s-router`), and a certificate authority for mTLS | A certificate authority for mTLS | Hub API server reachable from workload clusters, and credentials per pool |
-| Parts to build | RPCs, heartbeat, replica list, pool-side connection to every replica, mTLS | RPCs, heartbeat, mTLS, the router writes records and Leases, watch | CRD, record writer in the PoolRelay, credentials, Leases, watch |
-| Time to notice a dead pool | Fast. Missed heartbeats | Set by the Lease length. The state stream covers this | Slow, about a minute. The state stream covers this |
+| Pool reaches every router replica (open question 9) | Needs extra work. The reply to `RegisterPool` returns the replica list, and pools connect to each replica | **Yes.** One regional address. Every replica watches | **Yes.** The router's headless export gives every cluster the replica list |
+| New replica knows which pools to wait for | No exact answer. Ask a peer replica, or wait for a timeout | **Yes.** It lists the records | **Yes.** It lists the imported EndpointSlices |
+| Identity, and one pool cannot touch another | We build it: mTLS, pool binding, revocation | We build it: mTLS in the Global Router | **Trusted network.** MCS does not authenticate. RBAC in each cluster decides who can export. Mesh mTLS is optional |
+| See which pools exist | We build `GET /pools` | `kubectl get dynamopoolexports -A` | `kubectl get serviceimports -A` on the hub |
+| Standards | None | Kubernetes store, custom registration | **SIG Multicluster:** MCS, About API, optional ClusterProfile. Same model as GAIE 1374 |
+| What workload clusters must reach | Every router replica's gRPC address | The regional gRPC address | The router pods in the hub, over the trusted pod network. Not the hub's Kubernetes API |
+| Extra infrastructure | An address per replica (a load balancer per replica, or a router like `stargate-k8s-router`), and a certificate authority for mTLS | A certificate authority for mTLS | An MCS implementation (Submariner, Cilium ClusterMesh, a cloud MCS service) and a pod network that reaches across clusters |
+| Parts to build | RPCs, heartbeat, replica list, pool-side connection to every replica, mTLS | RPCs, heartbeat, mTLS, the router writes records and Leases, watch | `ServiceExport` in the operator, router export in Helm, EndpointSlice watchers in the router and the PoolRelay |
+| Time to notice a dead pool | Fast. Missed heartbeats | Set by the Lease length. The state stream covers this | Readiness probe plus the MCS implementation's sync delay. The state stream covers this |
 | Hub API server is down | Not affected | Known pools keep working from the watch cache. New pools cannot join | Known pools keep working from the watch cache. New pools cannot join |
 
 ## Which Option When
@@ -127,7 +128,7 @@ The proposal aims to define abstractions for discovery so that a client can deci
 |---|---|
 | No Kubernetes, or the Global Router does not run on Kubernetes | **gRPC Native** |
 | The Global Router runs on Kubernetes, but workload clusters must not reach the hub's Kubernetes API (different owners, several clouds, strict security rules) | **Hybrid** |
-| One owner and a private network between clusters, or a cluster manager (OCM, Karmada, a cloud fleet service) already connects clusters to a hub | **Full Kubernetes** |
+| One owner and a trusted network between clusters, with an MCS implementation that joins them, the hub included, into a ClusterSet | **Full Kubernetes** |
 | First tests, or a few pools that rarely change | **Static file** as a start |
 
 ## Membership Interface
@@ -150,7 +151,7 @@ Each option is one combination of the two.
 | Option | How pools announce | Where the list lives | Who sees it |
 |---|---|---|---|
 | gRPC Native | PoolRelay calls `RegisterPool` | In memory, per replica | Only the replica that got the call |
-| Full Kubernetes | PoolRelay writes a record and Lease to the hub | Hub Kubernetes API | Every replica, by watching |
+| Full Kubernetes | The operator creates a `ServiceExport`. MCS imports it into the hub | Hub Kubernetes API (`ServiceImport` and EndpointSlices) | Every replica, by watching |
 | Hybrid | PoolRelay calls `RegisterPool` | The receiving replica writes to the hub Kubernetes API | Every replica, by watching |
 | Static file (possible start) | A person edits the file | ConfigMap | Every replica |
 
@@ -239,130 +240,131 @@ Compared with gRPC Native, the shared list of pools saves us:
 * Teams where security is not an issue may be more comfortable reusing existing solutions. 
 
 
-## Full Kubernetes Approach
-Each pool writes a small record into the Kubernetes API of the hub cluster where the Global Router resides. Every Global
-Router replica watches those records. The hub cluster's Kubernetes API is the directory. Pools write to it.
-Global Router replicas read from it.
+## Full Kubernetes Approach (SIG Multicluster)
+
+For clusters on one trusted network. This option uses the SIG
+Multicluster standard APIs
+([SIG Multicluster](https://multicluster.sigs.k8s.io/#approach)) instead
+of a Dynamo-specific record. It needs:
+
+* a **ClusterSet** with namespace sameness, the hub included,
+* a cluster ID from the **About API** (`cluster.clusterset.k8s.io`) in
+  every cluster,
+* an implementation of the **Multi-Cluster Services (MCS) API**, such as
+  Submariner, Cilium ClusterMesh, or a cloud MCS service, with headless
+  Service support,
+* pod addresses that can be reached between clusters.
+
+A **ClusterProfile** inventory on the hub, written by a cluster manager
+such as Open Cluster Management, Karmada, or a cloud fleet service, is
+optional.
 
 ```
- Workload cluster A              Hub cluster                    
- +--------------------+          +------------------------------+
- | PoolRelay          |  dials   | Kubernetes API server        |
- |                    |--------->|  ns: pool-a                  |
- +--------------------+   out    |    DynamoPoolExport "pool-a" |
-                                 |    Lease "pool-a"            |
- Workload cluster B              |  ns: pool-b                  |
- +--------------------+  dials   |    DynamoPoolExport "pool-b" |
- | PoolRelay          |--------->|    Lease "pool-b"            |
- |                    |   out    |                              |
- +--------------------+          |        ^ watch   ^ watch     |
-                                 |        |         |           |
-                                 |  Global Router  Global Router|
-                                 |  replica 1      replica 2 ...|
-                                 +------------------------------+
+ Workload cluster A                      Hub cluster
+ +----------------------------+          +--------------------------------+
+ | DGD "qwen3-32b"            |          | ServiceImport "qwen3-32b"      |
+ | PoolRelay Service          |   MCS    |   EndpointSlice per cluster    |
+ |   + ServiceExport ---------|--------->|   (source-cluster: cluster-a)  |
+ |                            |          |        ^ watch                 |
+ | ServiceImport              |   MCS    |        |                       |
+ |   "global-router" <--------|----------| Global Router replicas 1..N   |
+ |                            |          |   headless Service             |
+ | PoolRelay -----------------|- dials ->|   + ServiceExport              |
+ +----------------------------+  each    +--------------------------------+
+                                 replica
 ```
 
-1. **The user marks a pool for export,** with a field or annotation on
-   the DGD in the workload cluster. If GAIE is installed, the GAIE export
-   annotation on the InferencePool
+1. **The user marks a pool for export,** with a field on the DGD in the
+   workload cluster. If GAIE is installed, the GAIE export annotation on
+   the InferencePool
    ([1374](https://github.com/kubernetes-sigs/gateway-api-inference-extension/tree/main/docs/proposals/1374-multi-cluster-inference))
    can also trigger it.
-2. **The PoolRelay dials out.** The pool's PoolRelay connects to the
-   hub's Kubernetes API server and writes a `DynamoPoolExport` record
-   into the pool's own namespace on the hub.
-3. **The PoolRelay keeps a heartbeat** by renewing a Kubernetes
-   `Lease` next to the record.
-4. **Every Global Router replica watches** the records and Leases, and
-   builds its Pool Catalog from them.
-5. **The pool leaves.** When export is turned off or the DGD is deleted,
-   the PoolRelay deletes the record. If the PoolRelay dies, the Lease
-   expires.
+2. **The operator creates a `ServiceExport`** for the pool's PoolRelay
+   Service, in the DGD's namespace, named after the DGD.
+3. **The MCS implementation imports it into the hub:** a `ServiceImport`
+   and EndpointSlices. Each EndpointSlice holds endpoints from one
+   cluster and carries the `multicluster.kubernetes.io/source-cluster`
+   label.
+4. **Every Global Router replica watches** those EndpointSlices and
+   builds its Pool Catalog from them. A pool is live while its PoolRelay
+   endpoint is Ready.
+5. **The PoolRelay finds every router replica.** The hub exports the
+   Global Router's headless Service. Every workload cluster then has the
+   router's EndpointSlices locally. The PoolRelay reads them and dials
+   each replica.
+6. **The pool leaves.** When export is turned off or the DGD is deleted,
+   the operator deletes the `ServiceExport`, and the pool's endpoints
+   disappear from the hub. If the PoolRelay dies, its endpoint stops
+   being Ready.
 
-### Why the PoolRelay Writes the Record, Not the Operator
+### Why the Operator Creates the Export
 
-* **The Lease shows that the PoolRelay is alive.** If the operator
-  renewed the Lease, a crashed PoolRelay would still look alive until
-  its state stream timed out.
-* **The PoolRelay talks to the hub anyway.** It dials every router
-  replica for the state stream, so it already needs a hub credential
-  and the replica list. With the operator, two components would hold
-  hub credentials.
-* **The same component announces the pool in every option.** The HLD
-  says the PoolRelay registers. In gRPC Native and Hybrid it calls
-  `RegisterPool`. Here it writes the record. The Global Router has one
-  pool-side interface, with one implementation per option.
-* **Fewer new parts.** No new operator reconciler, and no second cluster
-  client in the operator.
+The export is a normal Kubernetes object that the operator owns for the
+DGD, as GAIE does for InferencePools. Liveness does not depend on who
+creates it: the endpoint is Ready only while the PoolRelay pod passes its
+readiness probe. The PoolRelay needs no access to the hub's Kubernetes
+API and no hub credential.
 
-The operator still deploys the PoolRelay and can pass it values it
-knows, such as the frontend address.
+### Pool Identity Is the MCS Identity
 
-### The Record
+The Global View's `PoolKey` is (`siteId`, DGD namespace, DGD name). MCS
+names a service the same way: cluster ID, namespace, name. So:
 
-A small, namespaced custom resource on the hub. It holds data that
-changes rarely.
+* `siteId` is the About API cluster ID, read from the EndpointSlice's
+  `source-cluster` label.
+* The DGD namespace and name are the `ServiceImport` namespace and name.
 
-```yaml
-apiVersion: nvidia.com/v1alpha1
-kind: DynamoPoolExport
-metadata:
-  name: pool-a
-  namespace: pool-a            # one namespace per pool
-spec:
-  siteId: site-a                 # siteId, dgdNamespace and dgdName name the pool
-  dgdNamespace: inference        # namespace of the DGD in the workload cluster
-  dgdName: qwen3-32b
-  runtimeNamespace: dynamo-qwen3 # Dynamo runtime namespace of the pool
-  frontendEndpoint: https://pool-a.us-east-1.example.com:443  # for requests
-  relayIdentity: spiffe://example.com/relay/pool-a             # for the state stream
-  location:
-    region: us-east-1
-    availabilityZone: us-east-1a
-    cluster: cluster-a
-    datacenter: dc-1
-  model: Qwen/Qwen3-32B
-```
+MCS merges every cluster that exports the same namespace and name into
+one `ServiceImport`. Pools are per cluster, so the Global Router splits
+them by the EndpointSlice's `source-cluster` label, not by
+`ServiceImport`.
 
-The three name fields are the Global View's `PoolKey`. The Global Router
-derives the pool's routing ID from them.
+### Pool Details
 
-The field list is a starting point for review. The Lease has the same
-name and namespace as the record. Field details are in the
-[Appendix](#appendix-full-kubernetes-details).
+Discovery gives the pool's name and whether its PoolRelay is Ready.
+Other details come from elsewhere:
 
-### Who Can Write What
+* **Model, frontend endpoint, hardware:** the PoolRelay already sends
+  these in its catalog on the state stream.
+* **Location:** ClusterProfile properties on the hub, if a cluster
+  manager writes them. Otherwise, Global Router configuration keyed by
+  cluster ID.
+* **Runtime namespace and Relay identity:** add them to the PoolRelay
+  catalog. `exportedAnnotations` on the `ServiceExport` is a fallback,
+  because MCS implementations support it unevenly.
 
-* **Credentials.** The hub holds no credentials for workload clusters.
-  Each workload cluster holds a credential for the hub. In Phase 1, the
-  hub admin creates a namespace, ServiceAccount, and RBAC per pool and
-  gives the cluster a token. In Phase 2, a short-lived bootstrap token is
-  swapped for a certificate through a Kubernetes CSR, and the hub admin
-  approves the new pool, as Open Cluster Management and Karmada pull mode
-  do.
-* **RBAC.** Each credential can write only its own namespace: its record
-  and its Lease, nothing else.
-* **CEL check.** RBAC cannot check what is inside a record. A
-  `ValidatingAdmissionPolicy` (CEL) on the hub checks that the name
-  fields and `relayIdentity` match the namespace, so a pool cannot claim
-  another pool's identity.
+### Who Can Do What
+
+* **Trusted network.** MCS does not authenticate anyone. Membership in
+  the ClusterSet is the trust boundary.
+* **RBAC in each workload cluster** decides who can create a
+  `ServiceExport` in a namespace. Namespace sameness means a namespace
+  has one owner in every cluster.
+* **The state stream** can still check the PoolRelay's identity, for
+  example with mesh mTLS (SPIFFE).
 
 **Pros:**
 
-* Every replica sees every pool, and a new replica knows when it is
-  ready, using built-in Kubernetes watches.
-* Identity, per-pool isolation, and an audit log come from Kubernetes.
-* Same pattern as GAIE 1374 Push/Pull, Open Cluster Management, and
-  Karmada pull mode.
-* Easy to operate: `kubectl get dynamopoolexports -A`.
+* Standard SIG Multicluster APIs. No Dynamo CRD on the hub. Same model as
+  GAIE 1374.
+* Workload clusters never reach the hub's Kubernetes API and hold no hub
+  credentials.
+* Every replica sees every pool, and a new replica lists the imported
+  EndpointSlices to know which pools to wait for.
+* Liveness comes from endpoint readiness. No Leases and no heartbeats.
+* PoolRelays find every router replica from a local EndpointSlice (open
+  question 9).
+* Easy to operate: `kubectl get serviceimports -A` on the hub.
 
 **Cons:**
 
-* Workload clusters must reach the hub's Kubernetes API server, the
-  hub's control plane. Some security teams will not allow this.
-* Every workload cluster holds a credential for the hub.
-* More parts: a CRD, a record writer in the PoolRelay, per-pool
-  credentials, and Leases.
-* Records are stored in etcd, so it bends the HLD's "no external store"
+* Needs an MCS implementation and a pod network that reaches across
+  clusters, the hub included. Many teams do not have this.
+* MCS does not authenticate. It relies on the trusted network.
+* Support for headless export and `exportedAnnotations` differs between
+  MCS implementations.
+* The MCS API is `v1alpha1`, and ClusterProfile is alpha.
+* Imports are stored in etcd, so it bends the HLD's "no external store"
   rule, like Hybrid.
 
 ## Implementing the Interface
@@ -373,54 +375,19 @@ Related changes first:
 3. Rolling updates is outside of this DEP and a TODO.
 
 
-### Global Router Side
-
-The Pool Catalog only reads. It depends on one interface:
-
-```rust
-/// Where the Pool Catalog gets the pool list. The catalog does not care
-/// which implementation is behind it.
-trait MembershipSource {
-    /// Full list of pools right now, plus a version to watch from.
-    async fn snapshot(&self) -> Result<Snapshot>;
-
-    /// Changes after that version: Added, Updated, Removed.
-    fn watch(&self, from: Revision) -> BoxStream<'static, MembershipEvent>;
-}
-
-struct Snapshot {
-    pools: Vec<PoolRecord>,
-    revision: Revision,
-    /// true  = this is the full set (a new replica can wait for exactly these)
-    /// false = only pools that happened to call this replica (use a timeout)
-    complete: bool,
-}
-```
-
-The gRPC handler writes through a second interface:
-
-```rust
-/// Where RegisterPool calls are stored. Only used by the gRPC options.
-trait MembershipSink {
-    async fn register(&self, rec: PoolRecord, caller: PoolIdentity) -> Result<()>;
-    async fn heartbeat(&self, pool: &PoolId, caller: PoolIdentity) -> Result<()>;
-    async fn deregister(&self, pool: &PoolId, caller: PoolIdentity) -> Result<()>;
-}
-```
-
 Implementations:
 
 | Implementation | Source | Sink | `complete` |
 |---|---|---|---|
 | `InMemoryMembership` | Yes | Yes | `false` |
 | `KubernetesMembership` (read and write) | Yes | Yes | `true` |
-| `KubernetesMembership` (read only) | Yes | No (the PoolRelays write) | `true` |
+| `McsMembership` (reads imported EndpointSlices) | Yes | No (the operator exports) | `true` |
 | `FileMembership` | Yes | No | `true` |
 
 Wiring:
 
 * **gRPC Native:** gRPC server + `InMemoryMembership`.
-* **Full Kubernetes:** no gRPC server + `KubernetesMembership` (read only).
+* **Full Kubernetes:** no `RegisterPool` server + `McsMembership`.
 * **Hybrid:** gRPC server + `KubernetesMembership` (read and write).
 
 One setting picks the combination, for example
@@ -430,19 +397,23 @@ One setting picks the combination, for example
 
 * `GrpcAnnouncer`: calls `RegisterPool` on the regional address and sends
   heartbeats. Used by gRPC Native and Hybrid.
-* `KubernetesPoolAnnouncer`: runs in the PoolRelay and writes the record
-  and Lease to the hub. Used by full Kubernetes.
+* Full Kubernetes has no announcer in the PoolRelay. The operator
+  creates the `ServiceExport`. The PoolRelay only reads the Global
+  Router's imported EndpointSlices to find the replicas.
 
 ### Rules Shared by Every Option
 
 These live in the Pool Catalog, not in the implementations, so behavior
 is the same whichever option is chosen:
 
-* **One record format.** `PoolRecord` has the same fields as the
-  `DynamoPoolExport` spec. The gRPC `RegisterPool` message carries the
-  same fields.
+* **One record format.** The gRPC `RegisterPool` message and the Hybrid
+  record carry the same fields as `PoolRecord`. In Full Kubernetes, the
+  pool's name comes from the import, and the other fields come from the
+  PoolRelay catalog (see [Pool Details](#pool-details)).
 * **Expiry in one place.** The catalog removes a pool when it has not
   seen an update for the Lease or heartbeat duration, using its own clock.
+  In Full Kubernetes, it removes a pool when the pool's endpoints
+  disappear or stop being Ready.
 * **Readiness from `complete`.** If `true`, wait for first state from
   every listed pool, with a timeout. If `false`, become ready after a
   fixed wait (soft readiness).
@@ -450,15 +421,16 @@ is the same whichever option is chosen:
   [When Is a Pool Routable](#when-is-a-pool-routable).
 * **Identity is checked where the write happens.** In the gRPC options,
   the gRPC handler checks the caller's mTLS identity and that the caller
-  matches `pool_id` before calling the sink. In full Kubernetes, RBAC
-  and a CEL validation policy on the hub do it.
+  matches `pool_id` before calling the sink. In full Kubernetes, RBAC in
+  each workload cluster decides who can create a `ServiceExport`, and the
+  network is trusted.
 
 ### When Is a Pool Routable
 
 A pool is routable only when all of these are true:
 
 * its record exists,
-* its Lease or heartbeat is fresh,
+* its Lease or heartbeat is fresh, or in Full Kubernetes its endpoint is Ready,
 * its state stream has delivered first state,
 * and its readiness does not say "down"
   ([DEP #11225](https://github.com/ai-dynamo/dynamo/issues/11225)
@@ -469,12 +441,13 @@ check: when it drops, the pool stops getting traffic right away.
 
 ### Leases Do Not Expire on Their Own
 
-This applies to Hybrid and Full Kubernetes. Kubernetes never deletes an
-old Lease, so the Global Router must decide when a Lease is too old.
+This applies to Hybrid. Full Kubernetes uses endpoint readiness instead.
+Kubernetes never deletes an old Lease, so the Global Router must decide
+when a Lease is too old.
 
 * The Global Router starts the timer when **it sees** a Lease update.
-  It does not use `renewTime`, because the PoolRelay writes `renewTime`
-  with its own clock, which can differ from the Global Router's clock.
+  It does not use `renewTime`, because the replica that wrote it used
+  its own clock, which can differ from the reading replica's clock.
   Kubernetes checks node Leases the same way.
 * If a pool disappears for good, its record and Lease stay on the hub.
   The Global Router ignores stale records and reports them. Something on
@@ -483,8 +456,9 @@ old Lease, so the Global Router must decide when a Lease is too old.
 ### The "No External Store" Rule
 
 The HLD says "No etcd, database or shared cache is required for the
-Global View". Hybrid and Full Kubernetes store pool records in the hub's
-Kubernetes API, which is backed by etcd, so they bend that rule. We
+Global View". Hybrid stores pool records in the hub's Kubernetes API,
+and Full Kubernetes stores imported Services there. Both are backed by
+etcd, so they bend that rule. We
 think this is acceptable because:
 
 * **Dynamo already does this inside one cluster.** It uses the
@@ -550,14 +524,21 @@ reads it once at startup.
 
 # Open Questions
 
-1. Resolved: the PoolRelay writes the record, not the operator. See
-   [Why the PoolRelay Writes the Record, Not the Operator](#why-the-poolrelay-writes-the-record-not-the-operator).
-2. Final field list for `DynamoPoolExport`.
-3. One namespace per pool, or one per workload cluster?
+1. Resolved: in Full Kubernetes, the operator creates the
+   `ServiceExport`, and the PoolRelay needs no hub access. See
+   [Why the Operator Creates the Export](#why-the-operator-creates-the-export).
+2. Which pool details move into the PoolRelay catalog, and which use
+   `exportedAnnotations`?
+3. Namespace sameness: a DGD's namespace must have one owner in every
+   cluster, the hub included. How do teams name namespaces across
+   clusters?
 4. Only when GAIE is installed: should we also sync to GAIE's
    `InferencePoolImport`, or wait for it to leave draft status?
 5. Who issues Relay Certificates?
 6. How is each replica addressed in gRPC native?
+7. Which MCS implementations support headless export across clusters
+   well enough for per-replica dialing?
+8. Read location from ClusterProfile, or configure it per cluster ID?
 
 # References
 
@@ -570,6 +551,10 @@ reads it once at startup.
 * [KEP-1645](https://github.com/kubernetes/enhancements/tree/master/keps/sig-multicluster/1645-multi-cluster-services-api):
   Multi-Cluster Services API.
 * [ClusterProfile API (KEP-4322)](https://github.com/kubernetes/enhancements/tree/master/keps/sig-multicluster/4322-cluster-inventory).
+* [SIG Multicluster approach](https://multicluster.sigs.k8s.io/#approach):
+  ClusterSet, namespace sameness, About API, MCS, ClusterProfile.
+* [About API](https://multicluster.sigs.k8s.io/concepts/about-api/):
+  `ClusterProperty` and the cluster ID.
 * [Open Cluster Management: ManagedCluster registration](https://open-cluster-management.io/docs/concepts/cluster-inventory/managedcluster/).
 * [Karmada pull mode registration](https://karmada.io/docs/userguide/clustermanager/cluster-registration/).
 * [Submariner broker](https://submariner.io/getting-started/architecture/broker/).
@@ -578,63 +563,64 @@ reads it once at startup.
 
 # Appendix: Full Kubernetes Details
 
-## DynamoPoolExport Fields
+## Objects
 
-| Field | Required | Example | Where the PoolRelay gets it | Why the Global Router needs it |
+| Object | Cluster | Created by | Read by | Purpose |
 |---|---|---|---|---|
-| `spec.siteId` | Yes | `site-a` | PoolRelay configuration | With `dgdNamespace` and `dgdName`, names the pool (`PoolKey`). Matches the pool to its Lease and its state stream |
-| `spec.dgdNamespace` | Yes | `inference` | The DGD's namespace, passed by the operator | Part of the pool's name |
-| `spec.dgdName` | Yes | `qwen3-32b` | The DGD's name, passed by the operator | Part of the pool's name |
-| `spec.runtimeNamespace` | Yes | `dynamo-qwen3` | PoolRelay configuration | The pool's Dynamo runtime namespace. With `frontendEndpoint`, says where the pool serves requests |
-| `spec.frontendEndpoint` | Yes | `https://pool-a.us-east-1.example.com:443` | Passed by the operator: a manual override on the DGD first. Otherwise the Frontend Service's `status.loadBalancer.ingress`. Otherwise, if GAIE is installed, the Gateway's `status.addresses` | The pool's entry point. Where to send requests |
-| `spec.relayIdentity` | Yes | `spiffe://example.com/relay/pool-a` | PoolRelay configuration | Checks that a state stream really comes from this pool |
-| `spec.location.region` | Yes | `us-east-1` | PoolRelay configuration | Locality in cost functions |
-| `spec.location.availabilityZone` | No | `us-east-1a` | PoolRelay configuration | Locality |
-| `spec.location.cluster` | No | `cluster-a` | PoolRelay configuration | Locality, and to group pools by cluster |
-| `spec.location.datacenter` | No | `dc-1` | PoolRelay configuration | Locality |
-| `spec.model` | Yes | `Qwen/Qwen3-32B` | DGD | Which pools can serve a request |
+| `ServiceExport` for the PoolRelay Service | Workload | Dynamo operator | MCS implementation | Announces the pool |
+| `ServiceImport` and EndpointSlices for each pool | Hub | MCS implementation | Global Router | Pool list and liveness |
+| Headless Service and `ServiceExport` for the Global Router | Hub | Global Router Helm chart | MCS implementation | Announces the router replicas |
+| `ServiceImport` and EndpointSlices for the Global Router | Every workload cluster | MCS implementation | PoolRelay | Replica addresses for the state stream |
+| `ClusterProperty` `cluster.clusterset.k8s.io` | Every cluster | Cluster admin or cluster manager | MCS implementation | Cluster ID, used as `siteId` |
+| `ClusterProfile` (optional) | Hub | Cluster manager (OCM, Karmada, a cloud fleet service) | Global Router | Cluster list and location |
 
-No `status` is needed. The Global Router only reads these records.
+## Where Each PoolRecord Field Comes From
 
-**The Lease.** A standard `Lease` (`coordination.k8s.io/v1`) with the
-same name and namespace as the record. The PoolRelay sets
-`spec.holderIdentity` and `spec.leaseDurationSeconds` (for example `60`),
-and updates `spec.renewTime` on each heartbeat. The Lease has an
-`ownerReference` to its `DynamoPoolExport`, so deleting the record also
-deletes the Lease.
+| Field | Source |
+|---|---|
+| `siteId` | The EndpointSlice's `multicluster.kubernetes.io/source-cluster` label |
+| DGD namespace | The `ServiceImport` namespace |
+| DGD name | The `ServiceImport` name |
+| Location | ClusterProfile properties, or Global Router configuration keyed by cluster ID |
+| Model, frontend endpoint | The PoolRelay catalog on the state stream |
+| Runtime namespace, Relay identity | The PoolRelay catalog (to add), or `exportedAnnotations` on the `ServiceExport` |
 
 ## Components to Write
 
-1. **Record writer in the PoolRelay** (`KubernetesPoolAnnouncer`). It
-   writes the record and Lease to the hub, renews the Lease, and deletes
-   the record when the pool goes away.
-   * It needs a Kubernetes client for the hub, with the pool's
-     credential.
-   * If a pool runs more than one PoolRelay replica, only the leader
-     writes the record and renews the Lease.
-2. **The `DynamoPoolExport` CRD**, installed on the hub. A ConfigMap
-   could replace it, but a CRD is preferable.
-3. **A watcher in the Global Router** for records and Leases, which
+1. **Export in the operator.** When the DGD's export field is set, the
+   operator creates a `ServiceExport` for the PoolRelay Service, and
+   deletes it when export is turned off.
+2. **Router export in the Global Router Helm chart:** a headless Service
+   and its `ServiceExport`.
+3. **A watcher in the Global Router** for imported EndpointSlices, which
    builds the Pool Catalog.
-4. **A Helm chart** that creates a namespace, ServiceAccount, and RBAC
-   per pool on the hub.
-5. **The address lookup:** the operator reads the pool's Frontend Service
-   to find the pool's address, and passes it to the PoolRelay.
+4. **A watcher in the PoolRelay** for the Global Router's imported
+   EndpointSlices, which gives the replica list.
+5. **Optional:** a ClusterProfile reader in the Global Router, for
+   location.
+
+No Dynamo CRD, no Leases, and no per-pool hub credentials.
 
 ## Kubernetes APIs Used
 
-* Workload cluster, the operator reads: `DynamoGraphDeployment`,
-  `Service`. It passes the values to the PoolRelay.
-* Hub, the PoolRelay writes: `DynamoPoolExport`, `Lease`. In Phase 2 also
-  `CertificateSigningRequest`.
-* Hub, the Global Router reads: `DynamoPoolExport`, `Lease`.
+* Workload cluster, the operator reads `DynamoGraphDeployment` and
+  writes `ServiceExport` (`multicluster.x-k8s.io/v1alpha1`).
+* Workload cluster, the PoolRelay reads `EndpointSlice`.
+* Hub, the Global Router reads `ServiceImport` and `EndpointSlice`, and
+  optionally `ClusterProfile` (`multicluster.x-k8s.io/v1alpha1`).
+* Every cluster: `ClusterProperty` (`about.k8s.io`), read by the MCS
+  implementation.
 * GAIE and Gateway API: optional only.
 
 ## State Stream Direction
 
-If the state stream also dials out (pool to router), the pools need the
-router replica addresses. The same directory works in that direction
-too: each replica writes its address to the hub, and pools watch that
-list. The design of the state stream is out of scope here.
+The PoolRelay dials out to every router replica. In Full Kubernetes it
+finds them in the Global Router's imported EndpointSlices:
 
+* Export the router as a **headless** Service. A ClusterSet IP would send
+  each connection to only one replica.
+* Use the EndpointSlice addresses. Per-pod DNS names
+  (`<hostname>.<clusterid>.<svc>.<ns>.svc.clusterset.local`) exist only
+  when pods have hostnames, for example in a StatefulSet.
 
+The design of the state stream protocol is out of scope here.
