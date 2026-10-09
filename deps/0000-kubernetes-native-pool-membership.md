@@ -240,24 +240,12 @@ Compared with gRPC Native, the shared list of pools saves us:
 * Teams where security is not an issue may be more comfortable reusing existing solutions. 
 
 
-## Full Kubernetes Approach (SIG Multicluster)
+## Full Kubernetes Approach (SIG Multicluster MCS)
 
-For clusters on one trusted network. This option uses the SIG
-Multicluster standard APIs
-([SIG Multicluster](https://multicluster.sigs.k8s.io/#approach)) instead
-of a Dynamo-specific record. It needs:
-
-* a **ClusterSet** with namespace sameness, the hub included,
-* a cluster ID from the **About API** (`cluster.clusterset.k8s.io`) in
-  every cluster,
-* an implementation of the **Multi-Cluster Services (MCS) API**, such as
-  Submariner, Cilium ClusterMesh, or a cloud MCS service, with headless
-  Service support,
-* pod addresses that can be reached between clusters.
-
-A **ClusterProfile** inventory on the hub, written by a cluster manager
-such as Open Cluster Management, Karmada, or a cloud fleet service, is
-optional.
+This option uses the SIG Multicluster standard APIs ([SIG Multicluster](https://multicluster.sigs.k8s.io/#approach)) and available only on clusters on one trusted network where MCS can skip authentication.
+For V1 we also assume that pods in different cluster can reach each other. (i.e. Azure CNI with peered vNets, AWS VPC CNI with peered VPCs)
+Otherwise something like Submariner is needed. 
+For the V1 we will assume the use of an implementation of the Multi-Cluster Services (MCS) API with Karmada being the first choice. 
 
 ```
  Workload cluster A                      Hub cluster
@@ -282,14 +270,12 @@ optional.
 2. **The operator creates a `ServiceExport`** for the pool's PoolRelay
    Service, in the DGD's namespace, named after the DGD.
 3. **The MCS implementation imports it into the hub:** a `ServiceImport`
-   and EndpointSlices. Each EndpointSlice holds endpoints from one
-   cluster and carries the `multicluster.kubernetes.io/source-cluster`
-   label.
+   and EndpointSlices. 
 4. **Every Global Router replica watches** those EndpointSlices and
    builds its Pool Catalog from them. A pool is live while its PoolRelay
    endpoint is Ready.
 5. **The PoolRelay finds every router replica.** The hub exports the
-   Global Router's headless Service. Every workload cluster then has the
+   Global Router's Service. Every workload cluster then has the
    router's EndpointSlices locally. The PoolRelay reads them and dials
    each replica.
 6. **The pool leaves.** When export is turned off or the DGD is deleted,
@@ -297,64 +283,16 @@ optional.
    disappear from the hub. If the PoolRelay dies, its endpoint stops
    being Ready.
 
-### Why the Operator Creates the Export
-
-The export is a normal Kubernetes object that the operator owns for the
-DGD, as GAIE does for InferencePools. Liveness does not depend on who
-creates it: the endpoint is Ready only while the PoolRelay pod passes its
-readiness probe. The PoolRelay needs no access to the hub's Kubernetes
-API and no hub credential.
-
-### Pool Identity Is the MCS Identity
-
-The Global View's `PoolKey` is (`siteId`, DGD namespace, DGD name). MCS
-names a service the same way: cluster ID, namespace, name. So:
-
-* `siteId` is the About API cluster ID, read from the EndpointSlice's
-  `source-cluster` label.
-* The DGD namespace and name are the `ServiceImport` namespace and name.
-
-MCS merges every cluster that exports the same namespace and name into
-one `ServiceImport`. Pools are per cluster, so the Global Router splits
-them by the EndpointSlice's `source-cluster` label, not by
-`ServiceImport`.
-
-### Pool Details
-
-Discovery gives the pool's name and whether its PoolRelay is Ready.
-Other details come from elsewhere:
-
-* **Model, frontend endpoint, hardware:** the PoolRelay already sends
-  these in its catalog on the state stream.
-* **Location:** ClusterProfile properties on the hub, if a cluster
-  manager writes them. Otherwise, Global Router configuration keyed by
-  cluster ID.
-* **Runtime namespace and Relay identity:** add them to the PoolRelay
-  catalog. `exportedAnnotations` on the `ServiceExport` is a fallback,
-  because MCS implementations support it unevenly.
-
-### Who Can Do What
-
-* **Trusted network.** MCS does not authenticate anyone. Membership in
-  the ClusterSet is the trust boundary.
-* **RBAC in each workload cluster** decides who can create a
-  `ServiceExport` in a namespace. Namespace sameness means a namespace
-  has one owner in every cluster.
-* **The state stream** can still check the PoolRelay's identity, for
-  example with mesh mTLS (SPIFFE).
-
 **Pros:**
 
 * Standard SIG Multicluster APIs. No Dynamo CRD on the hub. Same model as
   GAIE 1374.
-* Workload clusters never reach the hub's Kubernetes API and hold no hub
-  credentials.
 * Every replica sees every pool, and a new replica lists the imported
   EndpointSlices to know which pools to wait for.
 * Liveness comes from endpoint readiness. No Leases and no heartbeats.
 * PoolRelays find every router replica from a local EndpointSlice (open
   question 9).
-* Easy to operate: `kubectl get serviceimports -A` on the hub.
+* Using a 3rd party provider saves us from giving every workload cluster credentials to the Kubernetes Server in the hub.  We could provide a basic solution for teams on a private network but the 3rd party solution provides a wider use case. 
 
 **Cons:**
 
@@ -524,21 +462,18 @@ reads it once at startup.
 
 # Open Questions
 
-1. Resolved: in Full Kubernetes, the operator creates the
-   `ServiceExport`, and the PoolRelay needs no hub access. See
-   [Why the Operator Creates the Export](#why-the-operator-creates-the-export).
-2. Which pool details move into the PoolRelay catalog, and which use
+1. Which pool details move into the PoolRelay catalog, and which use
    `exportedAnnotations`?
-3. Namespace sameness: a DGD's namespace must have one owner in every
+2. Namespace sameness: a DGD's namespace must have one owner in every
    cluster, the hub included. How do teams name namespaces across
    clusters?
-4. Only when GAIE is installed: should we also sync to GAIE's
+3. Only when GAIE is installed: should we also sync to GAIE's
    `InferencePoolImport`, or wait for it to leave draft status?
-5. Who issues Relay Certificates?
-6. How is each replica addressed in gRPC native?
-7. Which MCS implementations support headless export across clusters
+4. Who issues Relay Certificates?
+5. How is each replica addressed in gRPC native?
+6. Which MCS implementations support headless export across clusters
    well enough for per-replica dialing?
-8. Read location from ClusterProfile, or configure it per cluster ID?
+7. Read location from ClusterProfile, or configure it per cluster ID?
 
 # References
 
