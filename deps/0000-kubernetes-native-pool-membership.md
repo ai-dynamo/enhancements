@@ -312,56 +312,24 @@ Related changes first:
 2. The Global Router will run a gRPC server. Today the Relay is the server and the router subscribes. With this DEP the Relay will call into router ot we do the "reverse tunnel: the relay opens the connection and the router still subscribes over it. This is TBD.
 3. Rolling updates is outside of this DEP and a TODO.
 
+Main components:
+Same for all implementations:
+* `PoolDiscovery` will pick the mode `grpc|kubernetes|hybrid|file` at startup.
+* Something in the GR that accepts connections from Relay - `RelayListener`
+* Something that dials from Relay - `RelayDialer`
+* Something to store Router replicas - `ReplicaDirectory`, the router will register itself with the Dynamo Runtime (reuse) in the hub's K8 API.
 
-Implementations:
-
-| Implementation | Source | Sink | `complete` |
+Traits:
+| Function | gRPC Native | Hybrid | Full Kubernetes |
 |---|---|---|---|
-| `InMemoryMembership` | Yes | Yes | `false` |
-| `KubernetesMembership` (read and write) | Yes | Yes | `true` |
-| `McsMembership` (reads imported EndpointSlices) | Yes | No (the operator exports) | `true` |
-| `FileMembership` | Yes | No | `true` |
+|Lists and watches the pools - `Pool Directory` | stored in Router Memory | watches pool records in the Hub's K8 API| watches EndpointSlices in K8 API|
+| Save a pool when Relay registers  - `PoolRegistar` | Writes to memory and expires pools leases | Writes to hub's K8 API | NOT needed |
+| Save Router Replicas in Relay - `ReplicaDirectory` | from `/RegisterPool` API | from `/RegisterPool` API | in Relay's cluster K8 API from EndPointSlices| 
+| Authenticate a calling Relay - `RelayAuthenticator`| TODO| TODO | trusted network so not needed |
+| Register the pool on the relay side | gRPC Client | gRPC Client | does not use |
+| Call `/RegsiterPool` on the Router - `GrpcAnnouncer` | also gets list of router replicas | also gets list of router replica | not needed, `ServiceExport` in the operator |
 
-Wiring:
 
-* **gRPC Native:** gRPC server + `InMemoryMembership`.
-* **Full Kubernetes:** no `RegisterPool` server + `McsMembership`.
-* **Hybrid:** gRPC server + `KubernetesMembership` (read and write).
-
-One setting picks the combination, for example
-`--membership=grpc|kubernetes|hybrid|file`.
-
-### Pool Side
-
-* `GrpcAnnouncer`: calls `RegisterPool` on the regional address and sends
-  heartbeats. Used by gRPC Native and Hybrid.
-* Full Kubernetes has no announcer in the PoolRelay. The operator
-  creates the `ServiceExport`. The PoolRelay only reads the Global
-  Router's imported EndpointSlices to find the replicas.
-
-### Rules Shared by Every Option
-
-These live in the Pool Catalog, not in the implementations, so behavior
-is the same whichever option is chosen:
-
-* **One record format.** The gRPC `RegisterPool` message and the Hybrid
-  record carry the same fields as `PoolRecord`. In Full Kubernetes, the
-  pool's name comes from the import, and the other fields come from the
-  PoolRelay catalog (see [Pool Details](#pool-details)).
-* **Expiry in one place.** The catalog removes a pool when it has not
-  seen an update for the Lease or heartbeat duration, using its own clock.
-  In Full Kubernetes, it removes a pool when the pool's endpoints
-  disappear or stop being Ready.
-* **Readiness from `complete`.** If `true`, wait for first state from
-  every listed pool, with a timeout. If `false`, become ready after a
-  fixed wait (soft readiness).
-* **Same routable rule** as in
-  [When Is a Pool Routable](#when-is-a-pool-routable).
-* **Identity is checked where the write happens.** In the gRPC options,
-  the gRPC handler checks the caller's mTLS identity and that the caller
-  matches `pool_id` before calling the sink. In full Kubernetes, RBAC in
-  each workload cluster decides who can create a `ServiceExport`, and the
-  network is trusted.
 
 ### When Is a Pool Routable
 
