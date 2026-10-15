@@ -312,24 +312,30 @@ Related changes first:
 2. The Global Router will run a gRPC server. Today the Relay is the server and the router subscribes. With this DEP the Relay will call into router ot we do the "reverse tunnel: the relay opens the connection and the router still subscribes over it. This is TBD.
 3. Rolling updates is outside of this DEP and a TODO.
 
-Main components:
+Main components (the same in every mode):
 Same for all implementations:
-* `PoolDiscovery` will pick the mode `grpc|kubernetes|hybrid|file` at startup.
+1. Hub Cluster:
+* `PoolDiscoveryMode` will pick the mode `grpc|kubernetes|hybrid|file` at startup and build `PoolDiscovery`.
 * Something in the GR that accepts connections from Relay - `RelayListener`
-* Something that dials from Relay - `RelayDialer`
-* Something to store Router replicas - `ReplicaDirectory`, the router will register itself with the Dynamo Runtime (reuse) in the hub's K8 API.
+* Something to store Router replicas - `ReplicaDirectory`, the router will register itself with the Dynamo Runtime (reuse) in the hub's K8 API. Populated by Dynamo Runtime Discovery. The operator will treat the Global Router as a component. 
+2. Workload Cluster: 
+* Something that dials from Relay - `RelayDialer` 
+3. The state connections between clusters are still TBD.  Will transport be a new push RPC from the Relay, or a reverse tunnel that runs subscriptions over connection Relay opens. 
 
-Traits:
+Components  (different per mode):
 | Function | gRPC Native | Hybrid | Full Kubernetes |
 |---|---|---|---|
-|Lists and watches the pools - `Pool Directory` | stored in Router Memory | watches pool records in the Hub's K8 API| watches EndpointSlices in K8 API|
-| Save a pool when Relay registers  - `PoolRegistar` | Writes to memory and expires pools leases | Writes to hub's K8 API | NOT needed |
-| Save Router Replicas in Relay - `ReplicaDirectory` | from `/RegisterPool` API | from `/RegisterPool` API | in Relay's cluster K8 API from EndPointSlices| 
-| Authenticate a calling Relay - `RelayAuthenticator`| TODO| TODO | trusted network so not needed |
-| Register the pool on the relay side | gRPC Client | gRPC Client | does not use |
-| Call `/RegsiterPool` on the Router - `GrpcAnnouncer` | also gets list of router replicas | also gets list of router replica | not needed, `ServiceExport` in the operator |
+|Lists and watches the pools - `PoolDirectory` (Hub)| stored in Router Memory | watches pool records in the Hub's K8 API| watches EndpointSlices in K8 API or Karmada control plane|
+| Save a pool when Relay registers  - `PoolRegistrar` (Hub)| Writes to memory and expires pools leases | Writes leases to hub's K8 API | NOT needed |
+| Authenticate a calling Relay - `RelayAuthenticator` (Hub)| TBD extra sec| TBD extra sec| trusted network, `TrustedNetworkAuthenticator` checks the caller's source IP |
+| Lets Relays Find the Router (Hub)| `/RegisterPool` on the Router also gets list of router replicas | `/RegisterPool` on the Router also gets list of router replica | the router's Service is exported to every workload cluster (one-time admin setup) |
+| Register the pool (Workload cluster) | `GrpcAnnouncer`, gRPC Client | `GrpcAnnouncer`, gRPC Client | not used, the operator creates a `ServiceExport` for the pool |
+| Save Router Replicas in Relay - `ReplicaDirectory` (Workload cluster) | populated from `/RegisterPool` API | populated from `/RegisterPool` API | populated in Relay's cluster K8 API from EndpointSlices| 
 
-
+TBD
+* Upgrades. Old relays must keep working with new router and vice versa.
+* Liveness
+* Cold Start 
 
 ### When Is a Pool Routable
 
