@@ -322,15 +322,16 @@ Same for all implementations:
 * Something that dials from Relay - `RelayDialer` 
 3. The state connections between clusters are still TBD.  Will transport be a new push RPC from the Relay, or a reverse tunnel that runs subscriptions over connection Relay opens. 
 
-Components  (different per mode):
+Components (different per mode). Since this DEP was first written, pool discovery moved into a Global Discovery Service, which serves every option over HTTP: `POST /pools`, `GET /pools` and `GET /routers`. Its memory store stands in for gRPC Native, its MCS store is Full Kubernetes, and Hybrid has no store yet. The code: ai-dynamo/dynamo#17331 (the contract and stores), ai-dynamo/dynamo#17371 (the HTTP service), ai-dynamo/dynamo#17332 (registrations joined with MCS), and ai-dynamo/dynamo#17208 (the PoolRelay's client).
+
 | Function | gRPC Native | Hybrid | Full Kubernetes |
 |---|---|---|---|
-|Lists and watches the pools - `PoolDirectory` (Hub)| stored in Router Memory | watches pool records in the Hub's K8 API| watches EndpointSlices in K8 API or Karmada control plane|
-| Save a pool when Relay registers  - `PoolRegistrar` (Hub)| Writes to memory and expires pools leases | Writes leases to hub's K8 API | NOT needed |
-| Authenticate a calling Relay - `RelayAuthenticator` (Hub)| TBD extra sec| TBD extra sec| trusted network, `TrustedNetworkAuthenticator` checks the caller's source IP |
-| Lets Relays Find the Router (Hub)| `/RegisterPool` on the Router also gets list of router replicas | `/RegisterPool` on the Router also gets list of router replica | the router's Service is exported to every workload cluster (one-time admin setup) |
-| Register the pool (Workload cluster) | `GrpcAnnouncer`, gRPC Client | `GrpcAnnouncer`, gRPC Client | not used, the operator creates a `ServiceExport` for the pool |
-| Save Router Replicas in Relay - `ReplicaDirectory` (Workload cluster) | populated from `/RegisterPool` API | populated from `/RegisterPool` API | populated in Relay's cluster K8 API from EndpointSlices| 
+| Lists and watches the pools: `PoolDirectory` (Global Discovery Service) | The registrations, in the discovery service's memory, not the router's. Run one replica | Pool records in the hub's Kubernetes API. Not built | Watches the imported EndpointSlices of each pool's PoolRelay Service (`<DGD name>-pool-relay` by default), on the Karmada control plane or in a cluster that imports them. A pool is live while its PoolRelay endpoint is Ready |
+| Saves a pool when its PoolRelay registers: `PoolRegistrar` (Global Discovery Service) | Keeps each registration until its lease runs out | Writes each registration and its lease to the hub's Kubernetes API. Not built | Keeps registrations for what MCS cannot know: the model, capabilities, capacity, and location. A pool is listed only while MCS shows a Ready PoolRelay and its registration is live. Frontend addresses come from MCS |
+| Admits a PoolRelay's state stream (router) | Not designed yet | Not designed yet | Trusted network: `relay_identity` is the PoolRelay endpoint's address, for the router to match against the caller's source IP |
+| Lets PoolRelays find the router replicas: `ReplicaDirectory` (Global Discovery Service) | `GET /routers` lists the configured replicas. Router registration is not designed yet | `GET /routers`, as in gRPC Native | `GET /routers` lists the Ready replicas in the router Service's imported EndpointSlices. The router's Service is exported once (admin setup) |
+| Registers the pool (PoolRelay) | Calls `POST /pools` on a timer | Calls `POST /pools` on a timer | Its PoolRelay Service is exported through MCS, a `ServiceExport` the operator is to create. It also calls `POST /pools` on a timer |
+| Gets the router replicas (PoolRelay) | `GET /routers` | `GET /routers` | `GET /routers`. The PoolRelay reads no EndpointSlices |
 
 TBD
 * Upgrades. Old relays must keep working with new router and vice versa.
