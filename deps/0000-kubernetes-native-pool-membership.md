@@ -317,7 +317,7 @@ Karmada. See [Standard MCS or Karmada](#standard-mcs-or-karmada).
   `ServiceImport`, a `derived-<hash>` Service, and EndpointSlices labeled
   `multicluster.kubernetes.io/service-name` and
   `multicluster.kubernetes.io/source-cluster`. When clusters export the
-  same Service in conflicting ways, the oldest export wins, as in Cilium,
+  same Service in conflicting ways, the oldest export wins (the KEP-1645 rule),
   and the `ServiceExport` reports `Valid`, `Ready` and `Conflict`
   conditions. With `--write-cluster-properties` it also creates the
   `ClusterProperty` objects `clusterset.k8s.io` and
