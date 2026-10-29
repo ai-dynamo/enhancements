@@ -172,8 +172,25 @@ registrations, so each storage works with each of them.
 |---|---|
 | No Kubernetes, or tests | **Registrations** |
 | Kubernetes, but no trusted network between clusters | **Registrations** now. **Hybrid** or DynamoDB storage later |
-| One owner and a trusted network, with an MCS implementation (Karmada first) | **MCS** |
+| One owner and a trusted network, with an MCS implementation (Dynamo's standard one, or Karmada) | **MCS** |
 | First tests, or a few pools that rarely change | A static file, as in the POC |
+
+### Standard MCS or Karmada
+
+Use the [standard implementation](#the-standard-mcs-implementation) in
+`deploy/global-discovery-mcs` for new fleets, and whenever clusters span
+regions. It needs no MCS hub: each cluster runs `mcs-controller`, and
+`mcs-registry` with a DynamoDB Global Table serves every region. It
+imports each exported Service into every cluster on its own. It is a
+standard KEP-1645 implementation: its slices carry the KEP labels, and
+its exports report conflicts. Karmada's MCS is partial. Its imported
+slices have no KEP labels, so the source cluster is parsed from the slice
+name, which limits a Service name to 55 characters. Each Service needs a
+manual `ServiceImport` and `PropagationPolicy` per destination. Its CRDs
+serve `v1alpha1` only, it does not handle conflicts, and it has one hub,
+whose hostPath etcd loses its state when the hub's pod moves. Karmada
+still fits a fleet that already runs it: set `--pool-discovery karmada`
+and the operator's `mcsImplementation` to `karmada`.
 
 ## Registrations
 
@@ -216,8 +233,14 @@ This mode uses the SIG Multicluster APIs
 for clusters on one trusted network, where MCS can skip authentication. V1
 also assumes that pods in different clusters can reach each other (for
 example, peered VPCs with the AWS VPC CNI, or peered VNets with Azure CNI).
-Otherwise something like Submariner is needed. Karmada is the first MCS
-implementation.
+Otherwise something like Submariner is needed.
+
+Dynamo provides a standard MCS implementation
+([KEP-1645](https://github.com/kubernetes/enhancements/tree/master/keps/sig-multicluster/1645-multi-cluster-services-api)),
+shipped in `deploy/global-discovery-mcs` ([#17601]). Karmada is an
+alternative. The discovery service reads the slices of either:
+`--pool-discovery mcs` for the standard implementation, `karmada` for
+Karmada. See [Standard MCS or Karmada](#standard-mcs-or-karmada).
 
 ```
  Workload cluster                          Hub cluster
@@ -241,7 +264,8 @@ implementation.
    `<DGD name>-pool-relay` and `<DGD name>-frontend`. Removing the
    annotation withdraws them.
 3. **MCS imports them** as EndpointSlices, in the cluster where the
-   discovery service runs, or on the Karmada control plane.
+   discovery service runs, or on the Karmada control plane. The standard
+   implementation imports them into every cluster.
 4. **The discovery service lists the pool** while its PoolRelay endpoint is
    Ready and its registration is live. The frontend addresses come from
    MCS. The model, capabilities, capacity and location come from the
@@ -270,11 +294,40 @@ implementation.
 * Karmada names an imported Service `derived-<name>`, which must fit in 63
   characters. So a Service name can have at most 55 characters, and a DGD
   name at most 44. Karmada also watches a member's `ServiceExport`s only
-  while it has propagated at least one there.
+  while it has propagated at least one there. The standard
+  implementation names it `derived-<hash>`, whose length does not depend
+  on the Service name.
 * If every discovery instance in a cluster is down, that cluster's pools
   drop out of every region within a lease. Storage that every region reads,
   such as DynamoDB, would remove this.
-* The MCS API is `v1alpha1`, and imports are stored in etcd.
+* Karmada's MCS CRDs serve `v1alpha1` only. The `sigs.k8s.io/mcs-api`
+  v0.5.2 CRDs serve `v1beta1` too. Imports are stored in etcd.
+
+### The Standard MCS Implementation
+
+`deploy/global-discovery-mcs` ([#17601]) has two parts:
+
+* **`mcs-registry`**, one service for the ClusterSet. It keeps a lease for
+  each cluster, each cluster's Service exports and endpoint sets, and the
+  ServiceImports merged from them. It stores them in memory, or in a
+  DynamoDB Global Table when clusters span regions.
+* **`mcs-controller`**, one in each cluster. It exports every Service that
+  has a `ServiceExport`, or the label
+  `dynamo.nvidia.com/mcs-export: "true"`. In every cluster it creates the
+  `ServiceImport`, a `derived-<hash>` Service, and EndpointSlices labeled
+  `multicluster.kubernetes.io/service-name` and
+  `multicluster.kubernetes.io/source-cluster`. When clusters export the
+  same Service in conflicting ways, the oldest export wins, as in Cilium,
+  and the `ServiceExport` reports `Valid`, `Ready` and `Conflict`
+  conditions. With `--write-cluster-properties` it also creates the
+  `ClusterProperty` objects `clusterset.k8s.io` and
+  `cluster.clusterset.k8s.io`.
+
+The discovery service reads these slices unchanged, with
+`--pool-discovery mcs`. Pool liveness is the same as with Karmada: a pool
+is live while its PoolRelay endpoint is Ready. `mcs-controller` can also
+stamp `topology.kubernetes.io/region` on the slices it imports, so a
+pool's region can come from that label instead of the cluster name.
 
 ## Implementing the Interface
 
@@ -301,6 +354,15 @@ the two knobs. A PoolRelay will call it through `lib/global-discovery-client`.
 | Admits a PoolRelay's state stream (router) | Not designed yet. Listings name no PoolRelay | `relay_identities`: the PoolRelay pod's addresses, matched against the caller's source IP |
 | Registers the pool (PoolRelay) | `POST /pools` on a timer | `POST /pools` on a timer. The operator exports its Services |
 | Finds the router replicas (PoolRelay) | `GET /routers` | `GET /routers` |
+| Shares the exports between clusters (MCS implementation) | Not used | `mcs`: `mcs-registry`, in memory or a DynamoDB Global Table. `karmada`: the Karmada control plane |
+| Creates the `ServiceImport` (MCS implementation) | Not used | `mcs`: `mcs-controller`, in every cluster. `karmada`: an admin, with a `PropagationPolicy` per Service and destination |
+| Creates the derived Service (MCS implementation) | Not used | `mcs`: `mcs-controller`, named `derived-<hash>`. `karmada`: Karmada, named `derived-<name>` |
+| Creates the imported EndpointSlices (MCS implementation) | Not used | `mcs`: `mcs-controller`, labeled `multicluster.kubernetes.io/service-name` and `multicluster.kubernetes.io/source-cluster`. `karmada`: Karmada, without these labels |
+| Names the ClusterSet and the cluster: `ClusterProperty` (MCS implementation) | Not used | `mcs`: `mcs-controller` creates `clusterset.k8s.io` and `cluster.clusterset.k8s.io` when `--write-cluster-properties` is set. Otherwise, and with `karmada`, a cluster admin or manager |
+
+The rows marked "MCS implementation" are not part of the discovery
+service. Their `mcs` cells describe the standard implementation that
+Dynamo ships in `deploy/global-discovery-mcs`.
 
 ### When Is a Pool Routable
 
@@ -338,6 +400,7 @@ acceptable because:
 | [#17332] | feat(global-router): take MCS pool models from registrations, not a file | Draft, on #17371 |
 | [#17333] | feat(global-router): reserve POST /routers until router registration is designed | In review, on #17371 |
 | [#17412] | feat(operator): export Global Router pools through the Multi-Cluster Services API | Draft |
+| [`estroz/mcs-port-module`][mcs-port-module] (PR number to come), for [#17601] | Ship a standard Multi-Cluster Services implementation for the Global Router: `mcs-registry` and `mcs-controller` in `deploy/global-discovery-mcs` | Not opened yet, on #17371 |
 
 Not built yet: a PoolRelay that calls the client, router registration,
 Kubernetes or DynamoDB storage, and caller checks.
@@ -408,6 +471,10 @@ fine start for tests.
    service, and the reverse.
 8. Only when GAIE is installed: should we also sync to GAIE's
    `InferencePoolImport`?
+9. **Several PoolRelay pods.** A PoolRelay with more than one replica
+   ([#17347]) registers the same PoolKey from each pod. This is a known
+   ambiguity in the registration model: it does not say whether these are
+   one registration or several, or whose fields win.
 
 # References
 
@@ -439,9 +506,12 @@ fine start for tests.
 |---|---|---|---|---|
 | `ServiceExport` for `<DGD name>-pool-relay` and `<DGD name>-frontend` | Workload | Dynamo operator | MCS implementation | Announces the pool and its frontends |
 | Their imported EndpointSlices | Where the discovery service runs, or the Karmada control plane | MCS implementation | Global Discovery Service | Pool list, liveness, frontend addresses |
+| `ServiceImport` for each exported Service | Every cluster (standard), or where an admin propagates it (Karmada) | `mcs-controller` (standard). An admin, with a `PropagationPolicy` (Karmada) | Not read by Dynamo | The Service as the ClusterSet sees it |
+| Its derived Service | The same | `mcs-controller`, named `derived-<hash>` (standard). Karmada, named `derived-<name>` | Not read by Dynamo | The local Service for the import |
 | `ServiceExport` for the Global Router Service | Hub | An admin, once | MCS implementation | Announces the router replicas |
 | Its imported EndpointSlices | Where the discovery service runs | MCS implementation | Global Discovery Service | `GET /routers` |
-| `ClusterProperty` `cluster.clusterset.k8s.io` | Every cluster | Cluster admin or manager | MCS implementation | The cluster's name in the ClusterSet |
+| `ClusterProperty` `cluster.clusterset.k8s.io` | Every cluster | Cluster admin or manager, or `mcs-controller` with `--write-cluster-properties` | MCS implementation | The cluster's name in the ClusterSet |
+| `ClusterProperty` `clusterset.k8s.io` | Every cluster | Cluster admin or manager, or `mcs-controller` with `--write-cluster-properties` | MCS implementation | The ClusterSet's name |
 
 ## Where Each Pool Field Comes From
 
@@ -456,7 +526,14 @@ fine start for tests.
 ## Kubernetes APIs Used
 
 * Workload cluster: the operator reads `DynamoGraphDeployment` and writes
-  `ServiceExport` (`multicluster.x-k8s.io/v1alpha1`).
+  `ServiceExport` (`multicluster.x-k8s.io/v1beta1`, with `v1alpha1` also
+  served by the `sigs.k8s.io/mcs-api` v0.5.2 CRDs; Karmada's own CRDs
+  serve `v1alpha1` only). The operator ([#17412]) writes `v1alpha1`
+  objects, which conversion accepts: the v0.5.2 CRDs store `v1beta1`.
+* Every cluster, with the standard implementation: `mcs-controller` reads
+  exported `Service`s and their endpoints, and writes `ServiceImport`, the
+  `derived-<hash>` Service, `EndpointSlice`, the `ServiceExport`
+  conditions, and, with `--write-cluster-properties`, `ClusterProperty`.
 * Hub: the Global Discovery Service lists and watches `EndpointSlice`. It
   writes nothing.
 * Every cluster: `ClusterProperty` (`about.k8s.io`), read by the MCS
@@ -477,5 +554,8 @@ replica. The state stream protocol is out of scope.
 [#17331]: https://github.com/ai-dynamo/dynamo/pull/17331
 [#17332]: https://github.com/ai-dynamo/dynamo/pull/17332
 [#17333]: https://github.com/ai-dynamo/dynamo/pull/17333
+[#17347]: https://github.com/ai-dynamo/dynamo/pull/17347
 [#17371]: https://github.com/ai-dynamo/dynamo/pull/17371
 [#17412]: https://github.com/ai-dynamo/dynamo/pull/17412
+[#17601]: https://github.com/ai-dynamo/dynamo/issues/17601
+[mcs-port-module]: https://github.com/ai-dynamo/dynamo/tree/estroz/mcs-port-module
