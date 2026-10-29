@@ -18,7 +18,9 @@
 
 **Pull Request**:
 
-**Implementation PR / Tracking Issue**: see [Implementation](#implementation)
+**Implementation PR / Tracking Issue**: the DEP issue is
+[ai-dynamo/dynamo#17600](https://github.com/ai-dynamo/dynamo/issues/17600).
+The PRs are under [Implementation](#implementation).
 
 # Summary
 
