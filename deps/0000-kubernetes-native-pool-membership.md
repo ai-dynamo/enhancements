@@ -400,7 +400,7 @@ acceptable because:
 | [#17332] | feat(global-router): take MCS pool models from registrations, not a file | Draft, on #17371 |
 | [#17333] | feat(global-router): reserve POST /routers until router registration is designed | In review, on #17371 |
 | [#17412] | feat(operator): export Global Router pools through the Multi-Cluster Services API | Draft |
-| [`estroz/mcs-port-module`][mcs-port-module] (PR number to come), for [#17601] | Ship a standard Multi-Cluster Services implementation for the Global Router: `mcs-registry` and `mcs-controller` in `deploy/global-discovery-mcs` | Not opened yet, on #17371 |
+| [#17615] | feat(global-router): add the Multi-Cluster Services registry and controller (`mcs-registry` and `mcs-controller` in `deploy/global-discovery-mcs`, closes [#17601]) | Draft, on #17371 |
 
 Not built yet: a PoolRelay that calls the client, router registration,
 Kubernetes or DynamoDB storage, and caller checks.
@@ -558,4 +558,4 @@ replica. The state stream protocol is out of scope.
 [#17371]: https://github.com/ai-dynamo/dynamo/pull/17371
 [#17412]: https://github.com/ai-dynamo/dynamo/pull/17412
 [#17601]: https://github.com/ai-dynamo/dynamo/issues/17601
-[mcs-port-module]: https://github.com/ai-dynamo/dynamo/tree/estroz/mcs-port-module
+[#17615]: https://github.com/ai-dynamo/dynamo/pull/17615
